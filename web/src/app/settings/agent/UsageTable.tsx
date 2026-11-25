@@ -4,6 +4,8 @@ import { Table, tableClass } from '../../../components/Table'
 
 const count = new Intl.NumberFormat('en-US')
 
+const ROLE_LABELS: Record<string, string> = { reviewer: 'Reviews' }
+
 /** Runs and cost per day and role for the current month. */
 export function UsageTable({ usage, loading, error }: { usage?: AgentUsageDTO; loading: boolean; error: boolean }) {
   return (
@@ -26,7 +28,7 @@ export function UsageTable({ usage, loading, error }: { usage?: AgentUsageDTO; l
             {usage?.days.map((row) => (
               <tr key={`${row.day}/${row.role}`}>
                 <td>{row.day}</td>
-                <td>{row.role}</td>
+                <td>{ROLE_LABELS[row.role] ?? row.role}</td>
                 <td className={tableClass.num}>{count.format(row.runs)}</td>
                 <td className={tableClass.num}>{count.format(row.input_tokens)}</td>
                 <td className={tableClass.num}>{count.format(row.output_tokens)}</td>

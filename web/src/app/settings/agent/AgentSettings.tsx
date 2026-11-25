@@ -22,6 +22,7 @@ import { useStickyBar } from '../useStickyBar'
 import styles from '../settings.module.css'
 import { IdentitySection } from './IdentitySection'
 import { InvestigationsTable } from './InvestigationsTable'
+import { ReviewsSection } from './ReviewsSection'
 import { UsageTable } from './UsageTable'
 
 // The install guide lives in the repository docs; the app has no docs site of its own.
@@ -54,16 +55,19 @@ interface Draft {
   model: string
   investigatorProvider: string
   investigatorModel: string
+  reviewerProvider: string
+  reviewerModel: string
   unredacted: string[]
 }
 
-type Role = 'chat' | 'investigator'
+type Role = 'chat' | 'investigator' | 'reviewer'
 
 type TestOutcome = AgentTestResult & { provider: string; model: string }
 
 function baselineOf(settings: AgentSettingsDTO): Draft {
   const chat = settings.role_models.chat
   const investigator = settings.role_models.investigator
+  const reviewer = settings.role_models.reviewer
   return {
     budget: settings.monthly_budget_usd,
     // A model the operator dropped stays in the draft: it is resubmitted unchanged until the admin chooses another.
@@ -71,6 +75,8 @@ function baselineOf(settings: AgentSettingsDTO): Draft {
     model: chat?.model ?? '',
     investigatorProvider: investigator?.provider ?? '',
     investigatorModel: investigator?.model ?? '',
+    reviewerProvider: reviewer?.provider ?? '',
+    reviewerModel: reviewer?.model ?? '',
     unredacted: settings.unredacted_providers,
   }
 }
@@ -178,6 +184,8 @@ export function AgentSettings() {
   const staleModel = chat !== undefined && !chat.available
   const investigatorModel = data.role_models.investigator
   const staleInvestigator = investigatorModel !== undefined && !investigatorModel.available
+  const reviewerModel = data.role_models.reviewer
+  const staleReviewer = reviewerModel !== undefined && !reviewerModel.available
   const budgetValid = ALLOWANCE_PATTERN.test(draft.budget.trim())
   const dirty =
     draft.budget !== baseline.budget ||
@@ -185,12 +193,15 @@ export function AgentSettings() {
     draft.model !== baseline.model ||
     draft.investigatorProvider !== baseline.investigatorProvider ||
     draft.investigatorModel !== baseline.investigatorModel ||
+    draft.reviewerProvider !== baseline.reviewerProvider ||
+    draft.reviewerModel !== baseline.reviewerModel ||
     !sameList(draft.unredacted, baseline.unredacted)
   // A provider without a model is half a choice; no provider at all is fine and leaves chat out of the request.
-  const modelChosen = (draft.provider === '' || draft.model !== '') && (draft.investigatorProvider === '' || draft.investigatorModel !== '')
+  const modelChosen = (draft.provider === '' || draft.model !== '') && (draft.investigatorProvider === '' || draft.investigatorModel !== '') && (draft.reviewerProvider === '' || draft.reviewerModel !== '')
   const canSave = dirty && budgetValid && modelChosen && !save.isPending
   const stillStale = staleModel && draft.provider === baseline.provider && draft.model === baseline.model
   const investigatorStillStale = staleInvestigator && draft.investigatorProvider === baseline.investigatorProvider && draft.investigatorModel === baseline.investigatorModel
+  const reviewerStillStale = staleReviewer && draft.reviewerProvider === baseline.reviewerProvider && draft.reviewerModel === baseline.reviewerModel
 
   const settled = Number(data.spend.settled_usd)
   const reserved = Number(data.spend.reserved_usd)
@@ -219,6 +230,7 @@ export function AgentSettings() {
           ...(draft.provider !== '' && draft.model !== '' ? { chat: { provider: draft.provider, model: draft.model } } : {}),
           // Always stated: the server keeps a stored model when the key is absent, so clearing needs an explicit null.
           investigator: draft.investigatorProvider !== '' && draft.investigatorModel !== '' ? { provider: draft.investigatorProvider, model: draft.investigatorModel } : null,
+          reviewer: draft.reviewerProvider !== '' && draft.reviewerModel !== '' ? { provider: draft.reviewerProvider, model: draft.reviewerModel } : null,
         },
       },
       {
@@ -239,12 +251,15 @@ export function AgentSettings() {
               const stored = baselineOf(result.data)
               const modelTouched = mine.provider !== baseline.provider || mine.model !== baseline.model
               const investigatorTouched = mine.investigatorProvider !== baseline.investigatorProvider || mine.investigatorModel !== baseline.investigatorModel
+              const reviewerTouched = mine.reviewerProvider !== baseline.reviewerProvider || mine.reviewerModel !== baseline.reviewerModel
               setEdited({
                 budget: mine.budget !== baseline.budget ? mine.budget : stored.budget,
                 provider: modelTouched ? mine.provider : stored.provider,
                 model: modelTouched ? mine.model : stored.model,
                 investigatorProvider: investigatorTouched ? mine.investigatorProvider : stored.investigatorProvider,
                 investigatorModel: investigatorTouched ? mine.investigatorModel : stored.investigatorModel,
+                reviewerProvider: reviewerTouched ? mine.reviewerProvider : stored.reviewerProvider,
+                reviewerModel: reviewerTouched ? mine.reviewerModel : stored.reviewerModel,
                 unredacted: mergeUnredacted(baseline.unredacted, mine.unredacted, stored.unredacted),
               })
             })
@@ -259,7 +274,12 @@ export function AgentSettings() {
   const runTest = (role: Role) => {
     setTestResults((current) => ({ ...current, [role]: undefined }))
     setTestingRole(role)
-    const tested = role === 'chat' ? { provider: draft.provider, model: draft.model } : { provider: draft.investigatorProvider, model: draft.investigatorModel }
+    const tested =
+      role === 'chat'
+        ? { provider: draft.provider, model: draft.model }
+        : role === 'investigator'
+          ? { provider: draft.investigatorProvider, model: draft.investigatorModel }
+          : { provider: draft.reviewerProvider, model: draft.reviewerModel }
     test.mutate(tested, {
       onSuccess: (result) => setTestResults((current) => ({ ...current, [role]: { ...result, ...tested } })),
       onError: (error) =>
@@ -355,6 +375,19 @@ export function AgentSettings() {
             testing={test.isPending && testingRole === 'investigator'}
             onTest={() => runTest('investigator')}
           />
+          <ModelPanel
+            title="Model for reviews"
+            name="review"
+            providers={providers}
+            provider={draft.reviewerProvider}
+            model={draft.reviewerModel}
+            stale={staleReviewer && reviewerStillStale}
+            onProvider={(reviewerProvider) => patch({ reviewerProvider, reviewerModel: '' })}
+            onModel={(reviewerModel) => patch({ reviewerModel })}
+            result={testResults.reviewer ?? null}
+            testing={test.isPending && testingRole === 'reviewer'}
+            onTest={() => runTest('reviewer')}
+          />
         </>
       )}
 
@@ -395,6 +428,8 @@ export function AgentSettings() {
       )}
 
       <IdentitySection identity={data.identity} />
+
+      <ReviewsSection settings={data} />
 
       <InvestigationsTable limits={data.investigator} />
 

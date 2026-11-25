@@ -536,6 +536,17 @@ describe('NotificationsPage delivery log', () => {
     expect(within(table).getByRole('button', { name: 'Retry' })).toBeInTheDocument()
   })
 
+  it('labels a review row', async () => {
+    const review = { ...DELIVERY_FAILED, event: 'review', alert: 'Weekly cost: week 47', service: '', service_id: '', cluster: '', cluster_id: '', scope: '', review_run_id: 41 }
+    server.use(http.get('/api/notifications/deliveries', () => HttpResponse.json({ ...NOTIFICATION_DELIVERIES, items: [review] })))
+    renderApp(`${PAGE}?view=log`)
+    const table = await screen.findByRole('table', { name: 'Deliveries' })
+    expect(within(table).getByText('Review')).toBeInTheDocument()
+    expect(within(table).getByRole('link', { name: 'Weekly cost: week 47' })).toHaveAttribute('href', '/reviews/runs/41')
+    expect(within(table).queryByText(/critical|warning/i)).not.toBeInTheDocument()
+    expect(within(table).getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+  })
+
   it('reads an unknown event as plain text without crashing', async () => {
     server.use(http.get('/api/notifications/deliveries', () => HttpResponse.json({ ...NOTIFICATION_DELIVERIES, items: [{ ...DELIVERY_FAILED, event: 'brand_new' }] })))
     renderApp(`${PAGE}?view=log`)

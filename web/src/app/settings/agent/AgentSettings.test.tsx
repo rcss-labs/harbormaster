@@ -35,6 +35,15 @@ const SETTINGS: AgentSettingsDTO = {
   spend: { month: '2026-11', settled_usd: '1.25', reserved_usd: '0.60' },
   identity: { username: 'harbormaster-agent', permissions: [{ tag_id: 3, tag_name: 'Prod', logs: false }] },
   investigator: { window_minutes: 15, per_hour: 20, concurrent: 2, max_wait_minutes: 15 },
+  reviews: {
+    enabled: true,
+    per_day: 24,
+    max_late_minutes: 360,
+    max_reviews: 20,
+    types: [{ id: 'cost', label: 'Cost' }],
+    supported_types: ['cost'],
+    worst_case_run_usd: null,
+  },
 }
 
 const investigation = (id: number, fields: Partial<AgentInvestigationDTO> = {}): AgentInvestigationDTO => ({
@@ -66,6 +75,7 @@ const useAgentMocks = (settings: AgentSettingsDTO = SETTINGS) =>
     http.get('/api/agent/settings', () => HttpResponse.json(settings)),
     http.get('/api/agent/usage', () => HttpResponse.json(USAGE)),
     http.get('/api/agent/investigations', () => HttpResponse.json({ items: [], next_cursor: '' })),
+    http.get('/api/agent/reviews', () => HttpResponse.json({ items: [] })),
   )
 
 describe('AgentSettings', () => {
@@ -152,7 +162,7 @@ describe('AgentSettings', () => {
     await userEvent.type(allowance, '40')
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() =>
-      expect(bodies).toEqual([{ monthly_budget_usd: '40', unredacted_providers: [], role_models: { chat: { provider: 'anthropic', model: 'model-b' }, investigator: null }, version: 3 }]),
+      expect(bodies).toEqual([{ monthly_budget_usd: '40', unredacted_providers: [], role_models: { chat: { provider: 'anthropic', model: 'model-b' }, investigator: null, reviewer: null }, version: 3 }]),
     )
     expect(await screen.findByText('Saved.')).toBeInTheDocument()
   })
@@ -175,7 +185,7 @@ describe('AgentSettings', () => {
     await userEvent.type(allowance, '30')
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() =>
-      expect(bodies).toEqual([{ monthly_budget_usd: '30', unredacted_providers: [], role_models: { chat: { provider: 'anthropic', model: 'retired' }, investigator: null }, version: 3 }]),
+      expect(bodies).toEqual([{ monthly_budget_usd: '30', unredacted_providers: [], role_models: { chat: { provider: 'anthropic', model: 'retired' }, investigator: null, reviewer: null }, version: 3 }]),
     )
   })
 
@@ -194,7 +204,7 @@ describe('AgentSettings', () => {
     await userEvent.clear(allowance)
     await userEvent.type(allowance, '12.50')
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
-    await waitFor(() => expect(bodies).toEqual([{ monthly_budget_usd: '12.50', unredacted_providers: [], role_models: { investigator: null }, version: 3 }]))
+    await waitFor(() => expect(bodies).toEqual([{ monthly_budget_usd: '12.50', unredacted_providers: [], role_models: { investigator: null, reviewer: null }, version: 3 }]))
   })
 
   it('on a conflict shows the message, loads the stored settings and keeps what was typed', async () => {
@@ -282,7 +292,7 @@ describe('AgentSettings', () => {
       version: 4,
       monthly_budget_usd: '30.00',
       unredacted_providers: ['anthropic'],
-      role_models: { chat: { provider: 'anthropic', model: 'model-b' }, investigator: null },
+      role_models: { chat: { provider: 'anthropic', model: 'model-b' }, investigator: null, reviewer: null },
     })
   })
 
@@ -488,7 +498,7 @@ describe('AgentSettings', () => {
         {
           monthly_budget_usd: '25.00',
           unredacted_providers: [],
-          role_models: { chat: { provider: 'anthropic', model: 'model-a' }, investigator: { provider: 'openai', model: 'model-c' } },
+          role_models: { chat: { provider: 'anthropic', model: 'model-a' }, investigator: { provider: 'openai', model: 'model-c' }, reviewer: null },
           version: 3,
         },
       ]),
@@ -524,20 +534,113 @@ describe('AgentSettings', () => {
       const roles = await saveAllowance(withInvestigator, async () => {
         await userEvent.selectOptions(screen.getByLabelText('Investigation provider'), '')
       })
-      expect(roles).toEqual({ chat: { provider: 'anthropic', model: 'model-a' }, investigator: null })
+      expect(roles).toEqual({ chat: { provider: 'anthropic', model: 'model-a' }, investigator: null, reviewer: null })
     })
 
     it('sends the stored model unchanged when other settings are saved', async () => {
       useAgentMocks(withInvestigator)
       const roles = await saveAllowance(withInvestigator)
-      expect(roles).toEqual({ chat: { provider: 'anthropic', model: 'model-a' }, investigator: { provider: 'openai', model: 'model-c' } })
+      expect(roles).toEqual({ chat: { provider: 'anthropic', model: 'model-a' }, investigator: { provider: 'openai', model: 'model-c' }, reviewer: null })
     })
 
     it('sends null when none was ever set', async () => {
       useAgentMocks(SETTINGS)
       const roles = await saveAllowance(SETTINGS)
-      expect(roles).toEqual({ chat: { provider: 'anthropic', model: 'model-a' }, investigator: null })
+      expect(roles).toEqual({ chat: { provider: 'anthropic', model: 'model-a' }, investigator: null, reviewer: null })
     })
+  })
+
+  describe('the model for reviews', () => {
+    const withReviewer = {
+      ...SETTINGS,
+      role_models: { ...SETTINGS.role_models, reviewer: { provider: 'openai', model: 'model-c', available: true, max_question_usd: '0.60', allowance_below_question: false } },
+    }
+    const saveAllowance = async (settings: AgentSettingsDTO, before?: () => Promise<void>) => {
+      const bodies: { role_models: Record<string, unknown> }[] = []
+      server.use(
+        http.put('/api/agent/settings', async ({ request }) => {
+          bodies.push((await request.json()) as { role_models: Record<string, unknown> })
+          return HttpResponse.json(settings)
+        }),
+      )
+      renderApp('/settings/agent')
+      const allowance = await screen.findByLabelText('Monthly allowance in US dollars')
+      await before?.()
+      await userEvent.clear(allowance)
+      await userEvent.type(allowance, '31')
+      await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+      await waitFor(() => expect(bodies).toHaveLength(1))
+      return bodies[0].role_models
+    }
+
+    it('saves the reviewer model', async () => {
+      useAgentMocks()
+      const bodies: unknown[] = []
+      server.use(
+        http.put('/api/agent/settings', async ({ request }) => {
+          bodies.push(await request.json())
+          return HttpResponse.json(SETTINGS)
+        }),
+      )
+      renderApp('/settings/agent')
+      expect(await screen.findByRole('region', { name: 'Model for reviews' })).toBeInTheDocument()
+      await userEvent.selectOptions(await screen.findByLabelText('Review provider'), 'openai')
+      await userEvent.selectOptions(screen.getByLabelText('Review model'), 'model-c')
+      await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+      await waitFor(() =>
+        expect(bodies).toEqual([
+          {
+            monthly_budget_usd: '25.00',
+            unredacted_providers: [],
+            role_models: { chat: { provider: 'anthropic', model: 'model-a' }, investigator: null, reviewer: { provider: 'openai', model: 'model-c' } },
+            version: 3,
+          },
+        ]),
+      )
+    })
+
+    it('sends null when the choice is cleared', async () => {
+      useAgentMocks(withReviewer)
+      const roles = await saveAllowance(withReviewer, async () => {
+        await userEvent.selectOptions(screen.getByLabelText('Review provider'), '')
+      })
+      expect(roles).toEqual({ chat: { provider: 'anthropic', model: 'model-a' }, investigator: null, reviewer: null })
+    })
+
+    it('sends the stored model unchanged when other settings are saved', async () => {
+      useAgentMocks(withReviewer)
+      const roles = await saveAllowance(withReviewer)
+      expect(roles).toEqual({ chat: { provider: 'anthropic', model: 'model-a' }, investigator: null, reviewer: { provider: 'openai', model: 'model-c' } })
+    })
+
+    it('warns when the reviewer model is no longer offered', async () => {
+      const reviewer = { provider: 'anthropic', model: 'retired', available: false, max_question_usd: '', allowance_below_question: false }
+      useAgentMocks({ ...SETTINGS, role_models: { ...SETTINGS.role_models, reviewer } })
+      renderApp('/settings/agent')
+      await screen.findByLabelText('Review model')
+      expect(screen.getByText('This model is no longer offered by the operator. Choose another.')).toBeInTheDocument()
+    })
+  })
+
+  it('labels the reviewer role in the usage table', async () => {
+    useAgentMocks()
+    server.use(
+      http.get('/api/agent/usage', () =>
+        HttpResponse.json({
+          month: '2026-11',
+          days: [
+            { day: '2026-11-24', role: 'reviewer', runs: 1, cost_usd: '0.30', input_tokens: 9000, output_tokens: 800 },
+            { day: '2026-11-24', role: 'rollup', runs: 1, cost_usd: '0.10', input_tokens: 10, output_tokens: 10 },
+          ],
+        }),
+      ),
+    )
+    renderApp('/settings/agent')
+    const usage = within(await screen.findByRole('region', { name: 'Usage' }))
+    expect(await usage.findByText('Reviews')).toBeInTheDocument()
+    expect(usage.queryByText('reviewer')).not.toBeInTheDocument()
+    // A role this version does not know is shown as it came.
+    expect(usage.getByText('rollup')).toBeInTheDocument()
   })
 
   it('warns when the investigator model is no longer offered', async () => {
