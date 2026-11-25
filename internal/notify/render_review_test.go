@@ -471,7 +471,7 @@ func TestReview_NameEmptyAfterCleaningIsRefused(t *testing.T) {
 
 func TestReview_EmailSubjectFoldsEveryHeaderLine(t *testing.T) {
 	for label, name := range map[string]string{
-		"emoji": strings.Repeat("😀", 80), "cjk": strings.Repeat("故", 80), "ascii": strings.Repeat("n", 80), "huge": strings.Repeat("😀", 2000),
+		"emoji": strings.Repeat("😀", 80), "cjk": strings.Repeat("故", 80), "ascii": strings.Repeat("n", 80), "huge": strings.Repeat("😀", 2000), "long ascii": strings.Repeat("n", 2005),
 	} {
 		m := reviewMessage("x")
 		m.Review.Name = name
