@@ -125,10 +125,7 @@ func (r *Runner) budgetRefusal(ctx context.Context, run store.AgentRun, leaveMic
 		settings          store.AgentSettings
 		settled, reserved int64
 	}
-	var userID int64
-	if run.UserID != nil {
-		userID = *run.UserID
-	}
+	userID := userIDOf(run)
 	var leaveAttr []any
 	if leaveMicroUSD > 0 {
 		leaveAttr = []any{"leave_micro_usd", leaveMicroUSD}
@@ -215,12 +212,20 @@ func (r *Runner) finish(ctx context.Context, ops *StoreOps) Result {
 	return f.Finish(ctx)
 }
 
+// userIDOf is the run's user, or 0 once that user is deleted.
+func userIDOf(run store.AgentRun) int64 {
+	if run.UserID == nil {
+		return 0
+	}
+	return *run.UserID
+}
+
 func (r *Runner) logFinished(ops *StoreOps) {
 	var u Usage
 	if ops.Meter != nil {
 		u, _ = ops.Meter.Last()
 	}
-	r.log().Info("agent run finished", "run_id", ops.Run.ID, "role", ops.Run.Role, "user_id", ops.Run.UserID, "outcome", ops.Outcome,
+	r.log().Info("agent run finished", "run_id", ops.Run.ID, "role", ops.Run.Role, "user_id", userIDOf(ops.Run), "outcome", ops.Outcome,
 		"input_tokens", u.InputTokens, "output_tokens", u.OutputTokens, "cost_micro_usd", u.CostMicroUSD)
 }
 

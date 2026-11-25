@@ -239,8 +239,8 @@ func TestSubmission_LargeInputIsLinear(t *testing.T) {
 	for i := range 20_000 {
 		units[fmt.Sprintf("e%d", i+1)] = citedUnit{tool: "get_service", serviceID: checkoutID, action: "view", excerpt: "x"}
 	}
-	corpus := &agentresult.Corpus{}
-	corpus.Add(strings.Repeat("read text ", 100_000))
+	corpus := &agentresult.ReadCorpus{}
+	corpus.Add("get_service_logs", strings.Repeat("read text ", 100_000))
 	started := time.Now()
 	sub, problem := parseSubmission(submitCall(strings.Repeat("summary ", 30_000), evidence...))
 	if problem != "" {

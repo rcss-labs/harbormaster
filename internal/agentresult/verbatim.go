@@ -34,13 +34,15 @@ func Normalize(text string) string {
 const valueSeparator = '\n'
 
 // Corpus indexes the text a run read, for the copy check. CorpusCap counts the raw bytes offered once; text that carries
-// JSON escapes is stored a second time with them decoded, so the stored size can reach twice the cap.
+// JSON escapes is stored a second time with them decoded and a few letters grow when lowercased, so the stored size can
+// reach three times the cap.
 type Corpus struct {
 	text []byte // normalised values, each followed by valueSeparator
 	raw  int    // raw bytes offered so far
 	full bool
 
 	allowed map[string]bool // lowercased names the copy check of a summary lets stand, see AllowNames
+	run     int             // consecutive characters that make a copy; 0 means VerbatimRun
 }
 
 // Add keeps the string values of a run's read text: every string value of a JSON body (keys are not values), the
@@ -256,14 +258,14 @@ func (c *Corpus) Full() bool { return c.full }
 // hashBase is random per process so the rolling hash cannot be aimed at.
 var hashBase = rand.Uint64() | 1
 
-// window is a rolling hash over the last VerbatimRun runes.
+// window is a rolling hash over the last run runes.
 type window struct {
-	hash, top uint64 // top is hashBase^(VerbatimRun-1)
+	hash, top uint64 // top is hashBase^(run-1)
 }
 
-func newWindow() window {
+func newWindow(run int) window {
 	top := uint64(1)
-	for i := 1; i < VerbatimRun; i++ {
+	for i := 1; i < run; i++ {
 		top *= hashBase
 	}
 	return window{top: top}
@@ -305,29 +307,33 @@ func insideOneName(runes []rune, owner []int32, first, last int) bool {
 // hasRunSkipping is hasRun that leaves out the candidate windows that lie wholly inside one allowed name, owner giving
 // each character's name (0 for none).
 func (c *Corpus) hasRunSkipping(cand string, owner []int32) bool {
+	run := c.run
+	if run == 0 {
+		run = VerbatimRun
+	}
 	candRunes := []rune(cand)
-	if len(candRunes) < VerbatimRun || len(c.text) < VerbatimRun {
+	if len(candRunes) < run || len(c.text) < run {
 		return false
 	}
-	// byteAt[i] is the byte offset of rune i, so a window's text is cand[byteAt[i]:byteAt[i+VerbatimRun]].
+	// byteAt[i] is the byte offset of rune i, so a window's text is cand[byteAt[i]:byteAt[i+run]].
 	byteAt := make([]int, len(candRunes)+1)
 	for i, r := range candRunes {
 		byteAt[i+1] = byteAt[i] + utf8.RuneLen(r)
 	}
-	windowText := func(i int) string { return cand[byteAt[i]:byteAt[i+VerbatimRun]] }
+	windowText := func(i int) string { return cand[byteAt[i]:byteAt[i+run]] }
 
-	w := newWindow()
+	w := newWindow(run)
 	index := make(map[uint64][]int, len(candRunes))
 	for i, r := range candRunes {
-		if i < VerbatimRun {
+		if i < run {
 			w.push(r)
 		} else {
-			w.slide(candRunes[i-VerbatimRun], r)
+			w.slide(candRunes[i-run], r)
 		}
-		if i < VerbatimRun-1 {
+		if i < run-1 {
 			continue
 		}
-		start := i - VerbatimRun + 1
+		start := i - run + 1
 		if owner != nil && insideOneName(candRunes, owner, start, i) {
 			continue
 		}
@@ -343,11 +349,11 @@ func (c *Corpus) hasRunSkipping(cand string, owner []int32) bool {
 		}
 	}
 
-	// Roll over the corpus; ring holds the last VerbatimRun runes and their byte offsets.
-	var ring [VerbatimRun]rune
-	var offsets [VerbatimRun]int
+	// Roll over the corpus; ring holds the last run runes and their byte offsets.
+	ring := make([]rune, run)
+	offsets := make([]int, run)
 	filled := 0 // runes in the ring since the last separator
-	w = newWindow()
+	w = newWindow(run)
 	for pos := 0; pos < len(c.text); {
 		r, size := utf8.DecodeRune(c.text[pos:])
 		if r == valueSeparator {
@@ -355,8 +361,8 @@ func (c *Corpus) hasRunSkipping(cand string, owner []int32) bool {
 			pos += size
 			continue
 		}
-		slot := filled % VerbatimRun
-		if filled < VerbatimRun {
+		slot := filled % run
+		if filled < run {
 			w.push(r)
 		} else {
 			w.slide(ring[slot], r)
@@ -364,9 +370,9 @@ func (c *Corpus) hasRunSkipping(cand string, owner []int32) bool {
 		ring[slot], offsets[slot] = r, pos
 		filled++
 		pos += size
-		if filled >= VerbatimRun {
+		if filled >= run {
 			if starts, ok := index[w.hash]; ok {
-				first := offsets[filled%VerbatimRun]
+				first := offsets[filled%run]
 				chunk := string(c.text[first:pos])
 				for _, start := range starts {
 					if windowText(start) == chunk {
