@@ -13,52 +13,42 @@ const SAME_ORIGIN_PATH = /^\/(?![/\\])[^\s\\]*$/
 // eslint-disable-next-line no-control-regex -- matching control characters is the point
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f]/
 
-const MAX_DECODE_ROUNDS = 5
+const MAX_DECODE_ROUNDS = 3
 
-/** Decodes percent-encoding until nothing changes, so a doubly encoded name cannot hide; null for a malformed or never-ending one. */
-function fullyDecoded(value: string): string | null {
-  let current = value
-  for (let round = 0; round < MAX_DECODE_ROUNDS; round++) {
-    let next: string
+/**
+ * What a path segment can turn into once percent-encoding is undone (at most MAX_DECODE_ROUNDS times), or null when that is
+ * not a harmless name: malformed or still encoded after the last round, or holding a separator, query or hash marker,
+ * backslash, control character or a dot segment.
+ */
+function decodedSegment(segment: string): string | null {
+  let current = segment
+  for (let round = 0; current.includes('%'); round++) {
+    if (round === MAX_DECODE_ROUNDS) return null
     try {
-      next = decodeURIComponent(current)
+      current = decodeURIComponent(current)
     } catch {
       return null
     }
-    if (next === current) return current
-    current = next
   }
-  return null
+  if (/[/\\?#]/.test(current) || CONTROL_CHARACTER.test(current) || current === '.' || current === '..') return null
+  return current
 }
 
-/** The path with "." and ".." segments resolved as a browser would; null when it climbs above the root or has an empty segment inside. */
-function resolvedSegments(path: string): string[] | null {
-  const parts = path.split('/').slice(1)
-  const out: string[] = []
-  for (const [index, part] of parts.entries()) {
-    if (part === '.') continue
-    if (part === '..') {
-      if (out.pop() === undefined) return null
-      continue
-    }
-    if (part === '' && index !== parts.length - 1) return null
-    out.push(part)
-  }
-  if (out[out.length - 1] === '') out.pop()
-  return out
-}
-
-/** True for a path (with optional query and fragment) that is an estate page of this app. */
+/**
+ * True for a path (with optional query and fragment) that is an estate page of this app. The check reads the raw text: the
+ * path is cut at the first raw "?" or "#" and split on raw "/", which is what a browser and the router do with it. Anything
+ * odd (a dot segment, an encoded separator, an empty segment, a terminal page) is refused, never resolved. The first segment
+ * is exactly an estate page's name. The query and fragment are not decoded.
+ */
 export function isEstatePath(target: string): boolean {
   if (!SAME_ORIGIN_PATH.test(target) || CONTROL_CHARACTER.test(target)) return false
-  const decoded = fullyDecoded(target)
-  if (decoded === null || CONTROL_CHARACTER.test(decoded) || decoded.includes('\\')) return false
-  const path = decoded.slice(0, decoded.search(/[?#]|$/))
-  if (!path.startsWith('/') || path.startsWith('//')) return false
-  const segments = resolvedSegments(path)
-  if (segments === null) return false
-  const names = segments.map((segment) => segment.toLowerCase())
-  if (names.length === 0) return true
-  if (names[names.length - 1] === 'terminal') return false
-  return ESTATE_PAGE_PREFIXES.includes(names[0])
+  const path = target.slice(0, target.search(/[?#]|$/))
+  if (path === '/') return true
+  const [first, ...rest] = path.split('/').slice(1)
+  if (!ESTATE_PAGE_PREFIXES.includes(first)) return false
+  return rest.every((segment, index) => {
+    if (segment === '') return index === rest.length - 1
+    const decoded = decodedSegment(segment)
+    return decoded !== null && decoded.toLowerCase() !== 'terminal'
+  })
 }

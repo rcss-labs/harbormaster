@@ -1,11 +1,41 @@
 import { render, screen } from '@testing-library/react'
-import { MemoryRouter } from 'react-router'
+import { MemoryRouter, useLocation } from 'react-router'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { AnswerText } from './AnswerText'
 
 const show = (text: string) => render(<MemoryRouter><AnswerText text={text} /></MemoryRouter>)
 
+function Where() {
+  const location = useLocation()
+  return <output aria-label="location">{location.pathname}</output>
+}
+
 describe('AnswerText', () => {
+  it.each([
+    '/services/abc/overview?x=1',
+    '/clusters',
+    '/tasks/abc',
+    '/logs?q=100%25',
+    '/analytics/availability#top',
+    '/networks/123/eu-west-1',
+    '/storage',
+    '/security',
+    '/config',
+    '/services/abc%20def',
+  ])('clicking %s in an answer stays on the estate page it names', async (target) => {
+    render(
+      <MemoryRouter initialEntries={['/start']}>
+        <AnswerText text={`See [the page](${target}).`} />
+        <Where />
+      </MemoryRouter>,
+    )
+    await userEvent.click(screen.getByRole('link', { name: 'the page' }))
+    const first = target.slice(1).split(/[/?#]/)[0]
+    expect(screen.getByLabelText('location').textContent).toMatch(new RegExp(`^/${first}(/|$)`))
+  })
+
+
   it('renders lists and code', () => {
     const { container } = show('Intro with **bold** and `inline`.\n\n- one\n- two\n\n1. first\n2. second\n\n```\nline a\n  line b\n```')
     expect(container.querySelectorAll('ul > li')).toHaveLength(2)
