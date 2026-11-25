@@ -505,3 +505,32 @@ func TestAllowNames_LinearWithTenThousandNamesAndAHostileCandidate(t *testing.T)
 		t.Error("allowed tokens counted as a copy")
 	}
 }
+
+func TestAllowNames_AMaskedNameIsNotASeparatorAndEscapesAreMasked(t *testing.T) {
+	// The log held "<left> <right>" side by side; a summary with the allowed name between the halves is not that copy.
+	left, right := "connection to the settlement", "ledger replica was refused"
+	c := corpusOf(`{"message":"` + left + " " + right + `"}`)
+	c.AllowNames(longServiceName)
+	if got, replaced := CheckSummary(left+" "+longServiceName+" "+right, c); replaced {
+		t.Errorf("a masked name joined two halves into a run: %q", got)
+	}
+	if _, replaced := CheckSummary(left+" "+right, c); !replaced {
+		t.Error("setup: the unmasked copy was not caught")
+	}
+	// A summary with a JSON escape in it is compared unescaped too, and the name is masked there as well.
+	d := corpusOf(`{"service":"` + longServiceName + `"}`)
+	d.AllowNames(longServiceName)
+	if got, replaced := CheckSummary(`It said \"ok\" for `+longServiceName+".", d); replaced {
+		t.Errorf("name refused beside an escape: %q", got)
+	}
+}
+
+func TestAllowNames_NameBoundsHoldWhereTheyAreTheOnlyGuard(t *testing.T) {
+	// 129 characters never allowed even where the token lookup would let it through (covered by the length test above);
+	// and an invalid name never reaches the set.
+	c := &Corpus{}
+	c.AllowNames("a.b", "two words", strings.Repeat("x", 129), "")
+	if len(c.allowed) != 0 {
+		t.Errorf("allowed set holds %d invalid names", len(c.allowed))
+	}
+}
