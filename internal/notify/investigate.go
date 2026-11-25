@@ -75,7 +75,7 @@ func (d *Dispatcher) afterSend(ctx context.Context, now time.Time, names map[str
 	// Planning and claiming share the second timeout, half each, so a slow plan leaves the claim its own time.
 	planCtx, cancelPlan := context.WithTimeout(ctx, d.investigateTimeout()/2)
 	heldUntil := func(r store.NotificationRoute, severity string) (time.Time, bool) { return HeldUntil(r, severity, now) }
-	_, err = d.Store.PlanDiagnosisDeliveries(planCtx, now, heldUntil, diagnosisPlanLimit)
+	_, err = d.Store.PlanDiagnosisDeliveries(planCtx, now, d.investigationWindow(), heldUntil, diagnosisPlanLimit)
 	cancelPlan()
 	if ctx.Err() != nil {
 		return

@@ -450,6 +450,26 @@ func TestDispatcher_WebhookGetsDiagnosisOnlyWithTheSwitchOn(t *testing.T) {
 	}
 }
 
+// The switch turned on inside the window brings the diagnosis; turned on days later it brings none.
+func TestDispatcher_ALateSwitchBringsNoOldDiagnosis(t *testing.T) {
+	for late, want := range map[time.Duration]int{10 * time.Minute: 1, 3 * 24 * time.Hour: 0} {
+		e := newInvEnv(t)
+		e.switched("on")
+		e.route("off")
+		e.setAlerts(alert(svcX, "service_failing", model.AlertDanger))
+		e.cycle()
+		e.finishInvestigations(testSummary)
+		e.advance(time.Second)
+		e.cycle()
+		e.advance(late)
+		e.exec(`update notification_routes set investigate = true where name = 'off'`)
+		e.cycle()
+		if got := e.sender.count("off", EventDiagnosis); got != want || e.sender.count("on", EventDiagnosis) != 1 {
+			t.Fatalf("%v later: off got %d diagnoses, want %d; on: %v", late, got, want, e.sender.to("on"))
+		}
+	}
+}
+
 func TestDispatcher_DiagnosisAfterQuietHoursFollowsTheHeldOpened(t *testing.T) {
 	e := newInvEnv(t)
 	e.clock = time.Date(2026, 11, 20, 23, 0, 0, 0, time.UTC)
