@@ -144,6 +144,11 @@ func turns(n int) []fake.Step {
 	return steps
 }
 
+const (
+	capSentence  = "No tool calls are left in this review. Call submit_result now."
+	turnSentence = "Too many tool calls in one turn. Ask for fewer at a time."
+)
+
 func TestReviewer_SixtyFirstCallIsRefusedWithoutAnUpstreamRequest(t *testing.T) {
 	for _, tc := range []struct {
 		role        string
@@ -165,13 +170,98 @@ func TestReviewer_SixtyFirstCallIsRefusedWithoutAnUpstreamRequest(t *testing.T) 
 			text := resultText(t, reqs[len(reqs)-1], fmt.Sprintf("c%d", i))
 			want := envelope("get_overview", `{"clusters":2}`)
 			if i > tc.want {
-				want = envelope("get_overview", "Too many tool calls in one turn. Ask for fewer at a time.")
+				want = envelope("get_overview", capSentence)
 			}
 			if text != want {
 				t.Errorf("%s: call %d of %d: %q, want %q", tc.role, i, tc.calls, text, want)
 			}
 		}
 	}
+}
+
+func TestReviewer_OneCallATimePastTheCapIsToldToSubmit(t *testing.T) {
+	steps := turns(60)
+	for i := range 4 {
+		steps = append(steps, calls(overviewCall(fmt.Sprintf("past%d", i))))
+	}
+	p := fake.New(append(steps, calls(submitCall(plainSummary)))...)
+	runner := &recordingRunner{}
+	requireResult(t, investigate(t, newLoop(p, runner, func(l *Limits) { l.MaxSteps = 20 }), p, reviewerInput()))
+	last := lastRequest(p)
+	for i := range 4 {
+		if text := resultText(t, last, fmt.Sprintf("past%d", i)); text != envelope("get_overview", capSentence) {
+			t.Errorf("call %d past the cap: %q", i+1, text)
+		}
+	}
+	for _, m := range last.Messages {
+		if strings.Contains(m.Text, turnSentence) {
+			t.Errorf("a turn of at most 8 calls was told there were too many in it: %q", m.Text)
+		}
+	}
+	if n := len(runner.Calls()); n != 60 {
+		t.Errorf("%d calls reached the tool runner, want 60", n)
+	}
+}
+
+// Nine calls in one turn: the ninth is refused with the sentence for a turn in every role. Only a reviewer has a cap,
+// so 72 calls of eight each are all run for the others.
+func TestReviewer_TheTurnSentenceIsTheSameInEveryRole(t *testing.T) {
+	for role, in := range map[string]RunInput{"chat": baseInput(), "investigator": investigatorInput(), "reviewer": reviewerInput()} {
+		var nine []provider.ToolCall
+		for i := range 9 {
+			nine = append(nine, overviewCall(fmt.Sprintf("n%d", i+1)))
+		}
+		end := calls(submitCall(plainSummary))
+		if role == "chat" {
+			end = fake.Text("Two clusters.", smallUsage)
+		}
+		p := fake.New(calls(nine...), end)
+		if _, err := run(t, fixedNonces(newLoop(p, &recordingRunner{})), in); err != nil {
+			t.Fatal(err)
+		}
+		if text := resultText(t, lastRequest(p), "n8"); text != envelope("get_overview", `{"clusters":2}`) {
+			t.Errorf("%s: eighth call: %q", role, text)
+		}
+		if text := resultText(t, lastRequest(p), "n9"); text != envelope("get_overview", turnSentence) {
+			t.Errorf("%s: ninth call: %q", role, text)
+		}
+		if role == "reviewer" {
+			continue
+		}
+		p = fake.New(append(turns(72), end)...)
+		runner := &recordingRunner{}
+		if _, err := run(t, fixedNonces(newLoop(p, runner, func(l *Limits) { l.MaxSteps = 20 })), in); err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range lastRequest(p).Messages {
+			if strings.Contains(m.Text, capSentence) {
+				t.Errorf("%s: %q", role, m.Text)
+			}
+		}
+		if n := len(runner.Calls()); n != 72 {
+			t.Errorf("%s: %d calls reached the tool runner, want 72", role, n)
+		}
+	}
+}
+
+// Past the cap the cap's sentence is the true one, also for a ninth call in its turn.
+func TestReviewer_PastTheCapANinthCallInATurnIsToldToSubmit(t *testing.T) {
+	var nine []provider.ToolCall
+	for i := range 9 {
+		nine = append(nine, overviewCall(fmt.Sprintf("n%d", i+1)))
+	}
+	p := fake.New(append(turns(60), calls(nine...), calls(submitCall(plainSummary)))...)
+	requireResult(t, investigate(t, newLoop(p, &recordingRunner{}, func(l *Limits) { l.MaxSteps = 20 }), p, reviewerInput()))
+	for i := range 9 {
+		if text := resultText(t, lastRequest(p), fmt.Sprintf("n%d", i+1)); text != envelope("get_overview", capSentence) {
+			t.Errorf("call %d: %q", i+1, text)
+		}
+	}
+}
+
+func lastRequest(p *fake.Provider) provider.Request {
+	reqs := p.Requests()
+	return reqs[len(reqs)-1]
 }
 
 func TestReviewer_SubmitIsNotCounted(t *testing.T) {

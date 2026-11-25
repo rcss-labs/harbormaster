@@ -13,6 +13,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/agent/provider/fake"
 	"github.com/rcss-labs/harbormaster/internal/agentclient"
 	"github.com/rcss-labs/harbormaster/internal/agentresult"
+	"github.com/rcss-labs/harbormaster/internal/model"
 )
 
 // wireReview is a review task as Harbormaster's client sends it.
@@ -55,7 +56,7 @@ func TestRuns_ReviewerNeedsAReviewTaskAndNothingElse(t *testing.T) {
 	many := func(n int) []map[string]any {
 		list := make([]map[string]any, n)
 		for i := range list {
-			list[i] = tag("name", strings.Repeat("ü", 100))
+			list[i] = tag("name", strings.Repeat("ü", 127)+"x") // 255 bytes
 		}
 		return list
 	}
@@ -103,7 +104,8 @@ func TestRuns_ReviewerNeedsAReviewTaskAndNothingElse(t *testing.T) {
 		"a tag with a region":      entries(tag("region", "eu-west-1")),
 		"a cluster with a tag":     entries(map[string]any{"kind": "cluster", "cluster_id": prodCluster.ID(), "tag_id": "12"}),
 		"an account with a tag":    entries(map[string]any{"kind": "account", "account_id": "123456789012", "tag_id": "12"}),
-		"a name of 201 bytes":      entries(tag("name", long)),
+		"a name of 256 bytes":      entries(tag("name", strings.Repeat("x", 256))),
+		"a cluster's of 256 bytes": entries(map[string]any{"kind": "cluster", "cluster_id": prodCluster.ID(), "name": strings.Repeat("x", 256)}),
 		"a tag id of 201 bytes":    entries(tag("tag_id", long)),
 		"an account of 201 bytes":  entries(map[string]any{"kind": "account", "account_id": long}),
 		"a region of 201 bytes":    entries(map[string]any{"kind": "account", "account_id": "123456789012", "region": long}),
@@ -122,7 +124,10 @@ func TestRuns_ReviewerNeedsAReviewTaskAndNothingElse(t *testing.T) {
 		"no entries":             entries(),
 		"null entries":           edit(func(_, _, scope map[string]any) { scope["entries"] = nil }),
 		"10 entries":             entries(many(10)...),
-		"an account alone":       entries(map[string]any{"kind": "account", "account_id": "123456789012"}),
+		"a name of 255 bytes":    entries(tag("name", strings.Repeat("x", 255))),
+		"texts of 200 bytes": entries(tag("tag_id", long[:200]),
+			map[string]any{"kind": "account", "account_id": long[:200], "region": long[:200]}),
+		"an account alone": entries(map[string]any{"kind": "account", "account_id": "123456789012"}),
 		// A real cluster id: its name is the longest one allowed.
 		"a 400-byte cluster id": entries(map[string]any{"kind": "cluster", "cluster_id": strings.Repeat("x", 400)}),
 		"the largest count and period": edit(func(_, review, scope map[string]any) {
@@ -146,6 +151,28 @@ func TestRuns_ReviewerNeedsAReviewTaskAndNothingElse(t *testing.T) {
 		if last := lastEvent(t, readEvents(t, resp)); last.Type != "done" || len(p.Requests()) != 1 {
 			t.Errorf("%s: last event %+v after %d provider calls", name, last, len(p.Requests()))
 		}
+	}
+}
+
+// The longest cluster name ECS allows is 255 bytes; its review must run and show the name and the id whole.
+func TestRuns_ReviewOfAClusterWithTheLongestNameShowsItWhole(t *testing.T) {
+	cluster := model.ClusterKey{AccountID: "123456789012", Region: "eu-central-1", Cluster: strings.Repeat("payments-prod-", 18) + "eu1"}
+	if len(cluster.Cluster) != 255 {
+		t.Fatalf("the name has %d bytes", len(cluster.Cluster))
+	}
+	p := fake.New(calls(submitCall(plainSummary)))
+	h := newHarness(t, harnessOptions{providers: map[string]provider.Provider{"fake": p}})
+	resp := h.post(t, "/v1/runs", h.token, h.reviewBody(func(b map[string]any) {
+		b["task"] = wireReview(func(_, _, scope map[string]any) {
+			scope["entries"] = []map[string]any{{"kind": "cluster", "cluster_id": cluster.ID(), "name": cluster.Cluster}}
+		})
+	}))
+	if resp.StatusCode != http.StatusOK || lastEvent(t, readEvents(t, resp)).Type != "done" {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	want := "\n" + `{"kind":"cluster","cluster_id":"` + cluster.ID() + `","name":"` + cluster.Cluster + `"}` + "\n"
+	if text := requestAt(t, p, 0).Messages[0].Text; !strings.Contains(text, want) {
+		t.Errorf("the first message lacks %q:\n%s", want, text)
 	}
 }
 

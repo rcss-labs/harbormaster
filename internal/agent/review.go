@@ -99,10 +99,18 @@ func (r *session) lookupTool(name string) (hmtools.Tool, bool) {
 	return tool, true
 }
 
-// pastCallCap counts one tool call and reports whether the role has no call left for it.
-func (r *session) pastCallCap() bool {
+// countCall counts a tool call, the i-th of its turn from 0, and returns the
+// sentence that answers it when it is over a limit, or "". The run's cap comes
+// first: past it, asking for fewer calls at a time would not help.
+func (r *session) countCall(i int) string {
 	r.toolCalls++
-	return r.reviewing() && r.toolCalls > maxReviewToolCalls
+	switch {
+	case r.reviewing() && r.toolCalls > maxReviewToolCalls:
+		return "No tool calls are left in this review. Call submit_result now."
+	case i >= maxToolCallsPerTurn:
+		return "Too many tool calls in one turn. Ask for fewer at a time."
+	}
+	return ""
 }
 
 // replacementSummary stands in for a summary of this run that failed a check.
@@ -212,6 +220,7 @@ const (
 	maxScopeEntries   = 10
 	maxScopeServices  = 100_000
 	maxScopeTextBytes = 200
+	maxScopeNameBytes = 255 // an ECS cluster name may be this long
 	// maxClusterIDBytes: an id grows with its cluster's name, beyond the limit for texts.
 	maxClusterIDBytes = 512
 )
@@ -284,10 +293,13 @@ func validateScopeEntry(entry ScopeEntry) string {
 	if len(entry.ClusterID) > maxClusterIDBytes {
 		return "Each cluster id of the scope must be at most 512 bytes."
 	}
-	for _, text := range []string{entry.TagID, entry.AccountID, entry.Region, entry.Name} {
+	for _, text := range []string{entry.TagID, entry.AccountID, entry.Region} {
 		if len(text) > maxScopeTextBytes {
 			return "Each text of the scope must be at most 200 bytes."
 		}
+	}
+	if len(entry.Name) > maxScopeNameBytes {
+		return "Each name of the scope must be at most 255 bytes."
 	}
 	return ""
 }

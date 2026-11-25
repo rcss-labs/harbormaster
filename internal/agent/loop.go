@@ -311,8 +311,7 @@ func (l *Loop) Run(ctx context.Context, in RunInput, emit func(Event)) error {
 			} else {
 				// The final call shows its results too, so only the time kept for
 				// it can stop a tool.
-				overLimit := r.pastCallCap() || i >= maxToolCallsPerTurn
-				msg, res = r.runTool(runCtx, call, overLimit, r.lowTime())
+				msg, res = r.runTool(runCtx, call, r.countCall(i), r.lowTime())
 			}
 			r.messages = append(r.messages, msg)
 			r.results[len(r.messages)-1] = res
@@ -519,8 +518,9 @@ func (r *session) emitUsage(usage provider.Usage, cost int64, provisional bool) 
 
 // runTool answers one tool call from the model and returns the tool message
 // for it. Every failure here is a result for the model, not the end of the
-// run. With skip, the tool is not run at all and nothing is reported.
-func (r *session) runTool(ctx context.Context, call provider.ToolCall, overLimit, skip bool) (provider.Message, *toolResult) {
+// run. A call over a limit is answered with overLimit, the sentence for it, when
+// that is not empty. With skip, the tool is not run at all and nothing is reported.
+func (r *session) runTool(ctx context.Context, call provider.ToolCall, overLimit string, skip bool) (provider.Message, *toolResult) {
 	tool, known := r.lookupTool(call.Name)
 	name := "unknown_tool"
 	if known {
@@ -534,8 +534,8 @@ func (r *session) runTool(ctx context.Context, call provider.ToolCall, overLimit
 	var text string
 	var isError bool
 	switch {
-	case overLimit:
-		text, isError = "Too many tool calls in one turn. Ask for fewer at a time.", true
+	case overLimit != "":
+		text, isError = overLimit, true
 	case !known:
 		text, isError = unknownToolMessage(call.Name), true
 	case call.ArgError != "":
