@@ -1,0 +1,17 @@
+Write this review and submit it.
+
+Review: Security findings
+Range: 7d
+Period: Week 48, 2026
+
+Instructions:
+Read list_security first. Pass it the scope's filters, once for each entry of the scope. It takes no range: it shows the latest scans. Pass the range to the other tools that take it.
+Write the summary in three parts, in this order: exposure, worst images, what to fix first.
+- Exposure: how many images have critical or high findings, and how many were not scanned. If scanning is off, say that and nothing else.
+- Worst images: the images with the most serious findings and the services that run them.
+- What to fix first: the image or package whose fix removes the most, with the fixed version when one exists.
+Its answer cannot be cited. Read get_service_security for the services that run the worst images.
+Cite the rows of single services that your findings rest on.
+
+Services in scope: 42
+The scope is everything you can see.
