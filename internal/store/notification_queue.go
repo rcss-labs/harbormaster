@@ -378,6 +378,8 @@ type DeliveryDetails struct {
 	Generation int `json:"generation"`
 	// InvestigationID is the investigation a diagnosis message reports; an older task ignores the unknown member.
 	InvestigationID int64 `json:"investigation_id,omitempty"`
+	// ReviewRunID is the review run a review message reports; an older task ignores the unknown member.
+	ReviewRunID int64 `json:"review_run_id,omitempty"`
 }
 
 const notificationDeliveryColumns = `id, route_id, route_name, destination, target, incident_id, event, seq, severity,
@@ -600,11 +602,11 @@ func (s *Store) FinishNotificationDelivery(ctx context.Context, id int64, lease 
 	if o.DurationMS != 0 || o.Delivered {
 		duration = &o.DurationMS
 	}
-	// A diagnosis row keeps next_attempt_at null (the older claim must never see it) and carries its retry time in
-	// diagnosis_due_at; every other event is unchanged.
+	// A diagnosis or review row keeps next_attempt_at null (the older claim must never see it) and carries its retry
+	// time in diagnosis_due_at; every other event is unchanged.
 	_, err := s.Pool.Exec(ctx, `update notification_deliveries set status = $2, attempts = $3,
-		next_attempt_at = case when event = 'diagnosis' then null else $4::timestamptz end,
-		diagnosis_due_at = case when event = 'diagnosis' and $4::timestamptz is not null then $4::timestamptz else diagnosis_due_at end,
+		next_attempt_at = case when event in ('diagnosis', 'review') then null else $4::timestamptz end,
+		diagnosis_due_at = case when event in ('diagnosis', 'review') and $4::timestamptz is not null then $4::timestamptz else diagnosis_due_at end,
 		claimed_until = null, status_code = $5, duration_ms = $6, note = $7, finished_at = $8,
 		details = case when $10::int > 0 then jsonb_set(details, '{generation}', to_jsonb($10::int)) else details end
 		where id = $1 and status = 'pending' and claimed_until is not distinct from $9`,
@@ -715,8 +717,8 @@ func (s *Store) CancelUnsentNotificationDeliveries(ctx context.Context, incident
 // ErrNotFound for an unknown id and ErrConflict when the row is not failed or its route was deleted.
 func (s *Store) RetryNotificationDelivery(ctx context.Context, id int64, now time.Time) (NotificationDelivery, error) {
 	row := s.Pool.QueryRow(ctx, `update notification_deliveries set status = 'pending', attempts = 0, retries = retries + 1,
-		next_attempt_at = case when event = 'diagnosis' then null else $2::timestamptz end,
-		diagnosis_due_at = case when event = 'diagnosis' then $2::timestamptz else diagnosis_due_at end,
+		next_attempt_at = case when event in ('diagnosis', 'review') then null else $2::timestamptz end,
+		diagnosis_due_at = case when event in ('diagnosis', 'review') then $2::timestamptz else diagnosis_due_at end,
 		finished_at = null, claimed_until = null
 		where id = $1 and status = 'failed' and route_id is not null
 		returning `+notificationDeliveryColumns, id, now)
@@ -790,21 +792,21 @@ func (s *Store) ListNotificationDeliveries(ctx context.Context, f DeliveryFilter
 
 // NotificationSummary feeds the failed-deliveries banner and the Settings badge.
 type NotificationSummary struct {
-	Failed24h       int     // failed deliveries (tests included, diagnosis messages not) created in the last 24 hours
-	FailingRouteIDs []int64 // routes whose last 3 finished alert deliveries (not tests, not diagnosis messages) all failed
+	Failed24h       int     // failed deliveries (tests included, diagnosis and review messages not) created in the last 24 hours
+	FailingRouteIDs []int64 // routes whose last 3 finished alert deliveries (not tests, not diagnosis or review messages) all failed
 }
 
 // NotificationSummary counts recent failures and finds the routes that keep failing.
 func (s *Store) NotificationSummary(ctx context.Context, now time.Time) (NotificationSummary, error) {
 	var sum NotificationSummary
-	if err := s.Pool.QueryRow(ctx, `select count(*) from notification_deliveries where status = 'failed' and event <> 'diagnosis' and created_at >= $1`,
+	if err := s.Pool.QueryRow(ctx, `select count(*) from notification_deliveries where status = 'failed' and event not in ('diagnosis', 'review') and created_at >= $1`,
 		now.Add(-24*time.Hour)).Scan(&sum.Failed24h); err != nil {
 		return NotificationSummary{}, fmt.Errorf("notification summary: %w", err)
 	}
 	rows, err := s.Pool.Query(ctx, `select route_id from (
 			select route_id, status, row_number() over (partition by route_id order by created_at desc, id desc) as n
 			from notification_deliveries
-			where route_id is not null and event not in ('test', 'diagnosis') and status in ('delivered', 'failed')
+			where route_id is not null and event not in ('test', 'diagnosis', 'review') and status in ('delivered', 'failed')
 		) last_three where n <= 3 group by route_id having count(*) = 3 and bool_and(status = 'failed') order by route_id`)
 	if err != nil {
 		return NotificationSummary{}, fmt.Errorf("notification summary: %w", err)
