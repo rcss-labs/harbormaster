@@ -18,7 +18,7 @@ func reviewMessage(summary string) Message {
 	return Message{
 		Event: EventReview, DeliveryID: 42, BaseURL: "https://hm.example.com", RouteName: "Prod",
 		Subject: Subject{Kind: "review", Severity: "info", At: time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)},
-		Review:  &Review{RunID: 31, Name: "Monthly spend", TypeLabel: "Cost", PeriodLabel: "November 2026", Summary: summary},
+		Review:  &Review{RunID: 31, Name: "Monthly spend", Type: "cost", PeriodLabel: "November 2026", Summary: summary},
 	}
 }
 
@@ -255,25 +255,31 @@ func TestReview_NoReviewOrNoIDIsRefusedByEverySender(t *testing.T) {
 }
 
 func TestReview_UnknownTypeIsRefused(t *testing.T) {
-	for _, label := range []string{"", "cost", "Cost <!here>", "Billing", "Cost\n"} {
+	for _, typ := range []string{"", "Cost", "billing", "cost\n", "<!here>"} {
 		m := reviewMessage("x")
-		m.Review.TypeLabel = label
+		m.Review.Type = typ
 		if _, err := SlackBody(m); err == nil {
-			t.Errorf("%q: SlackBody built a message", label)
+			t.Errorf("%q: SlackBody built a message", typ)
 		}
 		if _, err := WebhookBody(m); err == nil {
-			t.Errorf("%q: WebhookBody built a message", label)
+			t.Errorf("%q: WebhookBody built a message", typ)
+		}
+		if _, err := TelegramBody(m, "-100123", 0); err == nil {
+			t.Errorf("%q: TelegramBody built a message", typ)
 		}
 		if _, err := RenderPreview(DestEmail, m); err == nil {
-			t.Errorf("%q: the email preview was rendered", label)
+			t.Errorf("%q: the email preview was rendered", typ)
 		}
 	}
-	for label, id := range map[string]string{"Cost": "cost", "Security findings": "security", "Reliability": "reliability", "Capacity": "capacity"} {
+	for typ, label := range map[string]string{"cost": "Cost", "security": "Security findings", "reliability": "Reliability", "capacity": "Capacity"} {
 		m := reviewMessage("x")
-		m.Review.TypeLabel = label
+		m.Review.Type = typ
 		body, err := WebhookBody(m)
-		if err != nil || !strings.Contains(string(body), `"review_type":"`+id+`"`) {
-			t.Errorf("%s: %s, %v", label, body, err)
+		if err != nil || !strings.Contains(string(body), `"review_type":"`+typ+`"`) {
+			t.Errorf("%s: %s, %v", typ, body, err)
+		}
+		if got := m.plainHeadline(); got != label+" review: Monthly spend" {
+			t.Errorf("%s: headline = %q", typ, got)
 		}
 	}
 }

@@ -221,7 +221,7 @@ func WebhookBody(m Message) ([]byte, error) {
 		body["scope"], body["title"] = "review", m.plainHeadline()
 		body["summary"], body["ai_generated"] = m.summary(), true
 		body["review_run_id"], body["review_name"], body["review_type"], body["period"] =
-			m.Review.RunID, m.Review.Name, reviewTypes[m.Review.TypeLabel], m.Review.PeriodLabel
+			m.Review.RunID, m.Review.Name, m.Review.Type, m.Review.PeriodLabel
 	}
 	if s.Scope != "" {
 		services := make([]map[string]any, len(s.Members))

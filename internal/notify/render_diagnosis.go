@@ -14,9 +14,9 @@ var (
 	errNoReview    = errors.New("a review message needs its review, a run to point at and a known type")
 )
 
-// reviewTypes maps the fixed label of each review type to its id. A message carries the label, so only these four
+// reviewTypeLabels maps each review type id to its fixed label. The label is derived from the id, so only these four
 // strings can reach a headline.
-var reviewTypes = map[string]string{"Cost": "cost", "Security findings": "security", "Reliability": "reliability", "Capacity": "capacity"}
+var reviewTypeLabels = map[string]string{"cost": "Cost", "security": "Security findings", "reliability": "Reliability", "capacity": "Capacity"}
 
 const (
 	// diagnosisNotice is the code-owned line every diagnosis carries, ahead of the model's text.
@@ -71,7 +71,7 @@ func (m Message) checkMessage() error {
 	case m.isDiagnosis() && (m.Diagnosis == nil || m.Diagnosis.InvestigationID <= 0):
 		return errNoDiagnosis
 	case m.isReview():
-		if _, known := reviewTypes[m.reviewLabel()]; m.Review == nil || m.Review.RunID <= 0 || !known {
+		if m.Review == nil || m.Review.RunID <= 0 || m.reviewLabel() == "" {
 			return errNoReview
 		}
 	}
@@ -82,7 +82,7 @@ func (m Message) reviewLabel() string {
 	if m.Review == nil {
 		return ""
 	}
-	return m.Review.TypeLabel
+	return reviewTypeLabels[m.Review.Type]
 }
 
 // summary is the cleaned model text, never empty (a Slack text object may not be).

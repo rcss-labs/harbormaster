@@ -106,10 +106,10 @@ type Diagnosis struct {
 }
 
 // Review is the model-written summary of one review run. Its summary is untrusted: every renderer cleans it with
-// CleanReviewSummary at send time. TypeLabel is one of the four fixed labels; any other value is refused.
+// CleanReviewSummary at send time. Type is one of cost, security, reliability, capacity; any other value is refused.
 type Review struct {
-	RunID                                 int64
-	Name, TypeLabel, PeriodLabel, Summary string
+	RunID                            int64
+	Name, Type, PeriodLabel, Summary string
 }
 
 // Message is one notification to render and send.
