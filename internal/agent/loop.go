@@ -225,7 +225,7 @@ func (l *Loop) Run(ctx context.Context, in RunInput, emit func(Event)) error {
 		r.tools = append(r.tools, provider.ToolDef{Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema()})
 	}
 	if r.found != nil {
-		r.tools = append(r.tools, submitToolDef())
+		r.tools = append(r.tools, submitToolDef(r.kind()))
 	}
 	r.frameBytes = frameBytes(r.system, r.tools)
 	r.ledger = ledger{model: in.Model, ceiling: max(in.MaxCostMicroUSD, 0), maxTokens: l.Limits.MaxRunTokens}
