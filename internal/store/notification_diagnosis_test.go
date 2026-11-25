@@ -269,7 +269,7 @@ func TestClaimDiagnosis_TwoClaimersTakeARowOnce(t *testing.T) {
 		rows, err := slow.ClaimDiagnosisDeliveries(ctx, notifyT0, time.Minute, store.ClaimFilter{Limit: 5})
 		slowDone <- result{rows, err}
 	}()
-	time.Sleep(150 * time.Millisecond) // the slow claimer is now inside its first sleeping comparison
+	waitForSleepingClaimer(t, fast) // the slow claimer is now inside its first sleeping comparison
 	fastRows, err := fast.ClaimDiagnosisDeliveries(ctx, notifyT0, time.Minute, store.ClaimFilter{Limit: 5})
 	if err != nil || len(fastRows) != 1 {
 		t.Fatalf("fast claim = %+v, %v, want the row", fastRows, err)
@@ -620,5 +620,115 @@ func TestMaxRenderedGeneration_IgnoresADeliveredDiagnosis(t *testing.T) {
 	}
 	if g, err := s.MaxRenderedGeneration(ctx, route.ID, incident.ID); err != nil || g != 0 {
 		t.Fatalf("generation = %d, %v, want 0: a diagnosis message shows no group generation", g, err)
+	}
+}
+
+// waitForSleepingClaimer blocks until some backend is inside the test operator's pg_sleep, so the fast claimer
+// starts only after the slow one has taken its snapshot.
+func waitForSleepingClaimer(t *testing.T, s *store.Store) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		var n int
+		if err := s.Pool.QueryRow(context.Background(), `select count(*) from pg_stat_activity
+			where wait_event = 'PgSleep' and query like '%diagnosis_due_at%'`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n > 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("the slow claimer never reached its sleep")
+}
+
+func TestClaimDiagnosis_PerRouteCapKeepsTheEarliestDue(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	route, err := s.CreateNotificationRoute(ctx, newRoute("a"), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setAlerts(t, s, notifyAlert("s1", "service_failing", model.AlertDanger), notifyAlert("s2", "service_failing", model.AlertDanger),
+		notifyAlert("s3", "service_failing", model.AlertDanger))
+	incidents, _ := syncIncidents(t, s, notifyT0)
+	var earliest int64
+	for i, in := range incidents { // ids ascend while due times descend: the last row is the earliest
+		id := mustInsertDiagnosis(t, s, diagnosisDelivery(route, in), notifyT0.Add(time.Duration(len(incidents)-i)*time.Minute))
+		earliest = id
+	}
+	rows, err := s.ClaimDiagnosisDeliveries(ctx, notifyT0.Add(time.Hour), time.Minute, store.ClaimFilter{Limit: 10, PerRoute: 1})
+	if err != nil || len(rows) != 1 || rows[0].ID != earliest {
+		t.Fatalf("claim = %+v, %v, want only the route's earliest due row (id %d)", rows, err, earliest)
+	}
+}
+
+// TestMigration0220_LockTimeoutLetsAnOldSenderFinish: while an older task's reader holds the table, the migration's
+// ALTER waits and every later statement queues behind it. The dispatcher gives a result write 5 seconds; the
+// migration must give up before that, or the write times out and a delivered alert is sent again.
+func TestMigration0220_LockTimeoutLetsAnOldSenderFinish(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	incident, route := seedIncidentAndRoute(t, s)
+	for _, stmt := range []string{
+		`alter table notification_deliveries drop column diagnosis_due_at`,
+		`alter table notification_deliveries drop constraint notification_deliveries_event_check`,
+		`alter table notification_deliveries add constraint notification_deliveries_event_check
+			check (event in ('opened', 'repeat', 'update', 'resolved', 'test'))`,
+	} {
+		if _, err := s.Pool.Exec(ctx, stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+	var id int64
+	if err := s.Pool.QueryRow(ctx, `insert into notification_deliveries (route_id, route_name, destination, target, incident_id, event, seq,
+		severity, alert_title, alert_text, status, next_attempt_at, claimed_until) values ($1, 'r', 'webhook', 't', $2, 'opened', 0,
+		'critical', 't', 'x', 'pending', now(), now() + interval '1 minute') returning id`, route.ID, incident.ID).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile("migrations/0220_notification_diagnosis.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reader, err := s.Pool.Begin(ctx) // an older task's long read of the table
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Rollback(ctx) //nolint:errcheck // already rolled back on the happy path
+	if _, err := reader.Exec(ctx, `select count(*) from notification_deliveries`); err != nil {
+		t.Fatal(err)
+	}
+	migrated := make(chan error, 1)
+	go func() {
+		_, err := s.Pool.Exec(ctx, string(body))
+		migrated <- err
+	}()
+	deadline := time.Now().Add(10 * time.Second)
+	for waiting := false; !waiting; {
+		if time.Now().After(deadline) {
+			select {
+			case err := <-migrated:
+				t.Fatalf("the migration ended without waiting: %v", err)
+			default:
+			}
+			t.Fatal("the migration never started waiting for its lock")
+		}
+		if err := s.Pool.QueryRow(ctx, `select count(*) > 0 from pg_stat_activity where wait_event_type = 'Lock'
+			and query like '-- Diagnosis messages%'`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// An older task's result write, with the dispatcher's 5 second budget.
+	writeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if _, err := s.Pool.Exec(writeCtx, `update notification_deliveries set status = 'delivered', claimed_until = null, finished_at = now()
+		where id = $1 and status = 'pending'`, id); err != nil {
+		t.Fatalf("an older sender's result write failed while the migration waited: %v", err)
+	}
+	if err := <-migrated; err == nil {
+		t.Fatal("the migration succeeded under an open reader, want a lock timeout")
 	}
 }

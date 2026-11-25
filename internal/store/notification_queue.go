@@ -694,8 +694,9 @@ func (s *Store) ReleaseHeldNotificationDeliveries(ctx context.Context, now time.
 	return tx.Commit(ctx)
 }
 
-// CancelUnsentNotificationDeliveries cancels the opened, repeat, update and diagnosis rows of the given incidents that are still
-// pending (with pendingNote) or held (with heldNote) and not under a live lease: a row being sent is left to finish.
+// CancelUnsentNotificationDeliveries cancels the opened, repeat, update and diagnosis rows of the given incidents
+// that are still pending (with pendingNote) or held (with heldNote) and not under a live lease: a row being sent is
+// left to finish.
 func (s *Store) CancelUnsentNotificationDeliveries(ctx context.Context, incidentIDs []int64, pendingNote, heldNote string, now time.Time) error {
 	if len(incidentIDs) == 0 {
 		return nil

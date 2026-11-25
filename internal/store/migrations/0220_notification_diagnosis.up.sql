@@ -6,11 +6,12 @@
 -- held-row release (status held) and the older cancel (event list) all skip it; it would otherwise be rendered as an
 -- Opened message. After a rollback the leftover rows are inert and are deleted with their incident.
 --
--- The alters take an exclusive lock on a table older tasks keep writing to. Give up after 10 seconds instead of
--- queueing behind a long transaction and stalling every sender. The runner applies each migration in one
--- transaction, so a timeout rolls the whole file back, records nothing, and the next start retries it from scratch;
--- `set local` ends with the transaction.
-set local lock_timeout = '10s';
+-- The alters take an exclusive lock on a table older tasks keep writing to, and every statement that arrives while
+-- they wait queues behind them. The 2 seconds must stay well below the dispatcher's 5 second writeTimeout: otherwise
+-- an older sender's result write times out behind the waiting ALTER and a delivered alert is sent again. The runner
+-- applies each migration in one transaction, so a timeout rolls the whole file back, records nothing, and the next
+-- start retries it from scratch; `set local` ends with the transaction.
+set local lock_timeout = '2s';
 alter table notification_deliveries drop constraint notification_deliveries_event_check;
 alter table notification_deliveries add constraint notification_deliveries_event_check
   check (event in ('opened', 'repeat', 'update', 'resolved', 'test', 'diagnosis'));
