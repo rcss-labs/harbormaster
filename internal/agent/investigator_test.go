@@ -557,10 +557,11 @@ func TestInvestigator_ACallThatDropsAfterHiddenTextIsRetried(t *testing.T) {
 // stubbornInvestigator reads tools on every turn, until it is told to finish,
 // and may answer some turns with plain text; its replies use everything they may.
 type stubbornInvestigator struct {
-	mu    sync.Mutex
-	reqs  []provider.Request
-	plain bool
-	drops bool // every second call fails after it streamed some text
+	mu     sync.Mutex
+	reqs   []provider.Request
+	plain  bool
+	drops  bool   // every second call fails after it streamed some text
+	second string // the second tool of each turn; "" is get_service_logs
 }
 
 func (p *stubbornInvestigator) Name() string { return "stubborn" }
@@ -587,8 +588,12 @@ func (p *stubbornInvestigator) Generate(_ context.Context, req provider.Request,
 		return provider.Response{Text: strings.Repeat("A long opinion. ", 2000), Usage: usage, StopReason: "end"}, nil
 	}
 	n := len(p.reqs)
+	second := serviceCall(fmt.Sprintf("c%d-2", n), "get_service_logs")
+	if p.second != "" {
+		second = provider.ToolCall{ID: second.ID, Name: p.second, Arguments: map[string]any{}}
+	}
 	return provider.Response{ToolCalls: []provider.ToolCall{
-		serviceCall(fmt.Sprintf("c%d-1", n), "get_service"), serviceCall(fmt.Sprintf("c%d-2", n), "get_service_logs"),
+		serviceCall(fmt.Sprintf("c%d-1", n), "get_service"), second,
 	}, Usage: usage, StopReason: "tool_use"}, nil
 }
 

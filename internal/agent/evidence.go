@@ -29,7 +29,7 @@ type numberedUnit struct {
 	citedUnit
 }
 
-// findings is what an investigator run has read. It lives in memory for the
+// findings is what an investigator or reviewer run has read. It lives in memory for the
 // run only and is never logged.
 type findings struct {
 	corpus agentresult.Corpus
@@ -46,11 +46,17 @@ func newFindings() *findings { return &findings{units: map[string]citedUnit{}} }
 func (r *session) readResult(tool string, args map[string]any, text string) *toolResult {
 	res, clean := r.cleanResult(tool, text)
 	r.found.corpus.Add(clean)
+	if r.reviewing() {
+		r.found.corpus.AllowNames(idNames(clean)...)
+	}
 	if res.readCap {
 		res.keep(clean, r.resultLimit())
 		return res
 	}
 	shown, units := numberUnits(tool, args, clean, r.found.last+1)
+	if r.reviewing() && !viewOnly(units) {
+		shown, units = clean, nil // a review reads no logs, so it cites none
+	}
 	res.keep(shown, r.resultLimit())
 	r.found.last += len(units)
 	for _, u := range units {

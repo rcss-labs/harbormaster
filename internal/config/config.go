@@ -191,11 +191,12 @@ type Config struct {
 	AgentURL         string        // HM_AGENT_URL: the agent service's private base URL
 	AgentCAPEM       string        // HM_AGENT_CA_PEM: an extra root certificate for the agent's TLS certificate
 	AgentRunTokenTTL time.Duration // HM_AGENT_RUN_TOKEN_TTL: lifetime of a run token
-	// Automatic investigations (phase 2); the settings page shows them read-only.
-	AgentInvestigationWindow      time.Duration // HM_AGENT_INVESTIGATION_WINDOW: one investigation per subject in this window
-	AgentInvestigationsConcurrent int           // HM_AGENT_INVESTIGATIONS_CONCURRENT
-	AgentInvestigationsPerHour    int           // HM_AGENT_INVESTIGATIONS_PER_HOUR: 0 turns the investigator off
-	AgentInvestigationMaxWait     time.Duration // HM_AGENT_INVESTIGATION_MAX_WAIT: a queued request older than this is dropped
+
+	// Automatic investigations of alerts (the AI agent, phase 2).
+	AgentInvestigationWindow      time.Duration // HM_AGENT_INVESTIGATION_WINDOW: alerts of one subject within it share an investigation
+	AgentInvestigationsConcurrent int           // HM_AGENT_INVESTIGATIONS_CONCURRENT: investigations that run at the same time
+	AgentInvestigationsPerHour    int           // HM_AGENT_INVESTIGATIONS_PER_HOUR: investigations started in an hour; 0 = the investigator is off
+	AgentInvestigationMaxWait     time.Duration // HM_AGENT_INVESTIGATION_MAX_WAIT: a request older than this is not started
 	// Scheduled reviews (phase 3); the settings page shows them read-only.
 	AgentReviewsPerDay int           // HM_AGENT_REVIEWS_PER_DAY: 0 turns reviews off, at most 200 runs start a day
 	AgentReviewMaxLate time.Duration // HM_AGENT_REVIEW_MAX_LATE: an occurrence older than this is skipped as missed
@@ -619,6 +620,18 @@ func validateAgent(cfg Config) error {
 	}
 	if cfg.AgentCAPEM != "" && !x509.NewCertPool().AppendCertsFromPEM([]byte(cfg.AgentCAPEM)) {
 		return errors.New("HM_AGENT_CA_PEM: contains no PEM certificate")
+	}
+	if cfg.AgentInvestigationWindow < time.Minute || cfg.AgentInvestigationWindow > 24*time.Hour {
+		return errors.New("HM_AGENT_INVESTIGATION_WINDOW: must be between 1m and 24h")
+	}
+	if cfg.AgentInvestigationsConcurrent < 1 || cfg.AgentInvestigationsConcurrent > 8 {
+		return errors.New("HM_AGENT_INVESTIGATIONS_CONCURRENT: must be between 1 and 8")
+	}
+	if cfg.AgentInvestigationsPerHour < 0 {
+		return errors.New("HM_AGENT_INVESTIGATIONS_PER_HOUR: must be 0 (the investigator is off) or positive")
+	}
+	if cfg.AgentInvestigationMaxWait < time.Minute || cfg.AgentInvestigationMaxWait > 24*time.Hour {
+		return errors.New("HM_AGENT_INVESTIGATION_MAX_WAIT: must be between 1m and 24h")
 	}
 	return nil
 }

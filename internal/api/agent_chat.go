@@ -156,17 +156,7 @@ func (s *Server) agentStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func findModel(cat agentclient.Catalogue, ref store.AgentModelRef) (agentclient.Model, bool) {
-	for _, p := range cat.Providers {
-		if p.Provider != ref.Provider {
-			continue
-		}
-		for _, m := range p.Models {
-			if m.ID == ref.Model {
-				return m, true
-			}
-		}
-	}
-	return agentclient.Model{}, false
+	return cat.Find(ref.Provider, ref.Model)
 }
 
 func (s *Server) catalogue(r *http.Request) (agentclient.Catalogue, error) {

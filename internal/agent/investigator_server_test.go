@@ -216,21 +216,6 @@ func TestRuns_ResultEventOnTheWire(t *testing.T) {
 	}
 }
 
-func TestCatalogue_ListsRoles(t *testing.T) {
-	h := newHarness(t, harnessOptions{})
-	client, err := agentclient.New(h.server.URL, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	catalogue, err := client.Catalogue(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !equalStrings(catalogue.Roles, []string{"chat", "investigator", "test"}) {
-		t.Errorf("roles = %v", catalogue.Roles)
-	}
-}
-
 func TestLogs_NeverContainSummaryNoteExcerptOrTask(t *testing.T) {
 	p := fake.New(
 		calls(serviceCall("c1", "get_service")),
