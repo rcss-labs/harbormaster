@@ -6,9 +6,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"mime"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -17,6 +19,9 @@ import (
 // alert, or the accounts page for an account-level alert.
 func (m Message) Link() string {
 	base := strings.TrimRight(m.BaseURL, "/")
+	if m.isDiagnosis() && m.Diagnosis != nil {
+		return base + "/investigations/" + strconv.FormatInt(m.Diagnosis.InvestigationID, 10)
+	}
 	switch m.Subject.Scope {
 	case "cluster":
 		return base + "/clusters/" + m.Subject.Key.ClusterKey.ID()
@@ -70,6 +75,8 @@ func (m Message) plainHeadline() string {
 		return "Resolved: " + m.Subject.Title
 	case EventUpdate:
 		return "Update: " + m.Subject.Title
+	case EventDiagnosis:
+		return "Diagnosis: " + m.Subject.Title
 	case EventTest:
 		return "Test message from Harbormaster"
 	}
@@ -89,8 +96,13 @@ var slackEscape = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
 
 // SlackBody renders an incoming-webhook payload: a section (title, then text) and a context line.
 func SlackBody(m Message) ([]byte, error) {
+	if err := m.checkDiagnosis(); err != nil {
+		return nil, err
+	}
 	var title string
 	switch {
+	case m.isDiagnosis():
+		title = "*" + slackEscape.Replace(m.plainHeadline()) + "*"
 	case m.Event == EventTest:
 		title = "Test message from Harbormaster"
 	case m.Event == EventResolved:
@@ -101,17 +113,21 @@ func SlackBody(m Message) ([]byte, error) {
 		title = ":large_orange_circle: *" + slackEscape.Replace(m.updatePrefix()+m.Subject.Title) + "*"
 	}
 	section := title
-	if m.Subject.Text != "" {
-		section += "\n" + slackEscape.Replace(m.Subject.Text)
+	if text := m.bodyText(); text != "" {
+		section += "\n" + slackEscape.Replace(text)
 	}
-	context := slackEscape.Replace(m.where()) + " · <" + m.Link() + "|Open in Harbormaster>"
-	return json.Marshal(map[string]any{
+	context := slackEscape.Replace(m.where()) + " · <" + m.Link() + "|" + m.linkText() + ">"
+	body := map[string]any{
 		"text": m.plainHeadline(),
 		"blocks": []any{
 			map[string]any{"type": "section", "text": map[string]any{"type": "mrkdwn", "text": section}},
 			map[string]any{"type": "context", "elements": []any{map[string]any{"type": "mrkdwn", "text": context}}},
 		},
-	})
+	}
+	if m.isDiagnosis() {
+		body["unfurl_links"], body["unfurl_media"] = false, false
+	}
+	return json.Marshal(body)
 }
 
 const pagerDutySummaryMax = 1024
@@ -119,6 +135,9 @@ const pagerDutySummaryMax = 1024
 // PagerDutyBody renders an Events API v2 event. Trigger and resolve share the dedup key so a resolve closes the
 // incident the trigger opened.
 func PagerDutyBody(m Message, routingKey string) ([]byte, error) {
+	if m.isDiagnosis() {
+		return nil, errors.New("PagerDuty does not receive diagnosis messages")
+	}
 	s := m.Subject
 	action, dedup := "trigger", DedupKey(s)
 	if m.Event == EventResolved {
@@ -164,16 +183,19 @@ func PagerDutyBody(m Message, routingKey string) ([]byte, error) {
 			"class":          s.Kind,
 			"custom_details": details,
 		},
-		"links":  []any{map[string]any{"href": m.Link(), "text": "Open in Harbormaster"}},
+		"links":  []any{map[string]any{"href": m.pagerDutyLink(), "text": "Open in Harbormaster"}},
 		"client": "Harbormaster",
 	})
 }
 
 // WebhookBody renders the flat JSON object posted to a webhook.
 func WebhookBody(m Message) ([]byte, error) {
+	if err := m.checkDiagnosis(); err != nil {
+		return nil, err
+	}
 	s := m.Subject
 	event := map[Event]string{EventOpened: "alert.raised", EventRepeat: "alert.repeated", EventUpdate: "alert.updated",
-		EventResolved: "alert.resolved", EventTest: "test"}[m.Event]
+		EventResolved: "alert.resolved", EventTest: "test", EventDiagnosis: "diagnosis"}[m.Event]
 	scope := s.Scope
 	switch {
 	case scope != "":
@@ -186,6 +208,9 @@ func WebhookBody(m Message) ([]byte, error) {
 		"event": event, "delivery_id": m.DeliveryID, "scope": scope, "kind": s.Kind, "severity": s.Severity,
 		"title": s.Title, "text": s.Text, "service": s.Key.Service, "cluster": s.Key.Cluster,
 		"account_id": s.Key.AccountID, "region": s.Key.Region, "at": s.At.UTC().Format(time.RFC3339), "url": m.Link(),
+	}
+	if m.isDiagnosis() {
+		body["summary"], body["investigation_id"] = m.summary(), m.Diagnosis.InvestigationID
 	}
 	if s.Scope != "" {
 		services := make([]map[string]any, len(s.Members))
@@ -214,9 +239,18 @@ func emailSubject(m Message) string {
 	return headerValue("[Harbormaster] " + m.plainHeadline())
 }
 
+// crlf gives free text the line breaks SMTP expects.
+func crlf(text string) string {
+	return strings.NewReplacer("\r\n", "\r\n", "\r", "\r\n", "\n", "\r\n").Replace(text)
+}
+
 // emailText is the body: title, text, where it happened and the link.
 func emailText(m Message) string {
 	var b strings.Builder
+	if m.isDiagnosis() {
+		b.WriteString(crlf(m.summary()) + "\r\n\r\n" + m.Link() + "\r\n")
+		return b.String()
+	}
 	b.WriteString(m.plainHeadline() + "\r\n\r\n")
 	if m.Subject.Text != "" {
 		b.WriteString(m.Subject.Text + "\r\n\r\n")
@@ -268,7 +302,7 @@ func RenderPreview(destination string, m Message) (Preview, error) {
 			return Preview{}, err
 		}
 		p.Title = m.plainHeadline()
-		p.Body = strings.TrimSpace(m.Subject.Text + "\n" + m.where())
+		p.Body = strings.TrimSpace(m.bodyText() + "\n" + m.where())
 	case DestPagerDuty:
 		if _, err := PagerDutyBody(m, "preview"); err != nil {
 			return Preview{}, err

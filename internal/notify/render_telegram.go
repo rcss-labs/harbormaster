@@ -72,6 +72,8 @@ func cutRunes(s string, max int) string {
 func TelegramText(m Message) string {
 	var title string
 	switch {
+	case m.isDiagnosis():
+		title = m.plainHeadline()
 	case m.Event == EventTest:
 		title = "Test message from Harbormaster"
 	case m.Event == EventResolved:
@@ -83,18 +85,22 @@ func TelegramText(m Message) string {
 	}
 	head := "<b>" + telegramEscape.Replace(cutRunes(title, telegramMaxTitle)) + "</b>"
 	tail := "\n" + telegramEscape.Replace(cutRunes(m.where(), telegramMaxTitle)) +
-		"\n" + `<a href="` + telegramAttrEscape.Replace(m.Link()) + `">Open in Harbormaster</a>`
-	if m.Subject.Text == "" {
+		"\n" + `<a href="` + telegramAttrEscape.Replace(m.Link()) + `">` + m.linkText() + `</a>`
+	text := m.bodyText()
+	if text == "" {
 		return head + tail
 	}
 	// "\n" before the text counts one unit.
 	budget := telegramMaxUnits - utf16Units(head) - utf16Units(tail) - 1
-	return head + "\n" + cutEscaped(m.Subject.Text, budget) + tail
+	return head + "\n" + cutEscaped(text, budget) + tail
 }
 
 // TelegramBody renders the sendMessage JSON. The chat id is sent as the string given (a number, negative for
 // groups and channels, or @channelname); the topic id is sent only when set.
 func TelegramBody(m Message, chatID string, threadID int) ([]byte, error) {
+	if err := m.checkDiagnosis(); err != nil {
+		return nil, err
+	}
 	body := map[string]any{
 		"chat_id":              chatID,
 		"text":                 TelegramText(m),
