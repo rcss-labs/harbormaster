@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/rcss-labs/harbormaster/internal/model"
+	"github.com/rcss-labs/harbormaster/internal/secretshape"
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/telemetry"
 )
@@ -726,7 +727,8 @@ func TestDispatcher_ReviewReachesEveryRouteOfTheReview(t *testing.T) {
 		t.Fatalf("review messages = %d, want 3", len(got))
 	}
 	for _, m := range got {
-		if m.Review == nil || *m.Review != (Review{RunID: run, Name: "Monthly spend", Type: "cost", PeriodLabel: "21 November 2026", Summary: testReviewSummary}) {
+		if m.Review == nil || len(m.Review.NameIDs) != 0 || m.Review.RunID != run || m.Review.Name != "Monthly spend" || m.Review.Type != "cost" ||
+			m.Review.PeriodLabel != "21 November 2026" || m.Review.Summary != testReviewSummary {
 			t.Errorf("review = %+v, want the stored run", m.Review)
 		}
 		if m.Subject.Text != "" || m.Subject.Key != (model.ServiceKey{}) || m.Subject.Severity != "info" || m.Diagnosis != nil || m.Investigate || m.IncidentID != 0 {
@@ -748,7 +750,7 @@ func TestDispatcher_ReviewReachesEveryRouteOfTheReview(t *testing.T) {
 
 func TestDispatcher_TheStoredReviewSummaryIsPassedUncleaned(t *testing.T) {
 	const raw = "Spend is flat, see https://elsewhere.example/page for more."
-	if CleanReviewSummary(raw, "https://hm.example.com") == raw {
+	if CleanReviewSummary(raw, "https://hm.example.com", secretshape.Names{}) == raw {
 		t.Fatal("the fixture is not changed by cleaning")
 	}
 	e := newReviewEnv(t)

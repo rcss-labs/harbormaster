@@ -284,12 +284,12 @@ func nameSegments(name string) []string {
 
 // ValueLooksSecret reports whether value contains a secret-shaped span.
 func ValueLooksSecret(value string) bool {
-	return len(valueSpans(value)) > 0
+	return len(valueSpans(value, Names{})) > 0
 }
 
 // valueSpans returns the spans that are secret regardless of any name.
-func valueSpans(text string) [][2]int {
-	return append(patternSpans(text), longRunSpans(text)...)
+func valueSpans(text string, keep Names) [][2]int {
+	return append(patternSpans(text), longRunSpans(text, keep)...)
 }
 
 // patternSpans returns the spans of the value patterns and of URL passwords, without the long-run rule.
@@ -321,13 +321,13 @@ func looksLikePort(afterColon string) bool {
 }
 
 // longRunSpans finds random-looking tokens, skipping identifiers that are
-// common in diagnostics: digests, ARNs and image tags.
-func longRunSpans(text string) [][2]int {
+// common in diagnostics: digests, ARNs and image tags. A run that is wholly a name in keep is skipped too.
+func longRunSpans(text string, keep Names) [][2]int {
 	arns := arnSpan.FindAllStringIndex(text, -1)
 	var spans [][2]int
 	for _, m := range longRun.FindAllStringIndex(text, -1) {
 		run := text[m[0]:m[1]]
-		if isHarbormasterID(run) || !looksLikeRandomRun(run) {
+		if isHarbormasterID(run) || keep.holds(run) || !looksLikeRandomRun(run) {
 			continue
 		}
 		if insideAny(arns, m) {

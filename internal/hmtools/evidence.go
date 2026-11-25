@@ -140,6 +140,12 @@ func EvidenceAction(tool string) (string, bool) {
 	return rule.Action, true
 }
 
+// ReadsLogs reports whether tool's answer may be log text: its rule needs Logs, or it has no rule.
+func ReadsLogs(tool string) bool {
+	rule, ok := evidenceRules[tool]
+	return !ok || rule.Action == EvidenceLogs
+}
+
 // citable is true for a rule of a known, citable kind with a known action; every other rule gives no evidence.
 func citable(rule EvidenceRule) bool {
 	if rule.Kind != EvidenceServiceArg && rule.Kind != EvidencePerItem && rule.Kind != EvidencePerItemNested {

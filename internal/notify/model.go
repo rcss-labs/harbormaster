@@ -103,6 +103,8 @@ const (
 type Diagnosis struct {
 	InvestigationID int64
 	Summary         string
+	// NameIDs are the stored ids whose names the summary may use.
+	NameIDs []string
 }
 
 // Review is the model-written summary of one review run. Its summary is untrusted: every renderer cleans it with
@@ -110,6 +112,8 @@ type Diagnosis struct {
 type Review struct {
 	RunID                            int64
 	Name, Type, PeriodLabel, Summary string
+	// NameIDs are the stored ids whose names the summary may use.
+	NameIDs []string
 }
 
 // Message is one notification to render and send.

@@ -87,6 +87,11 @@ var gluedRedaction = regexp.MustCompile(`\[redacted\][^\s,;&"'\]}]`)
 
 // Wrapping a text must not uncover the secret in it, and scrubbing the result again must not change it.
 func TestScrubText_WrappingDoesNotUncoverSecrets(t *testing.T) {
+	requireWrappingUncoversNothing(t, ScrubText)
+}
+
+func requireWrappingUncoversNothing(t *testing.T, scrubText func(string) string) {
+	t.Helper()
 	quote := func(text string) string { return encode(t, text, 1) }
 	wrappers := map[string]func(string) string{
 		"alone":    func(text string) string { return text },
@@ -106,14 +111,14 @@ func TestScrubText_WrappingDoesNotUncoverSecrets(t *testing.T) {
 					continue
 				}
 				text := wrapOuter(wrapInner(row.text))
-				got := ScrubText(text)
+				got := scrubText(text)
 				if strings.Contains(got, row.secret) {
 					t.Errorf("%s(%s): %q left in %s\nfrom %s", outer, inner, row.secret, got, text)
 				}
 				if json.Valid([]byte(text)) {
 					requireValid(t, text, got)
 				}
-				if again := ScrubText(got); again != got && !gluedRedaction.MatchString(got) {
+				if again := scrubText(got); again != got && !gluedRedaction.MatchString(got) {
 					t.Errorf("%s(%s): scrubbing %s\nagain gave %s", outer, inner, got, again)
 				}
 			}

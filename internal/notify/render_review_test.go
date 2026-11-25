@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/rcss-labs/harbormaster/internal/agentresult"
+	"github.com/rcss-labs/harbormaster/internal/secretshape"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
@@ -168,7 +169,7 @@ func TestReview_Email_SubjectAndLinesStayShort(t *testing.T) {
 			}
 		}
 		_, body := decodedEmailBody(t, raw)
-		if want := aiNotice + "\r\n\r\nNovember 2026\r\n\r\n" + crlf(CleanReviewSummary(summary, "https://hm.example.com")) + "\r\n\r\n" + ownReview + "\r\n"; body != want {
+		if want := aiNotice + "\r\n\r\nNovember 2026\r\n\r\n" + crlf(CleanReviewSummary(summary, "https://hm.example.com", secretshape.Names{})) + "\r\n\r\n" + ownReview + "\r\n"; body != want {
 			t.Errorf("%s: the body does not decode to the text:\n got %.120q\nwant %.120q", name, body, want)
 		}
 	}
@@ -310,11 +311,11 @@ func TestCleanReviewSummary_ScrubsBeforeLinksAreRemoved(t *testing.T) {
 		"//-----BEGIN RSA PRIVATE KEY----- MIIEow",
 		"the key is " + "AKIA" + "IOSFODNN7EXAMPLE",
 	} {
-		if got := CleanReviewSummary(in, "https://hm.example.com"); got != agentresult.ReplacementReviewSummary {
+		if got := CleanReviewSummary(in, "https://hm.example.com", secretshape.Names{}); got != agentresult.ReplacementReviewSummary {
 			t.Errorf("CleanReviewSummary(%q) = %q, want the review sentence", in, got)
 		}
 	}
-	if got := CleanReviewSummary("Plain text.", "https://hm.example.com"); got != "Plain text." {
+	if got := CleanReviewSummary("Plain text.", "https://hm.example.com", secretshape.Names{}); got != "Plain text." {
 		t.Errorf("a clean summary changed: %q", got)
 	}
 }
@@ -324,10 +325,10 @@ func TestCleanReviewSummary_ReplacementIsTheReviewSentence(t *testing.T) {
 	over := strings.Repeat("x", agentresult.SummaryCap+1)
 	grows := strings.Repeat("http://a ", 100) // fits once, but not once every link is replaced
 	for name, in := range map[string]string{"over the cap": over, "grows past the cap": grows} {
-		if got := CleanReviewSummary(in, base); got != agentresult.ReplacementReviewSummary {
+		if got := CleanReviewSummary(in, base, secretshape.Names{}); got != agentresult.ReplacementReviewSummary {
 			t.Errorf("%s: got %.60q, want the review sentence", name, got)
 		}
-		if got := CleanSummary(in, base); got != agentresult.ReplacementSummary {
+		if got := CleanSummary(in, base, secretshape.Names{}); got != agentresult.ReplacementSummary {
 			t.Errorf("%s: the diagnosis must keep its own sentence, got %.60q", name, got)
 		}
 	}
@@ -340,8 +341,8 @@ func TestCleanReviewSummary_ReplacementIsTheReviewSentence(t *testing.T) {
 	}
 	// Idempotent and capped, as the diagnosis cleaner is.
 	for _, in := range []string{"", "plain", grows, over, agentresult.ReplacementReviewSummary, "[link removed] http://a " + strings.Repeat("[link removed] ", 78)} {
-		once := CleanReviewSummary(in, base)
-		if utf8.RuneCountInString(once) > agentresult.SummaryCap || CleanReviewSummary(once, base) != once {
+		once := CleanReviewSummary(in, base, secretshape.Names{})
+		if utf8.RuneCountInString(once) > agentresult.SummaryCap || CleanReviewSummary(once, base, secretshape.Names{}) != once {
 			t.Errorf("not capped and idempotent for %.60q: %.80q", in, once)
 		}
 	}
@@ -354,7 +355,7 @@ func TestCleanReviewSummary_LinearOn200KB(t *testing.T) {
 	}
 	start := time.Now()
 	for name, in := range inputs {
-		CleanReviewSummary(in, "https://hm.example.com")
+		CleanReviewSummary(in, "https://hm.example.com", secretshape.Names{})
 		if elapsed := time.Since(start); elapsed > 20*time.Second {
 			t.Fatalf("%s: %v for 200 KB inputs, want linear time", name, elapsed)
 		}

@@ -655,7 +655,7 @@ func (d *Dispatcher) deliver(sendCtx, parent context.Context, row store.Notifica
 		if err != nil {
 			return err
 		}
-		diagnosis = &Diagnosis{InvestigationID: investigation.ID, Summary: investigation.Summary}
+		diagnosis = &Diagnosis{InvestigationID: investigation.ID, Summary: investigation.Summary, NameIDs: investigation.SummaryNameIDs}
 	}
 
 	var review *Review

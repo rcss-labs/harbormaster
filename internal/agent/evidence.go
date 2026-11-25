@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -37,9 +38,16 @@ type findings struct {
 	last   int // the last number given
 	units  map[string]citedUnit
 	unseen []*toolResult // results with units the model may not have been shown yet
+
+	taskIDs []string          // ids of the clusters and services the run is about
+	learned []string          // ids of services a review read about, in the order it read them
+	known   map[string]bool   // the learned ids
+	keep    secretshape.Names // the names the task's ids and the learned ones decode to
 }
 
-func newFindings() *findings { return &findings{units: map[string]citedUnit{}} }
+func newFindings() *findings {
+	return &findings{units: map[string]citedUnit{}, known: map[string]bool{}}
+}
 
 // allowSubject lets the summary name what the run is about: the services and
 // clusters its subject's ids decode to, and no others.
@@ -50,11 +58,66 @@ func (f *findings) allowSubject(subject TaskSubject) {
 	}
 }
 
+// nameTask lets the run see and write the names its task's own ids decode to: those of an investigation's subject, or of
+// the clusters in a review's scope.
+func (f *findings) nameTask(role string, task Task) {
+	ids := append([]string{task.Subject.ClusterID}, task.Subject.ServiceIDs...)
+	if role == roleReviewer {
+		ids = nil
+		for _, entry := range task.Scope.Entries {
+			ids = append(ids, entry.ClusterID)
+		}
+	}
+	for _, id := range ids {
+		if isResourceID(id) {
+			f.taskIDs = append(f.taskIDs, id)
+		}
+	}
+	f.keep = secretshape.NamesOf(f.taskIDs...)
+}
+
+// isResourceID reports whether id is a cluster's or a service's. A task's id is neither: the cluster in its ARN may be
+// of any length.
+func isResourceID(id string) bool {
+	_, _, ok := secretshape.IDNames(id)
+	raw, err := base64.RawURLEncoding.DecodeString(id)
+	return ok && err == nil && !bytes.Contains(raw, []byte("arn:"))
+}
+
+// learn lets the run see and write the names of the services that code attributes the units of a raw answer to. An id
+// anywhere else in the answer teaches nothing, and neither does an answer that may be log text or is cut. The argument of
+// a call is the model's own: that it names a service the identity may View rests on Harbormaster's API, which answers a
+// call for any other as failed, and a failed call does not come here.
+func (f *findings) learn(tool string, args map[string]any, raw string) {
+	if hmtools.ReadsLogs(tool) || strings.HasSuffix(raw, answerTooLargeNote) {
+		return
+	}
+	for _, unit := range hmtools.Units(tool, args, raw) {
+		id := unit.ServiceID
+		if f.known[id] {
+			continue
+		}
+		if _, service, _ := secretshape.IDNames(id); service == "" {
+			continue
+		}
+		f.known[id] = true
+		f.learned = append(f.learned, id)
+		f.keep.Add(id)
+	}
+}
+
 // readResult prepares a successful tool answer: its scrubbed text counts as
 // read, and its units get their numbers. A unit whose marker does not survive
 // the result cap is forgotten, and an answer cut by the read cap has none.
 func (r *session) readResult(tool string, args map[string]any, text string) *toolResult {
-	res, clean := r.cleanResult(tool, text)
+	if r.reviewing() {
+		r.found.learn(tool, args, text)
+	}
+	var keep secretshape.Names
+	if !hmtools.ReadsLogs(tool) {
+		keep = r.found.keep
+	}
+	res, clean := r.cleanResult(tool, text, keep)
 	r.found.corpus.Add(tool, clean)
 	if r.reviewing() {
 		r.found.corpus.AllowNames(idNames(clean)...)

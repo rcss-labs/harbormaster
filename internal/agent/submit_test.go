@@ -246,7 +246,7 @@ func TestSubmission_LargeInputIsLinear(t *testing.T) {
 	if problem != "" {
 		t.Fatal(problem)
 	}
-	res := buildResult(sub, units, corpus, agentresult.ReplacementSummary)
+	res := buildResult(sub, units, corpus, agentresult.ReplacementSummary, nil, nil)
 	if len(res.Evidence) != 12 || res.EvidenceDropped != 20_000-12 || !res.SummaryReplaced {
 		t.Errorf("%d items, %d dropped, replaced %v", len(res.Evidence), res.EvidenceDropped, res.SummaryReplaced)
 	}

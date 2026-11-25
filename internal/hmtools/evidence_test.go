@@ -134,6 +134,27 @@ func TestEvidenceAction_NoneAndUnknownAreNotOK(t *testing.T) {
 	}
 }
 
+func TestReadsLogs_TwoToolsAndUnknown(t *testing.T) {
+	logs := 0
+	for _, tool := range Tools() {
+		want := tool.Name == "get_service_logs" || tool.Name == "search_logs"
+		if got := ReadsLogs(tool.Name); got != want {
+			t.Errorf("%s: %v, want %v", tool.Name, got, want)
+		}
+		if want {
+			logs++
+		}
+	}
+	if logs != 2 {
+		t.Errorf("%d log tools", logs)
+	}
+	for _, name := range []string{"", "unknown_tool", "submit_result", "alert", "scope", "get_service ", "GET_SERVICE"} {
+		if !ReadsLogs(name) {
+			t.Errorf("%q is not taken for a log tool", name)
+		}
+	}
+}
+
 func TestUnits_ServiceArgSplitsMembersAndArrays(t *testing.T) {
 	body := `{"name":"web", "tasks": [ {"id":1}, {"id": 2} ], "count": 3, "empty": []}`
 	want := []string{`name: "web"`, `tasks: {"id":1}`, `tasks: {"id":2}`, `count: 3`}

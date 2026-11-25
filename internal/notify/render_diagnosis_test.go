@@ -15,6 +15,7 @@ import (
 	"mime/quotedprintable"
 
 	"github.com/rcss-labs/harbormaster/internal/agentresult"
+	"github.com/rcss-labs/harbormaster/internal/secretshape"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
@@ -289,7 +290,7 @@ func TestDiagnosis_Email_LinesStayShort(t *testing.T) {
 			}
 		}
 		_, body := decodedEmailBody(t, raw)
-		want := aiNotice + "\r\n\r\n" + crlf(CleanSummary(summary, "https://hm.example.com")) + "\r\n\r\n" + ownInvestigation + "\r\n"
+		want := aiNotice + "\r\n\r\n" + crlf(CleanSummary(summary, "https://hm.example.com", secretshape.Names{})) + "\r\n\r\n" + ownInvestigation + "\r\n"
 		if body != want {
 			t.Errorf("%s: the body does not decode to the text:\n got %.120q\nwant %.120q", name, body, want)
 		}
@@ -362,7 +363,7 @@ func TestCleanSummary_OwnLinksAndForeignLinks(t *testing.T) {
 		{"foreign", "https://hm.example.com", "go to https://evil.example/x", "go to " + agentresult.URLPlaceholder},
 		{"no base", "", "https://hm.example.com/services/x", agentresult.URLPlaceholder},
 	} {
-		if got := CleanSummary(tc.in, tc.base); got != tc.want {
+		if got := CleanSummary(tc.in, tc.base, secretshape.Names{}); got != tc.want {
 			t.Errorf("%s: CleanSummary(%q, %q) = %q, want %q", tc.name, tc.in, tc.base, got, tc.want)
 		}
 	}
@@ -376,7 +377,7 @@ func TestCleanSummary_ScrubsBeforeLinksAreRemoved(t *testing.T) {
 		"//Authorization: Basic dXNlcjpwYXNzd29yZDEyMzQ1Ng==",
 		"//-----BEGIN RSA PRIVATE KEY----- MIIEow",
 	} {
-		if got := CleanSummary(in, "https://hm.example.com"); got != agentresult.ReplacementSummary {
+		if got := CleanSummary(in, "https://hm.example.com", secretshape.Names{}); got != agentresult.ReplacementSummary {
 			t.Errorf("CleanSummary(%q) = %q, want the replacement summary", in, got)
 		}
 	}
@@ -399,10 +400,10 @@ func TestDiagnosis_SummaryIsRecheckedAtSendTime(t *testing.T) {
 			t.Errorf("%s: no replacement summary in %s", name, out)
 		}
 	}
-	if got := CleanSummary(stored, m.BaseURL); got != agentresult.ReplacementSummary {
+	if got := CleanSummary(stored, m.BaseURL, secretshape.Names{}); got != agentresult.ReplacementSummary {
 		t.Errorf("CleanSummary = %q", got)
 	}
-	if got := CleanSummary("Plain text.", m.BaseURL); got != "Plain text." {
+	if got := CleanSummary("Plain text.", m.BaseURL, secretshape.Names{}); got != "Plain text." {
 		t.Errorf("CleanSummary changed a clean summary: %q", got)
 	}
 }
@@ -415,11 +416,11 @@ func TestCleanSummary_CapSafeAndIdempotent(t *testing.T) {
 		"\u202e", "\u200b", "`", "<", "&",
 	}
 	check := func(label, in string) {
-		once := CleanSummary(in, base)
+		once := CleanSummary(in, base, secretshape.Names{})
 		if n := utf8.RuneCountInString(once); n > agentresult.SummaryCap {
 			t.Errorf("%s: %d runes after cleaning, cap %d (input %.60q)", label, n, agentresult.SummaryCap, in)
 		}
-		if twice := CleanSummary(once, base); twice != once {
+		if twice := CleanSummary(once, base, secretshape.Names{}); twice != once {
 			t.Errorf("%s: not idempotent for %.60q:\n once %.80q\ntwice %.80q", label, in, once, twice)
 		}
 	}
@@ -436,7 +437,7 @@ func TestCleanSummary_CapSafeAndIdempotent(t *testing.T) {
 	} {
 		check(name, in)
 	}
-	if got := CleanSummary(strings.Repeat("http://a ", 100), base); got != agentresult.ReplacementSummary {
+	if got := CleanSummary(strings.Repeat("http://a ", 100), base, secretshape.Names{}); got != agentresult.ReplacementSummary {
 		t.Errorf("a summary that grows past the cap once its links are replaced must be replaced whole, got %.60q", got)
 	}
 	rng := rand.New(rand.NewSource(9))
@@ -462,7 +463,7 @@ func TestCleanSummary_AndCRLF_AreLinear(t *testing.T) {
 	}
 	start := time.Now()
 	for name, in := range inputs {
-		CleanSummary(in, "https://hm.example.com")
+		CleanSummary(in, "https://hm.example.com", secretshape.Names{})
 		crlf(in)
 		if elapsed := time.Since(start); elapsed > 20*time.Second {
 			t.Fatalf("%s: %v for 200 KB inputs, want linear time", name, elapsed)

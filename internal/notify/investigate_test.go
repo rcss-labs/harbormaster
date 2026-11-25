@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/rcss-labs/harbormaster/internal/model"
+	"github.com/rcss-labs/harbormaster/internal/secretshape"
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/telemetry"
 )
@@ -1485,7 +1486,7 @@ func TestDispatcher_OnlyOpenedCarriesInvestigate(t *testing.T) {
 
 func TestDispatcher_TheStoredSummaryIsPassedUncleaned(t *testing.T) {
 	const raw = "The api is down, see https://elsewhere.example/page for more."
-	if CleanSummary(raw, "https://hm.example.com") == raw {
+	if CleanSummary(raw, "https://hm.example.com", secretshape.Names{}) == raw {
 		t.Fatal("the fixture is not changed by cleaning")
 	}
 	e := newInvEnv(t)

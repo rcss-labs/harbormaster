@@ -228,7 +228,7 @@ A custom review is a review of type `custom` whose instructions an admin wrote. 
 
 ## 18. Custom reviews: switch and rollback
 
-**The switch off.** With `HM_AGENT_CUSTOM_REVIEWS=false` or unset, a custom review stays in the list and can be deleted. A finished custom run is neither planned nor sent: the delivery planner marks it with no messages (a manual run too), and a message already planned is cancelled with the note "Custom reviews are off." when it comes to be sent. Results stay readable. Turning the setting on again does not send them: a marked run is not planned again, and a planned message that was cancelled stays cancelled; one not yet sent goes out if its result is less than 48 hours old. It cannot be edited or switched off. A run of it that is waiting ends as `disabled`. A custom review that was on is still on in the database, so it becomes due again when the setting returns to `true`. To keep one for later, disable it first, then set the setting to `false`.
+**The switch off.** With `HM_AGENT_CUSTOM_REVIEWS=false` or unset, a custom review stays in the list and can be deleted. A finished custom run is neither planned nor sent: the delivery planner marks it with no messages (a manual run too), and a message already planned is cancelled with the note "Custom reviews are off." when it comes to be sent. Results stay readable. Turning the setting on again does not send them: a marked run is not planned again, and a planned message that was cancelled stays cancelled; one not yet sent goes out if its result is less than 48 hours old, its route is still on the review and, for a scheduled run, the review is on. While the setting is off the review cannot be edited or switched off. A run of it that is waiting ends as `disabled`. A custom review that was on is still on in the database, so it becomes due again when the setting returns to `true`. To keep one for later, disable it first, then set the setting to `false`.
 
 **Rollback to the release before custom reviews.** Disable or delete every custom review first, then roll back. No migration is undone: migration 0223 is additive in effect, and the older release works on the new schema because the new columns have defaults.
 
@@ -241,10 +241,19 @@ A custom review is a review of type `custom` whose instructions an admin wrote. 
 | The older dispatcher, a test run | Never planned: the run was marked planned when it was made. |
 | The older agent, a task from the current release | The new job waits for an agent that offers the type and never sends the task, so nothing is paid. |
 | A test run under the older code | It shows no covered tags, so only admins read it. |
-| An older coordinator, a test run it starts during a rolling deploy or a rollback | A database check refuses the older coordinator's start of the run. It retries once after 5 minutes, then the run fails with an error, before any call to the agent. Nothing is paid. |
+| An older coordinator, a test run it starts during a rolling deploy or a rollback | A database check refuses the older coordinator's start of the run. It is tried once more after 5 minutes: a current coordinator's try succeeds, an older one's is refused again and the run fails with an error, before any call to the agent. Nothing is paid for a refused start. |
 | The current agent, a built-in task from the older release | The same bytes as before. |
 
 Check it worked: after a rollback with custom reviews disabled or deleted, no `custom` run appears in **Settings > AI agent > Reviews**, and the delivery log shows no failing review rows.
+
+**Rollback to the release before random-looking names.** Migration 0224 adds one column to the investigations and one to the review runs, with a default, and is not undone.
+
+| What meets a summary that holds a random-looking service name | What happens |
+| --- | --- |
+| The older dispatcher, a stored summary that is still to be sent | It sends the fixed sentence instead. The page shows the stored summary. |
+| The older Harbormaster, an answer of the current agent | It ignores the reported ids and replaces the summary. |
+| The current Harbormaster, an answer of an older agent | The agent has already replaced the summary. |
+| A result the older Harbormaster stores on the new schema | It has no ids. Nothing else differs. |
 
 ## 19. Time zones
 

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"io"
 	"strings"
+
+	"github.com/rcss-labs/harbormaster/internal/secretshape"
 )
 
 // LooseRun is how many normalised characters a copied run of a loose value needs to be refused. VerbatimRun, the
@@ -57,21 +59,33 @@ func CheckReadSummary(summary string, read *ReadCorpus) (clean string, replaced 
 
 // CheckReadSummaryAs is CheckSummaryAs against both classes of what the run read.
 func CheckReadSummaryAs(summary string, read *ReadCorpus, replacement string) (clean string, replaced bool) {
+	return CheckReadSummaryNaming(summary, read, replacement, secretshape.Names{})
+}
+
+// CheckReadSummaryNaming is CheckReadSummaryAs for a run that may name what is in keep. The copy check does not know
+// keep; what it lets stand is up to AllowNames.
+func CheckReadSummaryNaming(summary string, read *ReadCorpus, replacement string, keep secretshape.Names) (clean string, replaced bool) {
 	if read == nil {
-		return CheckSummaryAs(summary, nil, replacement)
+		return checkSummary(summary, nil, replacement, keep)
 	}
-	if clean, replaced = CheckSummaryAs(summary, &read.strict, replacement); replaced {
+	if clean, replaced = checkSummary(summary, &read.strict, replacement, keep); replaced {
 		return clean, true
 	}
-	return CheckSummaryAs(summary, &read.loose, replacement)
+	return checkSummary(summary, &read.loose, replacement, keep)
 }
 
 // CheckReadNote is CheckNote against both classes of what the run read.
 func CheckReadNote(note string, read *ReadCorpus) string {
+	return CheckReadNoteNaming(note, read, secretshape.Names{})
+}
+
+// CheckReadNoteNaming is CheckReadNote for a run that may name what is in keep, under the rule of
+// CheckReadSummaryNaming; AllowNames does not hold for notes.
+func CheckReadNoteNaming(note string, read *ReadCorpus, keep secretshape.Names) string {
 	if read == nil {
-		return CheckNote(note, nil)
+		return checkNote(note, nil, keep)
 	}
-	return CheckNote(CheckNote(note, &read.strict), &read.loose)
+	return checkNote(checkNote(note, &read.strict, keep), &read.loose, keep)
 }
 
 type classedString struct {
