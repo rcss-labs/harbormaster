@@ -78,7 +78,7 @@ test.describe('agent chat as sam', () => {
 
   test('an admin sees the fake model in Settings and runs Test model', async ({ page }) => {
     await page.goto('/settings/agent')
-    await expect(page.getByRole('combobox', { name: 'Model' })).toHaveValue('fake-1')
+    await expect(page.getByRole('combobox', { name: 'Model', exact: true })).toHaveValue('fake-1')
     await page.getByRole('button', { name: 'Test model' }).click()
     await expect(page.getByRole('status').filter({ hasText: /\S/ })).toHaveText('The model answered.')
     await saveScreenshot(page, 'agent-settings.png')

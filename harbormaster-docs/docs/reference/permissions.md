@@ -77,7 +77,31 @@ The AI agent calls Harbormaster with a run token (prefix `hma_`), minted for one
 
 ## The AI chat flag
 
-Using the AI chat needs a per-user flag, **AI chat**, set by a global admin in **Settings > Users**. It is off for new users. Global admins can chat without it. The flag grants no data access: the chat sees only what the user's own tags allow. Only global admins can change the flag, the chat model, the allowance and the redaction setting. See [AI chat](../guides/ai-agent-chat.md).
+Using the AI chat needs a per-user flag, **AI chat**, set by a global admin in **Settings > Users**. It is off for new users. Global admins can chat without it. The flag grants no data access: the chat sees only what the user's own tags allow. Only global admins can change the flag, the chat and investigation models, the allowance, the redaction setting and the [agent identity](#the-agent-identity)'s access. See [AI chat](../guides/ai-agent-chat.md).
+
+## The agent identity
+
+Automatic AI investigations run as the **agent identity**, a built-in user of a separate kind that is not a person. Its username is `harbormaster-agent` (the first free of that and `harbormaster-agent-1` to `-9`). The prefix `harbormaster-agent` is reserved: no user can be created with a name that starts with it, whatever the case (`_` and `.` count as `-`), and a single sign-on sign-in whose derived name would start with it fails.
+
+- **What it holds.** Only View, and Logs where an admin grants it, on the tags an admin picks in **Settings > AI agent > Agent identity** (**No access**, **View**, **View and logs**). It starts with no access. Every other action is masked off, even if a row for it were stored, and it can never be a global admin.
+- **What it can never do.** Sign in by password or single sign-on, hold a session, a personal access token or an OAuth grant, be an admin or a break-glass admin, have the AI chat flag, or use Operate, Deploy, Edit, Terminal or Accept risk. It is not listed on **Settings > Users**, and the user routes answer `404` for it. It cannot be deleted or edited there.
+- **How it reads.** For a run it gets a run token, valid for `HM_AGENT_RUN_TOKEN_TTL`, that is read-only like any run token: only the routes tokens may call, only View and Logs. Its use does not count as user activity, so it does not wake AWS polling that was idle.
+- **Limits of its own.** `HM_AGENT_IDENTITY_RATE_PER_SECOND` and the two `HM_AGENT_IDENTITY_LOG_SEARCH_*` limits (see [Configuration](configuration.md#ai-agent)).
+- **Where it shows.** The delete-tag impact view lists it among those who lose access when a tag it holds is deleted. Changes to its access are audited as `agent_identity_update`.
+- **It is off with the agent.** With `HM_AGENT_URL` unset, no identity row is created and nothing in this section applies. Once created, the row stays if you later unset it, inert.
+
+### Who reads an investigation
+
+A person's access to an investigation is checked on every request, from their current permissions:
+
+| Item | Needs |
+| --- | --- |
+| The summary of a service investigation | View on the service. A service that no longer exists: global admin. |
+| The summary of a cluster or account investigation | Global admin, or View on every service listed when it was requested. A list at the 50-service cap, or an empty one: global admin only. |
+| One evidence item | View on its service, and Logs as well when it is log text. Hidden items are counted, not described. |
+| The list of all investigations in Settings | Global admin. |
+
+Access tokens and run tokens cannot read investigations. See [Automatic AI investigations](../guides/ai-agent-investigator.md#who-sees-what).
 
 ## How tags match clusters, services and tasks
 
@@ -113,7 +137,7 @@ List routes accept `?tag=` filters, and the web app has account, region and tag 
 | Register a task definition revision | Edit |
 | Terminal | Terminal |
 | Vulnerability and package acceptances | Accept risk |
-| Users, tags, permissions, accounts, audit, SSO, off-hours schedules, notification routes, instance settings | Global admin |
+| Users, tags, permissions, accounts, audit, SSO, off-hours schedules, notification routes (including the **Investigate with AI** switch), instance settings, the agent identity's access and the list of all investigations | Global admin |
 
 The full route list with required actions is in the [API reference](api.md).
 

@@ -275,3 +275,18 @@ Do not connect Harbormaster's own service, cluster or database to Harbormaster's
 ## AI agent
 
 To enable the AI agent, deploy the [`harbormaster-agent`](../harbormaster-agent/README.md) module and set `HM_AGENT_URL` in `extra_env` to its `agent_url` output. This needs `internal = true` and the agent's `task_security_group_id` in `alb_ingress_security_group_ids`, so its tool calls reach this load balancer. If the agent's certificate is issued by a private CA, set `HM_AGENT_CA_PEM` in `extra_env` to that CA's PEM so Harbormaster trusts the agent's load balancer (a CA certificate is public, so a plain value is fine). Leaving `HM_AGENT_URL` unset keeps the agent off.
+
+Automatic investigations of alerts need no new input. Their settings go through `extra_env` (which reaches every service) and have these defaults:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `HM_AGENT_INVESTIGATION_WINDOW` | `15m` | Alerts for one subject within this time share one investigation (`1m` to `24h`). |
+| `HM_AGENT_INVESTIGATIONS_CONCURRENT` | `2` | Investigations that run at once (1 to 8). |
+| `HM_AGENT_INVESTIGATIONS_PER_HOUR` | `20` | Investigations that may start in an hour. `0` turns the investigator off. |
+| `HM_AGENT_INVESTIGATION_MAX_WAIT` | `15m` | A request that waited longer before its first start is skipped (`1m` to `24h`). |
+| `HM_AGENT_IDENTITY_RATE_PER_SECOND` | `5` | Requests per second of the agent identity, burst 60 times that (1 to 50). |
+| `HM_AGENT_IDENTITY_LOG_SEARCH_MAX_GB` | `2` | GiB one log search by the identity may scan (`0`: no cap of its own). |
+| `HM_AGENT_IDENTITY_LOG_SEARCH_DAILY_GB` | `20` | GiB the identity may scan per UTC day (`0`: its log search is off). |
+| `HM_RETENTION_AGENT_RUNS` | `2160h` | Age after which finished investigations and agent run records are deleted (`0` keeps all; otherwise at least `48h`). |
+
+With split services the investigator runs on the coordinator, which must also reach the agent: pass `security_group_ids.web` and `security_group_ids.coordinator` to the agent module's `harbormaster_task_security_group_ids`. See [Automatic AI investigations](../../../harbormaster-docs/docs/guides/ai-agent-investigator.md) before you switch a route on.

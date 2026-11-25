@@ -52,7 +52,8 @@ export function draftFromReview(review: ReviewDTO): ReviewDraft {
     monthDay: schedule.month_day === null ? '' : String(schedule.month_day),
     timezone: schedule.timezone,
     scope: review.scope.map(scopeKey),
-    routeIds: review.routes.map((route) => route.id),
+    // A route that became PagerDuty is not offered any more; the server keeps it when only the switch is turned off.
+    routeIds: review.routes.filter((route) => route.destination !== 'pagerduty').map((route) => route.id),
   }
 }
 
@@ -107,8 +108,8 @@ export function isDirty(draft: ReviewDraft, saved: ReviewDTO | undefined): boole
   return JSON.stringify(bodyFromDraft(draft)) !== JSON.stringify(bodyFromDraft(draftFromReview(saved)))
 }
 
-/** The first problem with the draft, or null. Names are compared without regard to case, as the server does. */
-export function validateDraft(draft: ReviewDraft, info: AgentReviewsInfo, otherNames: string[]): string | null {
+/** The first problem with the draft, or null. `saved` is the stored review being edited. Names are compared without regard to case, as the server does. */
+export function validateDraft(draft: ReviewDraft, info: AgentReviewsInfo, otherNames: string[], saved?: ReviewDTO): string | null {
   const name = draft.name.trim()
   if (name === '') return 'Enter a name.'
   if (name.length > MAX_REVIEW_NAME) return `The name can be at most ${MAX_REVIEW_NAME} characters.`
@@ -121,7 +122,9 @@ export function validateDraft(draft: ReviewDraft, info: AgentReviewsInfo, otherN
     if (draft.monthDay.trim() === '' || !Number.isInteger(day) || day < 1 || day > 28) return 'Choose a day from 1 to 28.'
   }
   if (draft.timezone === '') return 'Choose a time zone.'
-  if (draft.routeIds.length === 0) return 'Choose at least one route.'
+  // An enabled review can always be turned off, whatever became of its routes.
+  const turningOff = saved?.enabled === true && !draft.enabled
+  if (draft.routeIds.length === 0 && !turningOff) return 'Choose at least one route.'
   if (draft.routeIds.length > MAX_REVIEW_ROUTES) return `Choose at most ${MAX_REVIEW_ROUTES} routes.`
   return null
 }

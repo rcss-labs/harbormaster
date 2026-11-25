@@ -53,11 +53,13 @@ The Terraform module creates the following billable resources. Sizes are the def
 
 ### AI agent and model spend
 
-The agent's infrastructure is small. The model spend is the part to watch, and it is billed by your provider, not by AWS (unless you use Amazon Bedrock, where it appears on your AWS bill).
+The agent's infrastructure is small. The coordinator calls it too, for investigations. The model spend is the part to watch, and it is billed by your provider, not by AWS (unless you use Amazon Bedrock, where it appears on your AWS bill).
 
 - A question costs the tokens of every model call it makes. The tool definitions alone are about 10,000 input tokens on each call, and a question can make several calls, so even short questions use real tokens.
 - An admin sets a monthly allowance in **Settings > AI agent**. Harbormaster reserves a question's worst case (the run token limit at the model's higher price) before it starts and refuses the question when the allowance cannot cover it. The month is the UTC calendar month. An interrupted question can be charged more than it used, so the allowance can run ahead of the provider's bill.
 - Prices come from the catalogue you give the agent. Harbormaster hardcodes none, so update `model_providers` when a provider changes its prices, or the allowance will be counted at the old ones.
+- **Automatic investigations spend from the same allowance.** Each investigation is one run with the chat's per-run limits, at most two runs per investigation (the first and one retry), and the worst case of each is reserved before it starts. A run makes several model calls, and the tool definitions alone are about 10,000 input tokens on each one. Cost per investigation is listed in **Settings > AI agent**. Counts, not money, limit them: `HM_AGENT_INVESTIGATIONS_PER_HOUR` (20 by default) and `HM_AGENT_INVESTIGATIONS_CONCURRENT` (2). A storm of alerts can use up the month's allowance, and then the chat refuses questions as well. Set `HM_AGENT_INVESTIGATIONS_PER_HOUR` low or `0` if you cannot accept that. See the [runbook](runbooks/ai-agent.md#10-an-alert-storm).
+- **Log search by the agent identity costs CloudWatch.** When the identity holds Logs, its log searches run CloudWatch Logs Insights in your accounts, billed by data scanned, up to `HM_AGENT_IDENTITY_LOG_SEARCH_MAX_GB` a search (2 GiB) and `HM_AGENT_IDENTITY_LOG_SEARCH_DAILY_GB` a UTC day (20 GiB), plus any global `HM_LOG_SEARCH_MAX_GB`. Set the daily value to `0` to stop it.
 - Bedrock: charges appear under Amazon Bedrock in Cost Explorer for the region in `bedrock_region`.
 - Lower `limits.max_run_tokens` and `limits.max_steps` to cap one question. Choose a smaller model for chat if answers are good enough.
 

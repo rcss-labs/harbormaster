@@ -31,24 +31,46 @@ func (s *Store) InsertDiagnosisDelivery(ctx context.Context, d NotificationDeliv
 	return tag.RowsAffected() == 1, nil
 }
 
+// The two follow-up events. They share one lane: a due time in diagnosis_due_at, never next_attempt_at, and their own
+// claim; the older claim and the older held release cannot see them.
+const (
+	deliveryEventDiagnosis = "diagnosis"
+	deliveryEventReview    = "review"
+)
+
 // ClaimDiagnosisDeliveries is ClaimNotificationDeliveries for diagnosis rows: pending, due by diagnosis_due_at and
 // without a live lease, within the filter, leased for lease. It never returns any other event.
 func (s *Store) ClaimDiagnosisDeliveries(ctx context.Context, now time.Time, lease time.Duration, f ClaimFilter) ([]NotificationDelivery, error) {
-	rows, err := s.Pool.Query(ctx, `with ranked as (
+	return s.claimFollowUpDeliveries(ctx, deliveryEventDiagnosis, now, lease, f)
+}
+
+// claimFollowUpDeliveries claims the due rows of one follow-up event. The event is chosen here from the two constants,
+// never from caller text, because it is written into the statement.
+func (s *Store) claimFollowUpDeliveries(ctx context.Context, event string, now time.Time, lease time.Duration, f ClaimFilter) ([]NotificationDelivery, error) {
+	var literal string
+	switch event {
+	case deliveryEventDiagnosis:
+		literal = "'diagnosis'"
+	case deliveryEventReview:
+		literal = "'review'"
+	default:
+		return nil, fmt.Errorf("claim %s deliveries: not a follow-up event", event)
+	}
+	rows, err := s.Pool.Query(ctx, fmt.Sprintf(`with ranked as (
 			select id, row_number() over (partition by coalesce(route_id, -id) order by diagnosis_due_at, id) as n
 			from notification_deliveries
-			where event = 'diagnosis' and status = 'pending' and diagnosis_due_at <= $1 and (claimed_until is null or claimed_until <= $1)
+			where event = %[1]s and status = 'pending' and diagnosis_due_at <= $1 and (claimed_until is null or claimed_until <= $1)
 			  and (route_id is null or route_id <> all(coalesce($5::bigint[], '{}')))),
 		due as (
 			select d.id from notification_deliveries d join ranked using (id)
 			where ($4 <= 0 or ranked.n <= $4)
-			  and d.event = 'diagnosis' and d.status = 'pending' and d.diagnosis_due_at <= $1 and (d.claimed_until is null or d.claimed_until <= $1)
+			  and d.event = %[1]s and d.status = 'pending' and d.diagnosis_due_at <= $1 and (d.claimed_until is null or d.claimed_until <= $1)
 			order by d.diagnosis_due_at, d.id limit $3 for update of d skip locked)
 		update notification_deliveries d set claimed_until = $1::timestamptz + $2::interval
-		from due where d.id = due.id returning `+prefixColumns("d", notificationDeliveryColumns),
+		from due where d.id = due.id returning `, literal)+prefixColumns("d", notificationDeliveryColumns),
 		now, fmt.Sprintf("%d microseconds", lease.Microseconds()), f.Limit, f.PerRoute, f.Exclude)
 	if err != nil {
-		return nil, fmt.Errorf("claim diagnosis deliveries: %w", err)
+		return nil, fmt.Errorf("claim %s deliveries: %w", event, err)
 	}
-	return collectClaimedDeliveries(rows, "claim diagnosis deliveries")
+	return collectClaimedDeliveries(rows, "claim "+event+" deliveries")
 }

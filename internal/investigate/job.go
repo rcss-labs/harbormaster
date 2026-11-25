@@ -206,11 +206,11 @@ func (j *job) prepare(ctx context.Context) *ending {
 		}
 	}
 
-	subject, err := agentjob.Within(ctx, j.scope)
+	seen, err := agentjob.Within(ctx, j.scope)
 	if err != nil {
 		return j.unready(ctx, "work out what the identity can see", err)
 	}
-	if len(subject.ServiceIDs) == 0 {
+	if len(seen.visible) == 0 {
 		return skip(reasonNotVisible)
 	}
 
@@ -229,11 +229,7 @@ func (j *job) prepare(ctx context.Context) *ending {
 		return j.unreadyByDriver(ctx)
 	}
 	j.prepared = prepared
-	j.task = agentclient.Task{
-		// Scrubbed and cut to what the agent takes; it frames the text as data.
-		Kind: "investigate", Subject: subject, Alert: agentclient.TaskAlert{
-			Kind: agentText(j.inv.AlertKind), Title: agentText(j.inv.AlertTitle), Text: agentText(j.inv.AlertText), OpenedAt: j.inv.AlertOpenedAt,
-		}}
+	j.task = agentclient.Task{Kind: "investigate", Subject: seen.subject, Alert: taskAlert(j.inv, seen.visible)}
 	return nil
 }
 

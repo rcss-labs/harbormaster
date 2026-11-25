@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -389,20 +390,25 @@ func validateInvestigationResult(state string, r *InvestigationResult) error {
 	if err := checkInvestigationText("summary", r.Summary, maxInvestigationSummary, 0); err != nil {
 		return err
 	}
-	if len(r.Evidence) > maxInvestigationEvidence {
-		return fmt.Errorf("finish investigation: %d evidence items, at most %d", len(r.Evidence), maxInvestigationEvidence)
+	return checkEvidenceItems("finish investigation", r.Evidence, r.EvidenceDropped, "view", "logs")
+}
+
+// checkEvidenceItems is the one rule for the evidence rows of a finished run, shared by investigations and reviews:
+// at most 12 items, each with an allowed action, a tool, a full service and text within its caps. what prefixes the
+// error.
+func checkEvidenceItems(what string, items []InvestigationEvidence, dropped int, actions ...string) error {
+	if len(items) > maxInvestigationEvidence {
+		return fmt.Errorf("%s: %d evidence items, at most %d", what, len(items), maxInvestigationEvidence)
 	}
-	if r.EvidenceDropped < 0 {
-		return errors.New("finish investigation: negative dropped count")
+	if dropped < 0 {
+		return fmt.Errorf("%s: negative dropped count", what)
 	}
-	for i, e := range r.Evidence {
-		switch e.Action {
-		case "view", "logs":
-		default:
-			return fmt.Errorf("finish investigation: evidence %d has unknown action %q", i+1, e.Action)
+	for i, e := range items {
+		if !slices.Contains(actions, e.Action) {
+			return fmt.Errorf("%s: evidence %d has unknown action %q", what, i+1, e.Action)
 		}
 		if e.Tool == "" || e.AccountID == "" || e.Region == "" || e.ClusterName == "" || e.ServiceName == "" {
-			return fmt.Errorf("finish investigation: evidence %d has no tool or service", i+1)
+			return fmt.Errorf("%s: evidence %d has no tool or service", what, i+1)
 		}
 		for field, text := range map[string]string{"tool": e.Tool, "account": e.AccountID, "region": e.Region, "cluster": e.ClusterName, "service": e.ServiceName} {
 			if err := checkInvestigationText(fmt.Sprintf("evidence %d %s", i+1, field), text, 255, 0); err != nil {
@@ -459,18 +465,46 @@ func (s *Store) FinishInvestigation(ctx context.Context, c Claim, state, reason 
 	if _, err := tx.Exec(ctx, `delete from agent_investigation_evidence where investigation_id = $1`, c.InvestigationID); err != nil {
 		return fmt.Errorf("finish investigation: clear evidence: %w", err)
 	}
-	for i, e := range result.Evidence {
-		if _, err := tx.Exec(ctx, `insert into agent_investigation_evidence
-			(investigation_id, ordinal, tool, action, account_id, region, cluster_name, service_name, note, excerpt)
-			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-			c.InvestigationID, i+1, e.Tool, e.Action, e.AccountID, e.Region, e.ClusterName, e.ServiceName, e.Note, e.Excerpt); err != nil {
-			return fmt.Errorf("finish investigation: store evidence: %w", err)
-		}
+	if err := insertEvidence(ctx, tx, `agent_investigation_evidence`, `investigation_id`, c.InvestigationID, result.Evidence); err != nil {
+		return fmt.Errorf("finish investigation: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("finish investigation: %w", err)
 	}
 	return nil
+}
+
+// insertEvidence stores the items of one run in order, numbered from 1. table and ownerColumn are constants of the
+// callers, never input.
+func insertEvidence(ctx context.Context, tx pgx.Tx, table, ownerColumn string, ownerID int64, items []InvestigationEvidence) error {
+	for i, e := range items {
+		if _, err := tx.Exec(ctx, `insert into `+table+`
+			(`+ownerColumn+`, ordinal, tool, action, account_id, region, cluster_name, service_name, note, excerpt)
+			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+			ownerID, i+1, e.Tool, e.Action, e.AccountID, e.Region, e.ClusterName, e.ServiceName, e.Note, e.Excerpt); err != nil {
+			return fmt.Errorf("store evidence: %w", err)
+		}
+	}
+	return nil
+}
+
+// listEvidence returns the stored items of one run in order; table and ownerColumn are constants of the callers.
+func (s *Store) listEvidence(ctx context.Context, table, ownerColumn string, ownerID int64) ([]InvestigationEvidence, error) {
+	rows, err := s.Pool.Query(ctx, `select ordinal, tool, action, account_id, region, cluster_name, service_name, note, excerpt
+		from `+table+` where `+ownerColumn+` = $1 order by ordinal`, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []InvestigationEvidence{}
+	for rows.Next() {
+		var e InvestigationEvidence
+		if err := rows.Scan(&e.Ordinal, &e.Tool, &e.Action, &e.AccountID, &e.Region, &e.ClusterName, &e.ServiceName, &e.Note, &e.Excerpt); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }
 
 // ReleaseInvestigation hands a claimed attempt back to the queue, to be claimed again from retryAt (zero: at once).
@@ -523,21 +557,11 @@ func (s *Store) GetInvestigation(ctx context.Context, id int64) (Investigation, 
 
 // ListInvestigationEvidence returns the stored evidence of an investigation in order.
 func (s *Store) ListInvestigationEvidence(ctx context.Context, id int64) ([]InvestigationEvidence, error) {
-	rows, err := s.Pool.Query(ctx, `select ordinal, tool, action, account_id, region, cluster_name, service_name, note, excerpt
-		from agent_investigation_evidence where investigation_id = $1 order by ordinal`, id)
+	out, err := s.listEvidence(ctx, `agent_investigation_evidence`, `investigation_id`, id)
 	if err != nil {
 		return nil, fmt.Errorf("list investigation evidence: %w", err)
 	}
-	defer rows.Close()
-	out := []InvestigationEvidence{}
-	for rows.Next() {
-		var e InvestigationEvidence
-		if err := rows.Scan(&e.Ordinal, &e.Tool, &e.Action, &e.AccountID, &e.Region, &e.ClusterName, &e.ServiceName, &e.Note, &e.Excerpt); err != nil {
-			return nil, fmt.Errorf("list investigation evidence: %w", err)
-		}
-		out = append(out, e)
-	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // ListServiceInvestigations returns the investigations of one service, newest first.

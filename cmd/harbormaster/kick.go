@@ -37,6 +37,7 @@ func (k *kickPublisher) publish(job string) {
 func (k *kickPublisher) Kick()         { k.publish("scan") }
 func (k *kickPublisher) KickOffHours() { k.publish("offhours") }
 func (k *kickPublisher) KickNotify()   { k.publish("notify") }
+func (k *kickPublisher) KickReview()   { k.publish("review") }
 
 // newKickBus is the bus kicks travel on: the shared store while it is up, memory otherwise. Without a store it is memory
 // only, which is what a single task (role all) needs, since the web side and the coordinator share the process.

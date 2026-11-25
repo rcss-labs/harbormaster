@@ -44,36 +44,37 @@ type histogram struct {
 
 // Registry holds all Harbormaster process metrics.
 type Registry struct {
-	mu                sync.Mutex
-	awsCalls          map[string]uint64
-	loopDuration      map[string]*histogram
-	loopRuns          map[string]uint64
-	loopInterval      map[string]time.Duration
-	snapshotRows      map[string]uint64
-	registryRequests  map[string]uint64
-	notifyCounts      map[string]uint64
-	limitDecisions    map[string]uint64
-	leader            bool
-	leaseSlices       int
-	leaseWeight       int
-	leaseEvents       map[string]uint64
-	leaseRenewFails   map[string]uint64
-	fencedRejected    uint64
-	coordinatorOn     bool
-	pollMembers       map[string]int
-	idle              bool
-	buildVersion      string
-	buildInfoSet      bool
-	roleName          string
-	roleVersion       string
-	roleInfoSet       bool
-	kvUp              bool
-	kvUpSet           bool
-	kvErrors          map[string]uint64
-	kvDuration        map[string]*histogram
-	focusM            focusMetrics
-	snapCache         map[string]uint64 // by joinKey(model, result)
-	snapTokenFailures uint64
+	mu                      sync.Mutex
+	awsCalls                map[string]uint64
+	loopDuration            map[string]*histogram
+	loopRuns                map[string]uint64
+	loopInterval            map[string]time.Duration
+	snapshotRows            map[string]uint64
+	registryRequests        map[string]uint64
+	notifyCounts            map[string]uint64
+	limitDecisions          map[string]uint64
+	leader                  bool
+	leaseSlices             int
+	leaseWeight             int
+	leaseEvents             map[string]uint64
+	leaseRenewFails         map[string]uint64
+	fencedRejected          uint64
+	coordinatorOn           bool
+	pollMembers             map[string]int
+	idle                    bool
+	buildVersion            string
+	buildInfoSet            bool
+	roleName                string
+	roleVersion             string
+	roleInfoSet             bool
+	kvUp                    bool
+	kvUpSet                 bool
+	kvErrors                map[string]uint64
+	kvDuration              map[string]*histogram
+	focusM                  focusMetrics
+	snapCache               map[string]uint64 // by joinKey(model, result)
+	snapTokenFailures       uint64
+	investigationStepErrors uint64
 }
 
 // Default is the process-wide registry.

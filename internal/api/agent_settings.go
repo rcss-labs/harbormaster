@@ -28,10 +28,18 @@ const (
 	testRunTokens      = 2000 // the "Test model" call reserves a run of this many tokens at the model's higher price
 )
 
-// investigatorRoleName is the role id of background investigations; settingsRoles are the roles the form sets.
-const investigatorRoleName = "investigator"
+// investigatorRoleName and reviewerRoleName are the role ids of background investigations and scheduled reviews;
+// settingsRoles are the roles the form sets. The two background roles are newer than chat: a save that leaves their
+// key out keeps the stored model, and an explicit null clears it.
+const (
+	investigatorRoleName = "investigator"
+	reviewerRoleName     = "reviewer"
+)
 
-var settingsRoles = []string{chatRoleName, investigatorRoleName}
+var (
+	settingsRoles = []string{chatRoleName, investigatorRoleName, reviewerRoleName}
+	keptRoles     = []string{investigatorRoleName, reviewerRoleName}
+)
 
 // testCallLimit bounds the "Test model" call; the client's own limit is shorter.
 var testCallLimit = agentrun.Limit{Normal: 2 * time.Minute, Draining: 2 * time.Second}
@@ -115,11 +123,12 @@ type AgentChatModelDTO struct {
 	AllowanceBelowQuestion bool   `json:"allowance_below_question"`
 }
 
-// AgentRoleModelsDTO carries the model of each role that has one. The investigator entry has the shape and the stale-model
-// rule of the chat entry; MaxQuestionUSD there is what one background investigation reserves.
+// AgentRoleModelsDTO carries the model of each role that has one. The investigator and reviewer entries have the shape
+// and the stale-model rule of the chat entry; MaxQuestionUSD there is what one background run reserves.
 type AgentRoleModelsDTO struct {
 	Chat         *AgentChatModelDTO `json:"chat,omitempty"`
 	Investigator *AgentChatModelDTO `json:"investigator,omitempty"`
+	Reviewer     *AgentChatModelDTO `json:"reviewer,omitempty"`
 }
 
 // AgentInvestigatorLimitsDTO is what the operator's configuration allows background investigations; read only.
@@ -151,6 +160,8 @@ type AgentSettingsDTO struct {
 	// Identity is what background investigations may read; it has its own save (PUT /api/agent/identity).
 	Identity     AgentIdentityDTO           `json:"identity"`
 	Investigator AgentInvestigatorLimitsDTO `json:"investigator"`
+	// Reviews is what the operator's configuration and the agent allow scheduled reviews; read only.
+	Reviews AgentReviewsDTO `json:"reviews"`
 }
 
 func (s *Server) agentSettingsDTO(r *http.Request) (AgentSettingsDTO, error) {
@@ -196,12 +207,28 @@ func (s *Server) agentSettingsDTO(r *http.Request) (AgentSettingsDTO, error) {
 	}
 	out.RoleModels.Chat = roleDTO(chatRoleName)
 	out.RoleModels.Investigator = roleDTO(investigatorRoleName)
+	out.RoleModels.Reviewer = roleDTO(reviewerRoleName)
 	if out.Identity, err = s.agentIdentityDTO(r.Context()); err != nil {
 		return AgentSettingsDTO{}, err
 	}
 	out.Investigator = AgentInvestigatorLimitsDTO{
 		WindowMinutes: int(s.Cfg.AgentInvestigationWindow / time.Minute), PerHour: s.Cfg.AgentInvestigationsPerHour,
 		Concurrent: s.Cfg.AgentInvestigationsConcurrent, MaxWaitMinutes: int(s.Cfg.AgentInvestigationMaxWait / time.Minute),
+	}
+	out.Reviews = AgentReviewsDTO{
+		Enabled: s.Cfg.AgentReviewsPerDay > 0, PerDay: s.Cfg.AgentReviewsPerDay, MaxLateMinutes: int(s.Cfg.AgentReviewMaxLate / time.Minute),
+		MaxReviews: store.MaxAgentReviews, Types: reviewTypeOptions, SupportedTypes: []string{},
+	}
+	if catErr == nil {
+		for _, option := range reviewTypeOptions {
+			if cat.SupportsReview(option.ID) {
+				out.Reviews.SupportedTypes = append(out.Reviews.SupportedTypes, option.ID)
+			}
+		}
+	}
+	if reviewer := out.RoleModels.Reviewer; reviewer != nil && reviewer.MaxQuestionUSD != "" {
+		perRun := reviewer.MaxQuestionUSD
+		out.Reviews.WorstCaseRunUSD = &perRun
 	}
 	return out, nil
 }
@@ -239,16 +266,16 @@ func modelLabel(ref store.AgentModelRef, ok bool) string {
 	return ref.Provider + "/" + ref.Model
 }
 
-// putAgentSettings saves the allowance, redaction and the chat and investigator models. The form must carry the version it was loaded
+// putAgentSettings saves the allowance, redaction and the chat, investigator and reviewer models. The form must carry the version it was loaded
 // at; the save reads the stored settings under the row lock and refuses (409) if they moved on. Everything that
 // depends on the stored values (what changed, the audit's old values) uses that locked read.
 //
 // A role model or provider that is new must be in the agent's catalogue; one already stored may stay as it is
 // although the operator no longer offers it, so an admin can still change the allowance, and a removed provider can
 // be dropped. While the agent cannot be asked, additions and changes are refused (503); removals still go through.
-// A chat model the form leaves out is cleared (a save states the whole form). The investigator is newer: a body
-// without the key keeps the stored model, so an older browser bundle cannot wipe it during a deploy, and an explicit
-// null clears it.
+// A chat model the form leaves out is cleared (a save states the whole form). The investigator and reviewer are
+// newer: a body without the key keeps the stored model, so an older browser bundle cannot wipe it during a deploy,
+// and an explicit null clears it.
 func (s *Server) putAgentSettings(w http.ResponseWriter, r *http.Request) {
 	var body agentSettingsUpdate
 	if err := decodeStrictJSON(w, r, &body); err != nil {
@@ -270,7 +297,7 @@ func (s *Server) putAgentSettings(w http.ResponseWriter, r *http.Request) {
 			s.fail(w, invalid("Unknown role: "+role+"."))
 			return
 		}
-		if choice == nil && role == investigatorRoleName {
+		if choice == nil && slices.Contains(keptRoles, role) {
 			continue // explicit null: clear it (absent from wantRoles, present in the body)
 		}
 		if choice == nil || choice.Provider == "" || choice.Model == "" {
@@ -321,7 +348,7 @@ func (s *Server) putAgentSettings(w http.ResponseWriter, r *http.Request) {
 			next.RoleModels[role] = ref
 		}
 		for _, role := range settingsRoles {
-			if _, stated := body.RoleModels[role]; !stated && role == investigatorRoleName {
+			if _, stated := body.RoleModels[role]; !stated && slices.Contains(keptRoles, role) {
 				continue
 			}
 			delete(next.RoleModels, role)
@@ -340,9 +367,13 @@ func (s *Server) putAgentSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	oldChat, hadChat := old.RoleModels[chatRoleName]
 	oldInvestigator, hadInvestigator := old.RoleModels[investigatorRoleName]
-	wantChat, wantInvestigator := wantRoles[chatRoleName], wantRoles[investigatorRoleName]
+	oldReviewer, hadReviewer := old.RoleModels[reviewerRoleName]
+	wantChat, wantInvestigator, wantReviewer := wantRoles[chatRoleName], wantRoles[investigatorRoleName], wantRoles[reviewerRoleName]
 	if _, stated := body.RoleModels[investigatorRoleName]; !stated {
 		wantInvestigator = oldInvestigator // kept
+	}
+	if _, stated := body.RoleModels[reviewerRoleName]; !stated {
+		wantReviewer = oldReviewer // kept
 	}
 	s.auditAdmin(r, "agent_settings_update", "agent:settings", "Changed the AI agent settings.", map[string]any{
 		"old_budget_usd":           formatUSD(old.MonthlyBudgetMicroUSD, false),
@@ -351,6 +382,8 @@ func (s *Server) putAgentSettings(w http.ResponseWriter, r *http.Request) {
 		"new_chat_model":           modelLabel(wantChat, wantChat != store.AgentModelRef{}),
 		"old_investigator_model":   modelLabel(oldInvestigator, hadInvestigator),
 		"new_investigator_model":   modelLabel(wantInvestigator, wantInvestigator != store.AgentModelRef{}),
+		"old_reviewer_model":       modelLabel(oldReviewer, hadReviewer),
+		"new_reviewer_model":       modelLabel(wantReviewer, wantReviewer != store.AgentModelRef{}),
 		"old_unredacted_providers": nonNil(old.UnredactedProviders),
 		"new_unredacted_providers": nonNil(wantUnredacted),
 	})

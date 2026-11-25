@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/rcss-labs/harbormaster/internal/config"
+	"github.com/rcss-labs/harbormaster/internal/investigate"
+	"github.com/rcss-labs/harbormaster/internal/notify"
 	"github.com/rcss-labs/harbormaster/internal/store"
 	"github.com/rcss-labs/harbormaster/internal/store/storetest"
 )
@@ -32,5 +34,37 @@ func TestNewInvestigator_OnlyWithTheAgentOn(t *testing.T) {
 	}
 	if _, err := st.GetAgentIdentity(ctx); err != nil {
 		t.Errorf("identity with the agent on: %v", err)
+	}
+}
+
+// The dispatcher is connected to the investigator only when the investigator exists; HM_AGENT_INVESTIGATIONS_PER_HOUR=0
+// turns the recording and the diagnosis messages off.
+func TestWireInvestigations(t *testing.T) {
+	cfg := config.Config{AgentInvestigationsPerHour: 20, AgentInvestigationWindow: 7 * time.Minute}
+	runner := &investigate.Runner{}
+
+	off := &notify.Dispatcher{}
+	wireInvestigations(off, cfg, nil)
+	if off.Investigate || off.InvestigationWindow != 0 || off.OnInvestigationRequested != nil {
+		t.Errorf("with no investigator: Investigate %v, window %v, hook set %v; want nothing set",
+			off.Investigate, off.InvestigationWindow, off.OnInvestigationRequested != nil)
+	}
+
+	on := &notify.Dispatcher{}
+	wireInvestigations(on, cfg, runner)
+	if !on.Investigate || on.InvestigationWindow != 7*time.Minute || on.OnInvestigationRequested == nil {
+		t.Errorf("with an investigator: Investigate %v, window %v, hook set %v; want all set",
+			on.Investigate, on.InvestigationWindow, on.OnInvestigationRequested != nil)
+	}
+	if on.OnInvestigationRequested != nil {
+		on.OnInvestigationRequested() // the non-blocking kick: must return at once, twice in a row
+		on.OnInvestigationRequested()
+	}
+
+	cfg.AgentInvestigationsPerHour = 0
+	zero := &notify.Dispatcher{}
+	wireInvestigations(zero, cfg, runner)
+	if zero.Investigate {
+		t.Error("PER_HOUR=0 left the investigation step on")
 	}
 }
