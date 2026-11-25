@@ -316,6 +316,7 @@ func TestNamedIn_WholeRunsOnly(t *testing.T) {
 		{"not in the set", both, secretshape.NamesOf(service), ids, []string{service}},
 		{"empty set", both, secretshape.Names{}, ids, nil},
 		{"glued", "/services/" + cdkService + "/logs " + cdkWorker + "-1 x" + cdkWorker, keep, ids, nil},
+		{"one whole, one glued", cdkService + " and " + cdkWorker + "-1 " + cdkCluster + "/a", keep, ids, []string{service}},
 		{"equals", cdkService + "=", keep, ids, nil},
 		{"part", cdkService[:len(cdkService)-1] + " " + cdkService[1:], keep, ids, nil},
 		{"case", strings.Replace(cdkService, "Xy7", "xy7", 1), keep, ids, nil},
