@@ -24,7 +24,6 @@ const (
 	chatTitleMaxChars   = 60
 	chatPagePathMax     = 512
 	chatRoleName        = "chat"
-	minRunStaleAfter    = 10 * time.Minute
 	budgetExhaustedMsg  = "This month's AI allowance is used up. Ask an admin to raise it."
 	budgetTooSmallMsg   = "The AI allowance is smaller than what one question can cost. Ask an admin to raise it."
 	agentUnavailableMsg = "The agent is unavailable. Try again shortly."

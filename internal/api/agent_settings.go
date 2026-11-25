@@ -167,7 +167,7 @@ func (s *Server) agentSettingsDTO(r *http.Request) (AgentSettingsDTO, error) {
 		if offered {
 			reservation := known.MaxRunCostMicroUSD(cat.MaxRunTokens)
 			chat.MaxQuestionUSD = formatUSD(reservation, true)
-			chat.AllowanceBelowQuestion = settings.MonthlyBudgetMicroUSD-settled-reserved < reservation
+			chat.AllowanceBelowQuestion = !agentrun.BudgetCovers(settings.MonthlyBudgetMicroUSD, settled, reserved, reservation)
 		}
 		out.RoleModels.Chat = chat
 	}
@@ -362,16 +362,16 @@ func (s *Server) testAgentModel(w http.ResponseWriter, r *http.Request) {
 	var once sync.Once
 	finish := func(ok bool) {
 		once.Do(func() {
-			res := turnResult{outcome: "error"}
+			res := turnResult{Ending: agentrun.Ending{Outcome: "error"}}
 			if ok {
-				res = turnResult{success: true, outcome: "done"}
+				res = turnResult{Ending: agentrun.Ending{Success: true, Outcome: "done"}}
 			}
 			s.finishRun(r, s.runOps(r, run, actor, meter, res))
 		})
 	}
 	defer finish(false) // a panic still settles the run and deletes its token
 
-	token, err := agentrun.Within(r.Context(), setUpLimit, s.draining, func(ctx context.Context) (string, error) {
+	token, err := agentrun.Within(r.Context(), agentrun.SetUpLimit, s.draining, func(ctx context.Context) (string, error) {
 		return s.Auth.MintRunToken(ctx, actor, run.ID, true)
 	})
 	if err != nil {
