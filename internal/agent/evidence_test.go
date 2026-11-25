@@ -492,3 +492,21 @@ func TestInvestigator_NestedMarkersNeedTheirWholeMarkerAfterTheRest(t *testing.T
 		}
 	}
 }
+
+// The frame tells the model what [not citable] covers. A nested result begins with that line and cites the rows
+// below it, so the wording must be about the line, not about everything after it.
+func TestInvestigator_FrameWordsNotCitableByLineForNestedResults(t *testing.T) {
+	p := fake.New(calls(provider.ToolCall{ID: "c1", Name: "get_cost_analytics", Arguments: map[string]any{}}), calls(submitCall(plainSummary)))
+	investigate(t, newLoop(p, replies(map[string]string{"get_cost_analytics": nestedCostBody})), p, investigatorInput())
+	shown := strings.TrimPrefix(resultText(t, requestAt(t, p, 1), "c1"), "<tool_result_aaa111 tool=\"get_cost_analytics\">\n")
+	if !strings.HasPrefix(shown, notCitable) || !strings.Contains(shown, "\n[e1] ") {
+		t.Fatalf("a nested result must begin with the [not citable] line and cite below it:\n%s", shown)
+	}
+	system := requestAt(t, p, 0).System
+	if !strings.Contains(system, "A line that begins with [not citable], and a result without markers, you may read and reason from but cannot cite.") {
+		t.Errorf("the frame does not scope [not citable] to its line")
+	}
+	if strings.Contains(system, "What follows [not citable]") {
+		t.Errorf("the frame still says everything after [not citable] is uncitable")
+	}
+}
