@@ -199,7 +199,7 @@ func TestManual_RefusedWhileOneIsWaitingOrRunning(t *testing.T) {
 	s, ctx := storetest.Open(t), context.Background()
 	route := reviewRoute(t, s, "r")
 	a, b := oldReview(t, s, "a", route.ID), oldReview(t, s, "b", route.ID)
-	run, err := s.RequestManualReviewRun(ctx, a.ID, "Run by hand", revNow)
+	run, err := s.RequestManualReviewRun(ctx, a.ID, "Run by hand", false, revNow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,21 +210,21 @@ func TestManual_RefusedWhileOneIsWaitingOrRunning(t *testing.T) {
 	if _, err := uuid.Parse(strings.TrimPrefix(run.PeriodKey, "x:")); err != nil {
 		t.Fatalf("period key %q: %v", run.PeriodKey, err)
 	}
-	if _, err := s.RequestManualReviewRun(ctx, a.ID, "again", revNow); !errors.Is(err, store.ErrConflict) {
+	if _, err := s.RequestManualReviewRun(ctx, a.ID, "again", false, revNow); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("while waiting = %v, want ErrConflict", err)
 	}
-	if _, err := s.RequestManualReviewRun(ctx, b.ID, "other review", revNow); err != nil {
+	if _, err := s.RequestManualReviewRun(ctx, b.ID, "other review", false, revNow); err != nil {
 		t.Fatalf("another review: %v", err)
 	}
 	claimReview(t, s, revNow)
-	if _, err := s.RequestManualReviewRun(ctx, a.ID, "again", revNow); !errors.Is(err, store.ErrConflict) {
+	if _, err := s.RequestManualReviewRun(ctx, a.ID, "again", false, revNow); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("while running = %v, want ErrConflict", err)
 	}
 	invExec(t, s, `update agent_review_runs set state = 'done', summary = 's', finished_at = $1, claimed_until = null where review_id = $2`, revNow, a.ID)
-	if _, err := s.RequestManualReviewRun(ctx, a.ID, "after", revNow); err != nil {
+	if _, err := s.RequestManualReviewRun(ctx, a.ID, "after", false, revNow); err != nil {
 		t.Fatalf("after it finished: %v", err)
 	}
-	if _, err := s.RequestManualReviewRun(ctx, 424242, "x", revNow); !errors.Is(err, store.ErrNotFound) {
+	if _, err := s.RequestManualReviewRun(ctx, 424242, "x", false, revNow); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("unknown review = %v, want ErrNotFound", err)
 	}
 }
@@ -236,7 +236,7 @@ func TestManual_DisabledReviewCanBeRun(t *testing.T) {
 	if _, err := s.UpdateReview(ctx, rv, 0); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.RequestManualReviewRun(ctx, rv.ID, "by hand", revNow); err != nil {
+	if _, err := s.RequestManualReviewRun(ctx, rv.ID, "by hand", false, revNow); err != nil {
 		t.Fatalf("manual run of a disabled review: %v", err)
 	}
 }

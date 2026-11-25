@@ -88,7 +88,7 @@ func TestManual_ConcurrentRequestsCreateOne(t *testing.T) {
 	rv := oldReview(t, s, "a", reviewRoute(t, s, "r").ID)
 	var ok, conflict atomic.Int64
 	runTogether(t, s, 10, func(int) {
-		_, err := s.RequestManualReviewRun(ctx, rv.ID, "x", revNow)
+		_, err := s.RequestManualReviewRun(ctx, rv.ID, "x", false, revNow)
 		switch {
 		case err == nil:
 			ok.Add(1)

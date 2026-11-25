@@ -22,6 +22,8 @@ const (
 	maxReviewRoutes       = 5
 	maxReviewScopeEntries = 10
 	maxReviewNameRunes    = 80
+	// maxReviewInstructionRunes is the length check of the column; the API applies the stricter rules.
+	maxReviewInstructionRunes = 2000
 )
 
 // ErrReviewLimit is returned for the 21st review.
@@ -31,9 +33,15 @@ var ErrReviewLimit = errors.New("review limit reached")
 // rules do not allow. Nothing is written when it is returned.
 var ErrReviewInvalid = errors.New("review refused")
 
-// Review types and cadences. The type list is replaced by phase 4.
+// ReviewTypeCustom is the type whose instructions the admin writes.
+const ReviewTypeCustom = "custom"
+
+// ErrReviewTypeFixed is returned by UpdateReview for a change of type to or from custom.
+var ErrReviewTypeFixed = errors.New("review type cannot change to or from custom")
+
+// Review types and cadences. The type list is closed: a new type is a code and migration change.
 var (
-	reviewTypes    = []string{"cost", "security", "reliability", "capacity"}
+	reviewTypes    = []string{"cost", "security", "reliability", "capacity", ReviewTypeCustom}
 	reviewCadences = []string{"daily", "weekly", "monthly"}
 )
 
@@ -50,6 +58,8 @@ type Review struct {
 	Timezone          string
 	Scope             []NotificationSelector
 	RouteIDs          []int64
+	// Instructions is the admin's text of a custom review, and empty for every other type.
+	Instructions string
 	// ScheduleChangedAt is when the schedule last changed or the review was last turned on; occurrences at or before
 	// it are never recorded.
 	ScheduleChangedAt time.Time
@@ -59,12 +69,12 @@ type Review struct {
 }
 
 const reviewColumns = `id, name, type, enabled, cadence, at_minute, coalesce(weekday, 0), coalesce(month_day, 0), timezone,
-	schedule_changed_at, version, updated_at, updated_by`
+	schedule_changed_at, version, updated_at, updated_by, instructions`
 
 func scanReview(row pgx.Row) (Review, error) {
 	var r Review
 	err := row.Scan(&r.ID, &r.Name, &r.Type, &r.Enabled, &r.Cadence, &r.AtMinute, &r.Weekday, &r.MonthDay, &r.Timezone,
-		&r.ScheduleChangedAt, &r.Version, &r.UpdatedAt, &r.UpdatedBy)
+		&r.ScheduleChangedAt, &r.Version, &r.UpdatedAt, &r.UpdatedBy, &r.Instructions)
 	return r, err
 }
 
@@ -127,6 +137,22 @@ func validateReview(r Review) error {
 		default:
 			return invalidReview("scope entry %d has kind %q; reviews take account, cluster and harbormaster", i+1, sel.Kind)
 		}
+	}
+	return nil
+}
+
+// checkReview is validateReview plus the rules of the instructions: a custom review has text and every other type
+// has none, and the text is valid and at most 2000 characters. The store does no cleaning, scrubbing or hidden
+// character check; those belong to the API, and these are the backstop.
+func checkReview(r Review) error {
+	if err := validateReview(r); err != nil {
+		return err
+	}
+	if (r.Type == ReviewTypeCustom) != (r.Instructions != "") {
+		return invalidReview("instructions are for custom reviews only, and a custom review needs them")
+	}
+	if err := checkInvestigationText("instructions", r.Instructions, maxReviewInstructionRunes, 0); err != nil {
+		return invalidReview("%v", err)
 	}
 	return nil
 }
@@ -286,7 +312,7 @@ func (s *Store) GetReview(ctx context.Context, id int64) (Review, error) {
 // returns ErrConflict, the 21st review ErrReviewLimit, a definition the rules refuse ErrReviewInvalid; nothing is
 // written then. A zero by records no user.
 func (s *Store) CreateReview(ctx context.Context, r Review, by int64) (Review, error) {
-	if err := validateReview(r); err != nil {
+	if err := checkReview(r); err != nil {
 		return Review{}, err
 	}
 	tx, err := s.Pool.Begin(ctx)
@@ -309,9 +335,9 @@ func (s *Store) CreateReview(ctx context.Context, r Review, by int64) (Review, e
 		return Review{}, err
 	}
 	created, err := scanReview(tx.QueryRow(ctx, `insert into agent_reviews
-		(name, type, enabled, cadence, at_minute, weekday, month_day, timezone, updated_by)
-		values ($1, $2, $3, $4, $5, nullif($6, 0), nullif($7, 0), $8, nullif($9, 0::bigint))
-		returning `+reviewColumns, r.Name, r.Type, r.Enabled, r.Cadence, r.AtMinute, r.Weekday, r.MonthDay, r.Timezone, by))
+		(name, type, enabled, cadence, at_minute, weekday, month_day, timezone, updated_by, instructions)
+		values ($1, $2, $3, $4, $5, nullif($6, 0), nullif($7, 0), $8, nullif($9, 0::bigint), $10)
+		returning `+reviewColumns, r.Name, r.Type, r.Enabled, r.Cadence, r.AtMinute, r.Weekday, r.MonthDay, r.Timezone, by, r.Instructions))
 	if isUniqueViolation(err) {
 		return Review{}, ErrConflict
 	}
@@ -332,11 +358,12 @@ func (s *Store) CreateReview(ctx context.Context, r Review, by int64) (Review, e
 }
 
 // UpdateReview replaces a review's fields, scope and routes when r.Version is still current and bumps the version.
-// A stale version or a name used by another review returns ErrConflict, a missing review ErrNotFound. The schedule
+// A stale version or a name used by another review returns ErrConflict, a missing review ErrNotFound, a change of type
+// to or from custom ErrReviewTypeFixed. A change of the instructions raises the version and keeps the schedule. The schedule
 // time moves (schedule_changed_at = now) only when the cadence, minute, weekday, month day or zone changes or the
 // review goes from off to on.
 func (s *Store) UpdateReview(ctx context.Context, r Review, by int64) (Review, error) {
-	if err := validateReview(r); err != nil {
+	if err := checkReview(r); err != nil {
 		return Review{}, err
 	}
 	tx, err := s.Pool.Begin(ctx)
@@ -347,14 +374,24 @@ func (s *Store) UpdateReview(ctx context.Context, r Review, by int64) (Review, e
 	if err := checkReviewRoutes(ctx, tx, sortedUnique(r.RouteIDs)); err != nil {
 		return Review{}, err
 	}
-	updated, err := scanReview(tx.QueryRow(ctx, `update agent_reviews set name = $3, type = $4, enabled = $5, cadence = $6,
+	// Lock the row first: the type is read and the update written under the same lock.
+	var storedType string
+	if err := tx.QueryRow(ctx, `select type from agent_reviews where id = $1 for update`, r.ID).Scan(&storedType); errors.Is(err, pgx.ErrNoRows) {
+		return Review{}, ErrNotFound
+	} else if err != nil {
+		return Review{}, fmt.Errorf("update review: %w", err)
+	}
+	if (storedType == ReviewTypeCustom) != (r.Type == ReviewTypeCustom) {
+		return Review{}, ErrReviewTypeFixed
+	}
+	updated, err := scanReview(tx.QueryRow(ctx, `update agent_reviews set name = $3, type = $4, enabled = $5, cadence = $6, instructions = $12,
 		at_minute = $7, weekday = nullif($8, 0), month_day = nullif($9, 0), timezone = $10,
 		schedule_changed_at = case when cadence <> $6 or at_minute <> $7 or weekday is distinct from nullif($8, 0)
 		    or month_day is distinct from nullif($9, 0) or timezone <> $10 or (not enabled and $5)
 		  then now() else schedule_changed_at end,
 		version = version + 1, updated_at = now(), updated_by = nullif($11, 0::bigint)
 		where id = $1 and version = $2
-		returning `+reviewColumns, r.ID, r.Version, r.Name, r.Type, r.Enabled, r.Cadence, r.AtMinute, r.Weekday, r.MonthDay, r.Timezone, by))
+		returning `+reviewColumns, r.ID, r.Version, r.Name, r.Type, r.Enabled, r.Cadence, r.AtMinute, r.Weekday, r.MonthDay, r.Timezone, by, r.Instructions))
 	if isUniqueViolation(err) {
 		return Review{}, ErrConflict
 	}
