@@ -79,8 +79,8 @@ func (s *Store) ReserveAgentRun(ctx context.Context, run AgentRun, staleAfter ti
 }
 
 // ReserveAgentRunLeaving is ReserveAgentRun for a run that must leave room for others: it is inserted only when
-// the reservation plus leaveMicroUSD fits the budget. The row holds the reservation alone; the leave is a test of
-// the room afterwards, never stored and never held. A negative leave is an error.
+// the reservation plus leaveMicroUSD fits the budget. The row holds the reservation alone; the leave is never
+// stored or held. A negative leave is an error.
 func (s *Store) ReserveAgentRunLeaving(ctx context.Context, run AgentRun, leaveMicroUSD int64, staleAfter time.Duration, now time.Time) error {
 	if run.ReservedMicroUSD < 0 {
 		return fmt.Errorf("reserve agent run: negative reservation %d", run.ReservedMicroUSD)
@@ -119,7 +119,7 @@ func (s *Store) reserveAgentRun(ctx context.Context, run AgentRun, leaveMicroUSD
 	if err := tx.QueryRow(ctx, spendSQL, start, end).Scan(&settled, &reserved); err != nil {
 		return fmt.Errorf("reserve agent run: spend: %w", err)
 	}
-	// A sum past the int64 cap is larger than any budget, so it never fits; it must not wrap into one that does.
+	// A sum past the int64 cap exceeds every budget: refuse it rather than let it wrap.
 	fits := run.ReservedMicroUSD <= math.MaxInt64-leaveMicroUSD &&
 		FitsBudget(budget, settled, reserved, run.ReservedMicroUSD+leaveMicroUSD)
 	if !fits {

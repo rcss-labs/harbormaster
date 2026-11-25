@@ -3,7 +3,9 @@ package agentrun
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -94,10 +96,13 @@ func (r *Runner) Reserve(ctx context.Context, run store.AgentRun, runTimeout tim
 	return r.ReserveLeaving(ctx, run, runTimeout, 0)
 }
 
-// ReserveLeaving is Reserve for a run that must leave room for others: the store inserts it only when its
-// reservation plus leaveMicroUSD fits, and the leave is not held. A refusal says "too small" when the allowance
-// could never hold the reservation and the leave together.
+// ReserveLeaving is Reserve for a run that must leave room for others: it is inserted only when its reservation
+// plus leaveMicroUSD fits, and the leave is not held. A refusal says "too small" when the allowance itself is below
+// the two together, spent or not. A negative leave is an error.
 func (r *Runner) ReserveLeaving(ctx context.Context, run store.AgentRun, runTimeout time.Duration, leaveMicroUSD int64) error {
+	if leaveMicroUSD < 0 {
+		return fmt.Errorf("reserve agent run: negative leave %d", leaveMicroUSD)
+	}
 	ctx = context.WithoutCancel(ctx)
 	_, err := Within(ctx, SetUpLimit, r.Draining, func(ctx context.Context) (struct{}, error) {
 		return struct{}{}, r.Store.ReserveAgentRunLeaving(ctx, run, leaveMicroUSD, StaleAfter(runTimeout), r.now())
@@ -124,6 +129,10 @@ func (r *Runner) budgetRefusal(ctx context.Context, run store.AgentRun, leaveMic
 	if run.UserID != nil {
 		userID = *run.UserID
 	}
+	var leaveAttr []any
+	if leaveMicroUSD > 0 {
+		leaveAttr = []any{"leave_micro_usd", leaveMicroUSD}
+	}
 	read, err := Within(ctx, SetUpLimit, r.Draining, func(ctx context.Context) (spend, error) {
 		settings, err := r.Store.GetAgentSettings(ctx)
 		if err != nil {
@@ -134,12 +143,12 @@ func (r *Runner) budgetRefusal(ctx context.Context, run store.AgentRun, leaveMic
 	})
 	if err != nil {
 		r.LogRunError(run.ID, "agent run: could not read the budget for a refusal", err)
-		r.log().Warn("agent budget exhausted", "role", run.Role, "user_id", userID, "reserved_micro_usd", run.ReservedMicroUSD, "leave_micro_usd", leaveMicroUSD)
+		r.log().Warn("agent budget exhausted", slices.Concat([]any{"role", run.Role, "user_id", userID, "reserved_micro_usd", run.ReservedMicroUSD}, leaveAttr)...)
 		return ErrAllowanceUsedUp
 	}
 	budget := read.settings.MonthlyBudgetMicroUSD
-	r.log().Warn("agent budget exhausted", "role", run.Role, "user_id", userID, "reserved_micro_usd", run.ReservedMicroUSD, "leave_micro_usd", leaveMicroUSD,
-		"left_micro_usd", BudgetLeft(budget, read.settled, read.reserved))
+	r.log().Warn("agent budget exhausted", slices.Concat([]any{"role", run.Role, "user_id", userID, "reserved_micro_usd", run.ReservedMicroUSD}, leaveAttr,
+		[]any{"left_micro_usd", BudgetLeft(budget, read.settled, read.reserved)})...)
 	// An allowance of 0 holds nothing, a free run included, so it is "too small" whatever the run reserves.
 	if budget <= 0 || budget < run.ReservedMicroUSD || budget-run.ReservedMicroUSD < leaveMicroUSD {
 		return ErrAllowanceTooSmall

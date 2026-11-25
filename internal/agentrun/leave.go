@@ -17,28 +17,15 @@ func LeaveFor(cat agentclient.Catalogue, settings store.AgentSettings, roles ...
 		if !ok || ref.Model == "" {
 			continue
 		}
-		cost, found := modelCost(cat, ref)
+		model, found := cat.Find(ref.Provider, ref.Model)
 		if !found {
 			continue
 		}
+		cost := max(model.MaxRunCostMicroUSD(cat.MaxRunTokens), 0) // a wrapped price counts as nothing
 		if cost > math.MaxInt64-leave {
 			return math.MaxInt64
 		}
 		leave += cost
 	}
 	return leave
-}
-
-func modelCost(cat agentclient.Catalogue, ref store.AgentModelRef) (int64, bool) {
-	for _, p := range cat.Providers {
-		if p.Provider != ref.Provider {
-			continue
-		}
-		for _, m := range p.Models {
-			if m.ID == ref.Model {
-				return max(m.MaxRunCostMicroUSD(cat.MaxRunTokens), 0), true
-			}
-		}
-	}
-	return 0, false
 }

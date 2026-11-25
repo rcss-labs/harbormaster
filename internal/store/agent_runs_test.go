@@ -575,28 +575,59 @@ func TestReserveLeaving_RefusesWhenTheRoomAfterwardsIsTooSmall(t *testing.T) {
 	}
 }
 
+// spendSetup puts settled and running spend, and a stale reservation, on a fresh store with budget 1000.
+func spendSetup(t *testing.T, settled, running, stale int64) *store.Store {
+	t.Helper()
+	st := storetest.Open(t)
+	ctx := t.Context()
+	setBudget(t, st, 1000)
+	if settled > 0 {
+		r := agentRun(settled)
+		mustNoErr(t, st.ReserveAgentRun(ctx, r, time.Hour, agentNow))
+		mustNoErr(t, st.RecordAgentRunUsage(ctx, r.ID, 1, 1, settled, agentNow))
+		mustNoErr(t, st.SettleAgentRun(ctx, r.ID, "done", nil, nil, agentNow))
+	}
+	if running > 0 {
+		mustNoErr(t, st.ReserveAgentRun(ctx, agentRun(running), time.Hour, agentNow))
+	}
+	if stale > 0 {
+		if _, err := st.Pool.Exec(ctx, `insert into agent_runs (id, role, provider, model, state, reserved_micro_usd, started_at)
+			values ($1, 'chat', 'fake', 'm', 'running', $2, $3)`, uuid.New(), stale, agentNow.Add(-5*time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return st
+}
+
 func TestReserveLeaving_ZeroLeaveIsReserve(t *testing.T) {
 	type step struct {
 		request int64
 		want    bool
 	}
 	for name, tc := range map[string]struct {
-		budget int64
-		steps  []step
+		budget                int64
+		settled, running, old int64 // old: a stale reservation the first call sweeps
+		steps                 []step
 	}{
-		"exactly the budget":       {1000, []step{{1000, true}}},
-		"one over the budget":      {1000, []step{{1001, false}}},
-		"second fits the room":     {1000, []step{{600, true}, {400, true}}},
-		"second is one too many":   {1000, []step{{600, true}, {401, false}}},
-		"budget 0 refuses free":    {0, []step{{0, false}}},
-		"free run with a budget":   {1, []step{{0, true}}},
-		"refusal keeps the room":   {1000, []step{{1001, false}, {1000, true}}},
-		"refused then a small fit": {500, []step{{501, false}, {500, true}, {1, false}}},
+		"exactly the budget":      {1000, 0, 0, 0, []step{{1000, true}}},
+		"one over the budget":     {1000, 0, 0, 0, []step{{1001, false}}},
+		"second fits the room":    {1000, 0, 0, 0, []step{{600, true}, {400, true}}},
+		"second is one too many":  {1000, 0, 0, 0, []step{{600, true}, {401, false}}},
+		"budget 0 refuses free":   {0, 0, 0, 0, []step{{0, false}}},
+		"free run with a budget":  {1, 0, 0, 0, []step{{0, true}}},
+		"refusal keeps the room":  {1000, 0, 0, 0, []step{{1001, false}, {1000, true}}},
+		"settled spend":           {1000, 300, 0, 0, []step{{700, true}, {1, false}}},
+		"settled and one over":    {1000, 300, 0, 0, []step{{701, false}}},
+		"a stale run is swept":    {1000, 0, 0, 900, []step{{1000, true}}},
+		"settled, running, stale": {1000, 200, 300, 400, []step{{500, true}, {1, false}}},
+		"settled, running, over":  {1000, 200, 300, 400, []step{{501, false}}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			for _, viaLeaving := range []bool{false, true} {
-				st := storetest.Open(t)
-				setBudget(t, st, tc.budget)
+				st := spendSetup(t, tc.settled, tc.running, tc.old)
+				if tc.budget != 1000 {
+					setBudget(t, st, tc.budget)
+				}
 				for i, s := range tc.steps {
 					var err error
 					if viaLeaving {
@@ -608,6 +639,82 @@ func TestReserveLeaving_ZeroLeaveIsReserve(t *testing.T) {
 						t.Errorf("leaving=%v step %d (%d) = %v, want accepted=%v", viaLeaving, i, s.request, err, s.want)
 					}
 				}
+			}
+		})
+	}
+}
+
+// The room a leave is tested against is what settled and running spend leave, not the whole budget.
+func TestReserveLeaving_TheLeaveIsTestedAgainstTheRoomLeft(t *testing.T) {
+	for name, tc := range map[string]struct{ settled, running int64 }{
+		"settled spend": {250, 0},
+		"running":       {0, 250},
+		"both":          {100, 150},
+	} {
+		t.Run(name, func(t *testing.T) {
+			const request, room = 400, 750
+			leave := int64(room - request)
+			over := spendSetup(t, tc.settled, tc.running, 0)
+			if err := over.ReserveAgentRunLeaving(t.Context(), agentRun(request), leave+1, time.Hour, agentNow); !errors.Is(err, store.ErrBudgetExhausted) {
+				t.Fatalf("one over the room = %v, want ErrBudgetExhausted", err)
+			}
+			st := spendSetup(t, tc.settled, tc.running, 0)
+			if err := st.ReserveAgentRunLeaving(t.Context(), agentRun(request), leave, time.Hour, agentNow); err != nil {
+				t.Fatalf("exactly the room: %v", err)
+			}
+			if err := st.ReserveAgentRun(t.Context(), agentRun(leave), time.Hour, agentNow); err != nil {
+				t.Fatalf("a plain run of the leave's size: %v", err)
+			}
+		})
+	}
+}
+
+// Leaving and plain reservations at once never hold more than the budget.
+func TestReserveLeaving_ConcurrentLeavingAndPlainNeverExceedBudget(t *testing.T) {
+	st := storetest.Open(t)
+	setBudget(t, st, 1000)
+	var wg sync.WaitGroup
+	for i := range 12 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if i%2 == 0 {
+				_ = st.ReserveAgentRunLeaving(t.Context(), agentRun(100), 300, time.Hour, agentNow)
+			} else {
+				_ = st.ReserveAgentRun(t.Context(), agentRun(100), time.Hour, agentNow)
+			}
+		}()
+	}
+	wg.Wait()
+	_, reserved, err := st.AgentSpend(t.Context(), novStart)
+	if err != nil || reserved > 1000 {
+		t.Fatalf("reserved = %d, %v; want at most 1000", reserved, err)
+	}
+	// A leaving run was only accepted while 300 more would fit, so the plain runs that followed it stopped at 1000,
+	// and any leaving run that got in left room for 300 at that moment: the total is a multiple of 100.
+	if reserved%100 != 0 || reserved == 0 {
+		t.Fatalf("reserved = %d", reserved)
+	}
+}
+
+// A refusal caused by the leave alone, or by overflow, still commits the stale sweep.
+func TestReserveLeaving_RefusalStillCommitsTheStaleSweep(t *testing.T) {
+	for name, leave := range map[string]int64{"the leave alone": 950, "overflow": math.MaxInt64} {
+		t.Run(name, func(t *testing.T) {
+			st := storetest.Open(t)
+			ctx := t.Context()
+			setBudget(t, st, 1000)
+			old := uuid.New()
+			if _, err := st.Pool.Exec(ctx, `insert into agent_runs (id, role, provider, model, state, started_at) values ($1, 'chat', 'fake', 'm', 'running', $2)`,
+				old, agentNow.Add(-5*time.Hour)); err != nil {
+				t.Fatal(err)
+			}
+			if err := st.ReserveAgentRunLeaving(ctx, agentRun(100), leave, time.Hour, agentNow); !errors.Is(err, store.ErrBudgetExhausted) {
+				t.Fatalf("refusal expected, got %v", err)
+			}
+			var state string
+			if err := st.Pool.QueryRow(ctx, `select state from agent_runs where id = $1`, old).Scan(&state); err != nil || state != "failed" {
+				t.Fatalf("stale run after the refusal = %q, %v; want failed", state, err)
 			}
 		})
 	}

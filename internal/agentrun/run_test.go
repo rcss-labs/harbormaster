@@ -22,18 +22,20 @@ import (
 // fakeRunnerStore refuses every reservation for the budget; the reads that choose the words may be made to hang.
 type fakeRunnerStore struct {
 	fakeRunStore
-	settings   store.AgentSettings
-	hangReads  bool
-	release    chan struct{}
-	reserveErr error
-	readErr    error
-	readPanics bool
-	gotLeave   int64
-	reserved   chan struct{} // when set, ReserveAgentRunLeaving waits for its context
+	settings      store.AgentSettings
+	hangReads     bool
+	release       chan struct{}
+	reserveErr    error
+	readErr       error
+	readPanics    bool
+	gotLeave      int64
+	calledReserve bool
+	reserved      chan struct{} // when set, ReserveAgentRunLeaving waits for its context
 }
 
 func (f *fakeRunnerStore) ReserveAgentRunLeaving(ctx context.Context, _ store.AgentRun, leave int64, _ time.Duration, _ time.Time) error {
 	f.gotLeave = leave
+	f.calledReserve = true
 	if f.reserved != nil {
 		<-ctx.Done()
 		return ctx.Err()
@@ -289,7 +291,12 @@ func TestRunner_ReserveLeavingSaysWhichRefusalItIs(t *testing.T) {
 			}
 		})
 	}
-	// Reserve leaves nothing, and a negative leave is not passed on as room.
+	// A negative leave is refused before the store is asked.
+	neg := &fakeRunnerStore{}
+	if err := newRunner(neg).ReserveLeaving(t.Context(), run, time.Minute, -1); err == nil || errors.Is(err, ErrAllowanceUsedUp) || neg.calledReserve {
+		t.Errorf("negative leave = %v (store asked: %v), want an error before the store", err, neg.calledReserve)
+	}
+	// Reserve leaves nothing.
 	st := &fakeRunnerStore{}
 	if err := newRunner(st).Reserve(t.Context(), run, time.Minute); err != nil || st.gotLeave != 0 {
 		t.Errorf("Reserve = %v with leave %d, want nil and 0", err, st.gotLeave)
@@ -327,6 +334,17 @@ func TestLeaveFor_SumsConfiguredRolesOnly(t *testing.T) {
 		}
 	}
 
+	// A wrapped product or a negative price counts as nothing, never as a negative leave.
+	wrapped := agentclient.Catalogue{MaxRunTokens: math.MaxInt64, Providers: []agentclient.ProviderModels{{Provider: "anthropic",
+		Models: []agentclient.Model{{ID: modelA, InputMicroUSDPerMTok: 3}, {ID: modelB, InputMicroUSDPerMTok: -5_000_000, OutputMicroUSDPerMTok: -5_000_000}}}}}
+	if got := LeaveFor(wrapped, settings, "chat", "investigator"); got < 0 {
+		t.Errorf("negative price: LeaveFor = %d, want it never below 0", got)
+	}
+	wrapped.MaxRunTokens = 200000
+	if got := LeaveFor(wrapped, settings, "investigator"); got != 0 {
+		t.Errorf("negative price alone: LeaveFor = %d, want 0", got)
+	}
+
 	// Many costly roles add up to the cap and stop there.
 	big := agentclient.Catalogue{MaxRunTokens: 1_000_000, Providers: []agentclient.ProviderModels{{Provider: "anthropic",
 		Models: []agentclient.Model{{ID: modelA, InputMicroUSDPerMTok: 9_000_000_000_000}}}}}
@@ -336,5 +354,18 @@ func TestLeaveFor_SumsConfiguredRolesOnly(t *testing.T) {
 	}
 	if got := LeaveFor(big, settings, roles...); got != math.MaxInt64 {
 		t.Errorf("saturating sum = %d, want %d", got, int64(math.MaxInt64))
+	}
+}
+
+func TestRunner_ReserveLogsTheLeaveOnlyWhenThereIsOne(t *testing.T) {
+	for leave, want := range map[int64]bool{0: false, 70: true} {
+		var logs bytes.Buffer
+		st := &fakeRunnerStore{reserveErr: store.ErrBudgetExhausted, settings: store.AgentSettings{MonthlyBudgetMicroUSD: 100}}
+		r := newRunner(st)
+		r.Log = slog.New(slog.NewTextHandler(&logs, nil))
+		_ = r.ReserveLeaving(t.Context(), store.AgentRun{ID: uuid.New(), Role: "reviewer", ReservedMicroUSD: 40}, time.Minute, leave)
+		if got := strings.Contains(logs.String(), "leave_micro_usd"); got != want {
+			t.Errorf("leave %d: log mentions the leave = %v, want %v: %s", leave, got, want, logs.String())
+		}
 	}
 }
