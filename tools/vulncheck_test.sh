@@ -35,6 +35,9 @@ expect "an accepted called advisory passes" 0 "accepted: GO-2026-6909" "$HERE/vu
 expect "a new called advisory fails and is named" 1 "GO-2099-0001" "$HERE/vulncheck.sh" --json "$DATA/new-called.json"
 expect "an imported but never called advisory passes" 0 "" "$HERE/vulncheck.sh" --json "$DATA/imported-not-called.json"
 expect "an empty accepted list passes when nothing is called" 0 "no unaccepted" env VULNCHECK_ACCEPTED_FILE=/dev/null "$HERE/vulncheck.sh" --json "$DATA/imported-not-called.json"
+expect "an empty accepted list still fails a called advisory" 1 "GO-2099-0001" env VULNCHECK_ACCEPTED_FILE=/dev/null "$HERE/vulncheck.sh" --json "$DATA/new-called.json"
+expect "a comments-only accepted list still fails a called advisory" 1 "GO-2099-0001" env VULNCHECK_ACCEPTED_FILE="$DATA/comments-only.txt" "$HERE/vulncheck.sh" --json "$DATA/new-called.json"
+expect "a missing accepted list is an error" 2 "accepted list" env VULNCHECK_ACCEPTED_FILE="$DATA/does-not-exist.txt" "$HERE/vulncheck.sh" --json "$DATA/imported-not-called.json"
 expect "a missing JSON file is a usage error" 2 "" "$HERE/vulncheck.sh" --json "$DATA/does-not-exist.json"
 expect "an unknown flag is a usage error" 2 "usage:" "$HERE/vulncheck.sh" --bogus
 

@@ -10,7 +10,7 @@ set -euo pipefail
 
 GOVULNCHECK_VERSION=v1.10.0
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ACCEPTED_FILE="${VULNCHECK_ACCEPTED_FILE:-$HERE/vulncheck-accepted.txt}" # the override is for tools/vulncheck_test.sh
+ACCEPTED_FILE="$HERE/vulncheck-accepted.txt"
 
 usage() { echo "usage: tools/vulncheck.sh [--json FILE] [--help]" >&2; exit 2; }
 
@@ -22,6 +22,11 @@ while [ $# -gt 0 ]; do
     *) usage ;;
   esac
 done
+
+# VULNCHECK_ACCEPTED_FILE swaps the list for tools/vulncheck_test.sh and is honoured only with --json, so the environment
+# can never change what a real scan accepts.
+if [ -n "$json_file" ] && [ -n "${VULNCHECK_ACCEPTED_FILE:-}" ]; then ACCEPTED_FILE=$VULNCHECK_ACCEPTED_FILE; fi
+[ -r "$ACCEPTED_FILE" ] || { echo "vulncheck: cannot read the accepted list $ACCEPTED_FILE" >&2; exit 2; }
 
 command -v jq >/dev/null 2>&1 || { echo "vulncheck: jq is required" >&2; exit 2; }
 
