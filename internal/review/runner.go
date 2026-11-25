@@ -40,6 +40,8 @@ type Runner struct {
 	Scopes notify.TagMatcher
 	// PerDay is how many runs may start in a day. 0 turns reviews off: nothing is recorded, claimed or run.
 	PerDay int
+	// CustomReviews lets custom reviews be recorded and run. While it is off none is, and one that waits ends as disabled.
+	CustomReviews bool
 	// MaxLate is how long after its occurrence a run may first be started.
 	MaxLate time.Duration
 	// InvestigationMaxWait is how long a waiting investigation holds reviews up; 0 means for as long as it waits.
@@ -80,6 +82,11 @@ func (r *Runner) interval() time.Duration {
 		return defaultInterval
 	}
 	return r.Interval
+}
+
+// off reports whether the operator has switched reviews of the type off.
+func (r *Runner) off(reviewType string) bool {
+	return reviewType == store.ReviewTypeCustom && !r.CustomReviews
 }
 
 // runLease is how long a claim is held for a run of the given timeout.
@@ -150,8 +157,8 @@ func (r *Runner) tick(ctx context.Context, slot, freed chan struct{}, jobs *sync
 	})
 }
 
-// recordDue records the latest occurrence of each enabled review, once however often it is seen. Occurrences before
-// the latest one leave nothing, so a long outage does not end in a burst of runs.
+// recordDue records the latest occurrence of each enabled review whose type is not switched off, once however often it
+// is seen. Occurrences before the latest one leave nothing, so a long outage does not end in a burst of runs.
 func (r *Runner) recordDue(ctx context.Context) {
 	reviews, err := agentjob.Within(ctx, r.Store.ListReviews)
 	if err != nil {
@@ -163,7 +170,7 @@ func (r *Runner) recordDue(ctx context.Context) {
 	now := r.now()
 	var due []store.DueReview
 	for _, rv := range reviews {
-		if !rv.Enabled {
+		if !rv.Enabled || r.off(rv.Type) {
 			continue
 		}
 		schedule := reviewsched.Schedule{Cadence: rv.Cadence, AtMinute: rv.AtMinute, Weekday: rv.Weekday, MonthDay: rv.MonthDay, Timezone: rv.Timezone}

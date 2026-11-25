@@ -468,7 +468,11 @@ func (f *fixture) crashed(id int64, cost int64) uuid.UUID {
 	if err := f.st.ReserveAgentRun(ctx, run, 10*time.Minute, f.clock.now()); err != nil {
 		f.t.Fatal(err)
 	}
-	if err := f.st.StartReviewRun(ctx, claim, store.ReviewStart{RunID: run.ID, Provider: testProvider, Model: testModel, Range: "24h"}, f.clock.now()); err != nil {
+	rv, err := f.st.GetReview(ctx, *v.ReviewID)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if err := f.st.StartReviewRun(ctx, claim, store.ReviewStart{RunID: run.ID, Provider: testProvider, Model: testModel, Range: "24h", Instructions: rv.Instructions}, f.clock.now()); err != nil {
 		f.t.Fatal(err)
 	}
 	if _, _, err := f.runner.Driver.Auth.MintAgentRunToken(ctx, run.ID, true); err != nil {
@@ -729,8 +733,8 @@ func TestJob_NoModelConfiguredSkips(t *testing.T) {
 func TestJob_UnknownTypeIsNeverRun(t *testing.T) {
 	f := newFixture(t)
 	id := f.due("Daily spend")
-	f.exec(`update agent_review_runs set review_type = 'custom' where id = $1`, id)
-	f.agent.reviewTypes = append(f.agent.reviewTypes, "custom")
+	f.exec(`update agent_review_runs set review_type = 'tailored' where id = $1`, id)
+	f.agent.reviewTypes = append(f.agent.reviewTypes, "tailored")
 	f.want(f.runTo(id, "skipped"), "skipped", "not_configured")
 	f.unspent()
 }
