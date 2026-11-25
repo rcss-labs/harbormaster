@@ -25,14 +25,20 @@ type AcceptOptions struct {
 	AllowLogs bool
 	// Replacement is the sentence that stands in for a summary that failed a check.
 	Replacement string
+	// Echo, when not empty, is the text the run was given to follow: a summary or a note that repeats it is replaced.
+	Echo string
 }
 
 // Accept turns what the agent service answered into what is stored. Nothing it says about permissions is taken as
 // given: an item is kept only when its action, derived again from its tool, is the one it states, its service id
 // names a service, and the identity may take that action on that service now (canRead). Summary, notes and excerpts
-// pass the checks that need no logs once more. Items that fail, or that the options do not allow, are counted.
+// pass the checks that need no logs once more, and a summary or note that repeats Echo is replaced. Items that fail, or
+// that the options do not allow, are counted.
 func Accept(res agentresult.Result, canRead func(key model.ServiceKey, action authz.Action) bool, opts AcceptOptions) store.InvestigationResult {
 	summary, replaced := agentresult.RecheckSummaryAs(res.Summary, opts.Replacement)
+	if !replaced && repeats(summary, opts) {
+		summary, replaced = agentresult.RecheckSummaryAs("", opts.Replacement) // an empty summary is always replaced
+	}
 	out := store.InvestigationResult{Summary: summary, SummaryReplaced: res.SummaryReplaced || replaced}
 	dropped := min(max(res.EvidenceDropped, 0), maxDroppedCount)
 	for _, item := range res.Evidence {
@@ -74,11 +80,20 @@ func acceptItem(item agentresult.Evidence, canRead func(key model.ServiceKey, ac
 	if strings.TrimSpace(excerpt) == "" {
 		return none, false
 	}
+	note := agentresult.RecheckNote(item.Note)
+	if repeats(note, opts) {
+		note = agentresult.ReplacementNote
+	}
 	return store.InvestigationEvidence{
 		Tool: item.Tool, Action: derived,
 		AccountID: key.AccountID, Region: key.Region, ClusterName: key.Cluster, ServiceName: key.Service,
-		Note: agentresult.RecheckNote(item.Note), Excerpt: excerpt,
+		Note: note, Excerpt: excerpt,
 	}, true
+}
+
+// repeats reports whether text repeats what the run was given to follow.
+func repeats(text string, opts AcceptOptions) bool {
+	return opts.Echo != "" && agentresult.Echoes(text, opts.Echo)
 }
 
 // actionOf is the permission an evidence action asks for; an unknown action has none.

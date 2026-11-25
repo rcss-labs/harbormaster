@@ -628,8 +628,8 @@ func newReviewer(cfg config.Config, st *store.Store, agent *agentclient.Client, 
 	}
 	return &review.Runner{
 		Store: st, Driver: &agentjob.Driver{Store: st, Auth: auth.NewService(st, cfg), Agent: agent}, Scopes: st,
-		PerDay: cfg.AgentReviewsPerDay, MaxLate: cfg.AgentReviewMaxLate, InvestigationMaxWait: cfg.AgentInvestigationMaxWait,
-		KickNotify: kickNotify, Now: time.Now, Log: log,
+		PerDay: cfg.AgentReviewsPerDay, CustomReviews: cfg.AgentCustomReviews, MaxLate: cfg.AgentReviewMaxLate,
+		InvestigationMaxWait: cfg.AgentInvestigationMaxWait, KickNotify: kickNotify, Now: time.Now, Log: log,
 	}
 }
 
