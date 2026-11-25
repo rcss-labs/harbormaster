@@ -384,6 +384,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 	var investigator *investigate.Runner
 	if role.Coordinates() {
 		investigator = newInvestigator(ctx, cfg, st, agentClient, notifyDispatcher.Kick, log)
+		wireInvestigations(notifyDispatcher, cfg, investigator)
 	}
 	telemetry.Default.SetBuildInfo(version) // plan 06
 
@@ -599,6 +600,17 @@ func newInvestigator(ctx context.Context, cfg config.Config, st *store.Store, ag
 		Concurrent: cfg.AgentInvestigationsConcurrent, PerHour: cfg.AgentInvestigationsPerHour, MaxWait: cfg.AgentInvestigationMaxWait,
 		KickNotify: kickNotify, Now: time.Now, Log: log,
 	}
+}
+
+// wireInvestigations connects the alert dispatcher to the investigator. With no investigator nothing is set, so the
+// dispatcher records no request and sends no diagnosis.
+func wireInvestigations(d *notify.Dispatcher, cfg config.Config, investigator *investigate.Runner) {
+	if d == nil || investigator == nil {
+		return
+	}
+	d.Investigate = cfg.AgentInvestigationsPerHour > 0
+	d.InvestigationWindow = cfg.AgentInvestigationWindow
+	d.OnInvestigationRequested = investigator.Kick
 }
 
 // demoSeedOptions picks the extras fake AWS mode seeds: the demo notification routes, and the AI agent demo only when
