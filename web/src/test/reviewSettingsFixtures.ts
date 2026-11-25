@@ -40,6 +40,8 @@ export const REVIEW_SETTINGS: AgentSettingsDTO = {
     ],
     supported_types: ['cost', 'security', 'reliability'],
     worst_case_run_usd: '0.84',
+    custom_enabled: false,
+    max_instruction_chars: 2000,
   },
 }
 
@@ -55,6 +57,7 @@ export const REVIEW_WEEKLY_COST: ReviewDTO = {
   next_run_at: '2026-11-30T07:00:00Z',
   last_run: { id: 41, state: 'done', reason: '', finished_at: '2026-11-23T07:02:00Z' },
   worst_case_month_usd: '3.36',
+  instructions: '',
 }
 
 export const REVIEW_MONTHLY_SECURITY: ReviewDTO = {
@@ -69,9 +72,29 @@ export const REVIEW_MONTHLY_SECURITY: ReviewDTO = {
   next_run_at: null,
   last_run: null,
   worst_case_month_usd: null,
+  instructions: '',
 }
 
-export const PREVIEW_SMALL: ReviewPreviewDTO = { services_total: 12, services_unseen: 0, next_run_at: '2026-11-30T07:00:00Z', worst_case_month_usd: '3.36' }
+/** The same settings with the operator's switch on: the type list ends with Custom and the agent supports it. */
+export const REVIEW_SETTINGS_CUSTOM: AgentSettingsDTO = {
+  ...REVIEW_SETTINGS,
+  reviews: {
+    ...REVIEW_SETTINGS.reviews,
+    custom_enabled: true,
+    types: [...REVIEW_SETTINGS.reviews.types, { id: 'custom', label: 'Custom' }],
+    supported_types: [...REVIEW_SETTINGS.reviews.supported_types, 'custom'],
+  },
+}
+
+export const REVIEW_CUSTOM: ReviewDTO = {
+  ...REVIEW_MONTHLY_SECURITY,
+  id: 3,
+  name: 'Team spend',
+  type: 'custom',
+  instructions: 'Look at spend by team.\nKeep it short.',
+}
+
+export const PREVIEW_SMALL: ReviewPreviewDTO = { services_total: 12, services_unseen: 0, next_run_at: '2026-11-30T07:00:00Z', worst_case_month_usd: '3.36', instructions_problem: '' }
 
 export const reviewRun = (id: number, fields: Partial<ReviewRunRow> = {}): ReviewRunRow => ({
   id,
@@ -94,6 +117,8 @@ export const reviewRun = (id: number, fields: Partial<ReviewRunRow> = {}): Revie
   model: 'model-a',
   attempts: 1,
   cost_usd: '0.31',
+  test: false,
+  instructions: '',
   ...fields,
 })
 

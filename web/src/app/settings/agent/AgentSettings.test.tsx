@@ -43,6 +43,8 @@ const SETTINGS: AgentSettingsDTO = {
     types: [{ id: 'cost', label: 'Cost' }],
     supported_types: ['cost'],
     worst_case_run_usd: null,
+    custom_enabled: false,
+    max_instruction_chars: 2000,
   },
 }
 

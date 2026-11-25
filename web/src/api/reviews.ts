@@ -23,6 +23,8 @@ export interface ReviewRunDTO {
   finished_at: string | null
   summary: string
   summary_replaced: boolean
+  /** A test run: not sent to any route. Only an admin can read one. */
+  test: boolean
 }
 
 export interface ReviewRunDetailDTO extends ReviewRunDTO {

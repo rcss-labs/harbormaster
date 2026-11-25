@@ -14,9 +14,12 @@ import {
   MAX_REVIEW_ROUTES,
   MAX_REVIEW_SCOPE_ENTRIES,
   REVIEW_SCOPE_GROUPS,
+  CUSTOM_TYPE,
   TYPE_LINES,
   bodyFromDraft,
   draftFromReview,
+  draftInstructionProblem,
+  instructionLength,
   isDirty,
   mergeDraft,
   newReviewDraft,
@@ -24,10 +27,20 @@ import {
   withCadence,
   type ReviewDraft,
 } from './reviewDraft'
+import { instructionProblemText } from './instructionProblemText'
 import { WEEKDAYS, formatInZone, timeZoneOptions } from './schedule'
 
 const PREVIEW_DEBOUNCE_MS = 400
 const SPLIT_ADVICE_ABOVE = 150
+
+const TYPE_FIXED_TEXT = 'The type of a saved review cannot change to or from Custom. Create a new review.'
+
+/** The problem code of a refused save when it is about the instructions, else null. */
+function instructionCodeOf(error: unknown): string | null {
+  if (!(error instanceof ApiError) || error.status !== 422) return null
+  const field = (error.body as { error?: { field?: unknown } } | undefined)?.error?.field
+  return error.code.startsWith('instructions_') || field === 'instructions' ? error.code : null
+}
 
 const messageOf = (error: unknown) => (error instanceof ApiError ? error.message : 'Something went wrong. Try again.')
 
@@ -56,13 +69,19 @@ export function ReviewEditor({ review, info, onCreated }: ReviewEditorProps) {
   const [draft, setDraft] = useState<ReviewDraft>(baseline)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [conflict, setConflict] = useState<string | null>(null)
+  // The code the server refused the instructions with; the next edit of the text or the type clears it.
+  const [refusedCode, setRefusedCode] = useState<string | null>(null)
 
   const patch = (change: Partial<ReviewDraft>) => {
     setSaveError(null)
+    if ('instructions' in change || 'type' in change) setRefusedCode(null)
     setDraft((current) => ({ ...current, ...change }))
   }
 
   const problem = validateDraft(draft, info, otherNames, saved ?? undefined)
+  const localCode = draftInstructionProblem(draft, info)
+  const isCustom = draft.type === CUSTOM_TYPE
+  const maxChars = info.max_instruction_chars || 2000
   const dirty = isDirty(draft, saved ?? undefined)
   const saving = create.isPending || update.isPending
 
@@ -75,7 +94,7 @@ export function ReviewEditor({ review, info, onCreated }: ReviewEditorProps) {
   }, [routesQuery.data, saved])
 
   // The preview never carries a version; it is asked for after a pause in typing, and only for a draft that could be saved.
-  const previewBody = useMemo(() => (problem === null ? bodyFromDraft(draft) : null), [draft, problem])
+  const previewBody = useMemo(() => (problem === null && localCode === '' ? bodyFromDraft(draft) : null), [draft, problem, localCode])
   const previewSignature = JSON.stringify(previewBody)
   const preview = useReviewPreview()
   const { mutate: requestPreview, reset: resetPreview } = preview
@@ -92,6 +111,14 @@ export function ReviewEditor({ review, info, onCreated }: ReviewEditorProps) {
   const previewFresh = preview.variables !== undefined && JSON.stringify(preview.variables) === previewSignature
   const previewData = previewFresh ? (preview.data ?? null) : null
   const previewError = previewFresh && preview.error ? messageOf(preview.error) : null
+  const shownCode = refusedCode ?? (localCode || (isCustom && previewData ? previewData.instructions_problem : '')) 
+
+  const refuse = (error: unknown) => {
+    const code = instructionCodeOf(error)
+    if (code !== null) setRefusedCode(code)
+    else if (error instanceof ApiError && error.code === 'type_fixed') setSaveError(TYPE_FIXED_TEXT)
+    else setSaveError(messageOf(error))
+  }
 
   const submit = () => {
     setSaveError(null)
@@ -123,7 +150,7 @@ export function ReviewEditor({ review, info, onCreated }: ReviewEditorProps) {
               setDraft(mergeDraft(before, mine, stored))
             })
           } else {
-            setSaveError(messageOf(error))
+            refuse(error)
           }
         },
       })
@@ -133,12 +160,15 @@ export function ReviewEditor({ review, info, onCreated }: ReviewEditorProps) {
           toast.show(`Saved "${next.name}".`, 'ok')
           onCreated()
         },
-        onError: (error) => setSaveError(messageOf(error)),
+        onError: refuse,
       })
     }
   }
 
   const supported = new Set(info.supported_types)
+  // A saved review keeps its side of the line: a custom one shows only Custom, a built-in one is not offered it.
+  const typeChoices = saved ? info.types.filter((type) => (type.id === CUSTOM_TYPE) === (saved.type === CUSTOM_TYPE)) : info.types
+  const typeLocked = saved?.type === CUSTOM_TYPE
   const weekdayNeeded = draft.cadence === 'weekly'
   const dayNeeded = draft.cadence === 'monthly'
   const zones = timeZoneOptions(draft.timezone)
@@ -163,7 +193,7 @@ export function ReviewEditor({ review, info, onCreated }: ReviewEditorProps) {
 
           <fieldset className={`${styles.field} ${styles.wide}`} style={{ border: 0, padding: 0, margin: 0 }}>
             <legend className={styles.fieldLabel}>Type</legend>
-            {info.types.map((type) => {
+            {typeChoices.map((type) => {
               const offered = supported.has(type.id)
               const line = TYPE_LINES[type.id]
               return (
@@ -174,7 +204,7 @@ export function ReviewEditor({ review, info, onCreated }: ReviewEditorProps) {
                       name="review-type"
                       value={type.id}
                       checked={draft.type === type.id}
-                      disabled={!offered}
+                      disabled={!offered || typeLocked}
                       aria-describedby={[line ? `review-type-${type.id}` : '', offered ? '' : `review-type-${type.id}-unavailable`].filter(Boolean).join(' ') || undefined}
                       onChange={() => patch({ type: type.id })}
                     />
@@ -193,8 +223,35 @@ export function ReviewEditor({ review, info, onCreated }: ReviewEditorProps) {
                 </div>
               )
             })}
+            {typeLocked && <p className={styles.help}>The type of a saved custom review cannot change.</p>}
             {!info.types.some((type) => type.id === draft.type) && <p className={styles.help}>{`This review has a type this version does not know: ${draft.type}.`}</p>}
           </fieldset>
+
+          {isCustom && (
+            <div className={`${styles.field} ${styles.wide}`}>
+              <label htmlFor="review-instructions" className={styles.fieldLabel}>
+                Instructions
+              </label>
+              <textarea
+                id="review-instructions"
+                className={styles.ctl}
+                rows={8}
+                value={draft.instructions}
+                aria-invalid={shownCode !== '' || undefined}
+                aria-describedby="review-instructions-count review-instructions-help review-instructions-problem"
+                onChange={(event) => patch({ instructions: event.target.value })}
+              />
+              <span id="review-instructions-count" className={styles.help}>{`${instructionLength(draft.instructions)} of ${maxChars} characters`}</span>
+              <span id="review-instructions-help" className={styles.help}>
+                Say what the review should look at and how to lay out the summary. The agent keeps its own rules: it only reads, it has no log tools, and it answers as a summary with evidence.
+              </span>
+              <span className={styles.help}>Instructions are sent to the model provider and admins can read them. Do not paste secrets.</span>
+              <span className={styles.help}>The summary goes to the review&apos;s routes and to people who can see everything the agent sees.</span>
+              <span id="review-instructions-problem" role="alert" className={styles.error}>
+                {shownCode !== '' && instructionProblemText(shownCode)}
+              </span>
+            </div>
+          )}
 
           <div className={`${styles.field} ${styles.wide}`}>
             <span className={styles.fieldLabel}>Scope</span>
@@ -297,7 +354,7 @@ export function ReviewEditor({ review, info, onCreated }: ReviewEditorProps) {
           </p>
         )}
         <div className={styles.actionsRow}>
-          <button type="button" className={`${styles.btn} ${styles.primary}`} disabled={!dirty || problem !== null || saving} onClick={submit}>
+          <button type="button" className={`${styles.btn} ${styles.primary}`} disabled={!dirty || problem !== null || localCode !== '' || saving} onClick={submit}>
             Save review
           </button>
           <button

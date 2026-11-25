@@ -15,6 +15,7 @@ const REASONS: Record<string, string> = {
   rate_limited: 'rate limit',
   missed: 'missed its time',
   disabled: 'reviews were off',
+  instructions: 'instructions no longer pass the checks',
   agent_unavailable: 'agent unavailable',
   limit_reached: 'limit reached',
   no_result: 'no answer',

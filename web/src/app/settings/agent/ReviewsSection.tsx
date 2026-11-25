@@ -18,7 +18,10 @@ import { runState } from './runStates'
 import { describeSchedule, formatInZone } from './schedule'
 
 type Editing = { kind: 'review'; id: number } | { kind: 'new'; token: number }
-type Confirming = { action: 'run' | 'delete'; review: ReviewDTO }
+type Confirming = { action: 'run' | 'test' | 'delete'; review: ReviewDTO }
+
+const BUSY_TEXT = 'This review is already waiting or running.'
+const CUSTOM_OFF_TEXT = 'Custom reviews are turned off by configuration.'
 
 const messageOf = (error: unknown) => (error instanceof ApiError ? error.message : 'Something went wrong. Try again.')
 
@@ -55,11 +58,11 @@ export function ReviewsSection({ settings }: { settings: AgentSettingsDTO }) {
     )
   }
 
-  const confirmRun = (review: ReviewDTO) => {
+  const confirmRun = (review: ReviewDTO, test: boolean) => {
     setConfirming(null)
-    runNow.mutate(review.id, {
-      onSuccess: () => toast.show('The review has started. Its result goes to its routes.', 'ok'),
-      onError: (error) => toast.show(error instanceof ApiError && error.status === 409 ? 'This review is already waiting or running.' : messageOf(error), 'bad'),
+    runNow.mutate({ id: review.id, test }, {
+      onSuccess: () => toast.show(test ? 'The test run has started. Its result appears under Past results.' : 'The review has started. Its result goes to its routes.', 'ok'),
+      onError: (error) => toast.show(error instanceof ApiError && error.status === 409 ? BUSY_TEXT : messageOf(error), 'bad'),
     })
   }
 
@@ -74,29 +77,41 @@ export function ReviewsSection({ settings }: { settings: AgentSettingsDTO }) {
     })
   }
 
+  // While the operator's switch is off a custom review can only be deleted.
+  const frozen = (review: ReviewDTO) => review.type === 'custom' && !info.custom_enabled
   const rowActions = (review: ReviewDTO) => (
     <>
-      <button type="button" className={styles.btn} aria-label={`Run now ${review.name}`} disabled={runNow.isPending} onClick={() => setConfirming({ action: 'run', review })}>
-        Run now
-      </button>
+      {frozen(review) ? (
+        <span className={styles.hint}>{CUSTOM_OFF_TEXT}</span>
+      ) : (
+        <>
+          <button type="button" className={styles.btn} aria-label={`Run now ${review.name}`} disabled={runNow.isPending} onClick={() => setConfirming({ action: 'run', review })}>
+            Run now
+          </button>
+          <button type="button" className={styles.btn} aria-label={`Test run ${review.name}`} disabled={runNow.isPending} onClick={() => setConfirming({ action: 'test', review })}>
+            Test run
+          </button>
       <button type="button" className={styles.btn} aria-label={`Edit ${review.name}`} onClick={() => setEditing({ kind: 'review', id: review.id })}>
-        Edit
-      </button>
+            Edit
+          </button>
+        </>
+      )}
       <button type="button" className={styles.btn} aria-label={`Delete ${review.name}`} onClick={() => setConfirming({ action: 'delete', review })}>
         Delete
       </button>
     </>
   )
-  const onOff = (review: ReviewDTO) => (
-    <input
-      type="checkbox"
-      role="switch"
-      aria-label={`${review.name} is on`}
-      checked={review.enabled}
-      disabled={switching === review.id}
-      onChange={(event) => switchReview(review, event.target.checked)}
-    />
-  )
+  const onOff = (review: ReviewDTO) =>
+    frozen(review) ? null : (
+      <input
+        type="checkbox"
+        role="switch"
+        aria-label={`${review.name} is on`}
+        checked={review.enabled}
+        disabled={switching === review.id}
+        onChange={(event) => switchReview(review, event.target.checked)}
+      />
+    )
   const nextRun = (review: ReviewDTO) => (review.next_run_at ? formatInZone(review.next_run_at, review.schedule.timezone) : 'Not scheduled')
   const lastResult = (review: ReviewDTO) => {
     const last = review.last_run
@@ -200,8 +215,13 @@ export function ReviewsSection({ settings }: { settings: AgentSettingsDTO }) {
       )}
 
       {confirming?.action === 'run' && (
-        <ConfirmDialog title="Run this review now?" confirmLabel="Run review" onConfirm={() => confirmRun(confirming.review)} onCancel={() => setConfirming(null)}>
+        <ConfirmDialog title="Run this review now?" confirmLabel="Run review" onConfirm={() => confirmRun(confirming.review, false)} onCancel={() => setConfirming(null)}>
           It uses the AI allowance and sends the result to its routes.
+        </ConfirmDialog>
+      )}
+      {confirming?.action === 'test' && (
+        <ConfirmDialog title="Test run this review?" confirmLabel="Start test run" onConfirm={() => confirmRun(confirming.review, true)} onCancel={() => setConfirming(null)}>
+          Run this review once without sending it? It uses the AI allowance. The result appears under Past results.
         </ConfirmDialog>
       )}
       {confirming?.action === 'delete' && (
