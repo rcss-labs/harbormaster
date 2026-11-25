@@ -13,6 +13,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/agent/provider/fake"
 	"github.com/rcss-labs/harbormaster/internal/agentresult"
 	"github.com/rcss-labs/harbormaster/internal/hmtools"
+	"github.com/rcss-labs/harbormaster/internal/model"
 )
 
 func TestInvestigator_ToolResultIsShownAsNumberedUnits(t *testing.T) {
@@ -339,5 +340,173 @@ func TestInvestigator_UncitableToolsAreShownUnchanged(t *testing.T) {
 	}
 	if len(res.Evidence) != 0 || res.EvidenceDropped != 1 {
 		t.Errorf("result = %+v", res)
+	}
+}
+
+var nestedCostBody = `{"tab":"cost","by_cluster":[{"key":"c1","service_id":"` + checkoutID + `"}],` +
+	`"rightsizing":{"state":"ok","services":[{"service_id":"` + paymentsID + `","monthly":1},{"monthly":2},{"service_id":"` + checkoutID + `","monthly":3}]},` +
+	`"spot":{"services":[{"service_id":"` + checkoutID + `","status":"candidate"}]},` +
+	`"arm64":{"already_arm64":4,"services":[]}}`
+
+func TestInvestigator_NestedAnswerIsShownOnceAsUnitsAndRest(t *testing.T) {
+	p := fake.New(calls(provider.ToolCall{ID: "c1", Name: "get_cost_analytics", Arguments: map[string]any{}}), calls(submitCall(plainSummary)))
+	investigate(t, newLoop(p, replies(map[string]string{"get_cost_analytics": nestedCostBody})), p, investigatorInput())
+	want := envelope("get_cost_analytics", `[not citable] {"tab":"cost","by_cluster":[{"key":"c1","service_id":"`+checkoutID+`"}],`+
+		`"rightsizing":{"state":"ok","services":[{"monthly":2}]},"spot":{"services":[]},"arm64":{"already_arm64":4,"services":[]}}`+"\n"+
+		`[e1] {"service_id":"`+paymentsID+`","monthly":1}`+"\n"+
+		`[e2] {"service_id":"`+checkoutID+`","monthly":3}`+"\n"+
+		`[e3] {"service_id":"`+checkoutID+`","status":"candidate"}`)
+	if got := resultText(t, requestAt(t, p, 1), "c1"); got != want {
+		t.Errorf("result:\n%s\nwant\n%s", got, want)
+	}
+	// Nothing is shown twice: every cited row appears once, and the rows no unit covers only in the rest.
+	shown := resultText(t, requestAt(t, p, 1), "c1")
+	for _, row := range []string{`"monthly":1}`, `"monthly":3}`, `"status":"candidate"}`} {
+		if strings.Count(shown, row) != 1 {
+			t.Errorf("%s is shown %d times, want once", row, strings.Count(shown, row))
+		}
+	}
+}
+
+func TestNumberUnits_NestedRestKeepsWhatNoUnitCovers(t *testing.T) {
+	// A unit that is dropped (no usable id) stays in the rest, and so does every member outside the arrays,
+	// including an array that was empty to begin with.
+	body := `{"least_available":{"rows":[{"service_id":"","availability":0.5},{"service_id":"` + paymentsID + `"}],"total":2},` +
+		`"getting_worse":{"available":false,"data":null},"kpis":{"availability":null}}`
+	shown, units := numberUnits("get_reliability_analytics", nil, body, 1)
+	want := `[not citable] {"least_available":{"rows":[{"service_id":"","availability":0.5}],"total":2},"getting_worse":{"available":false,"data":null},"kpis":{"availability":null}}` + "\n" +
+		`[e1] {"service_id":"` + paymentsID + `"}`
+	if shown != want || len(units) != 1 {
+		t.Errorf("shown:\n%s\nwant\n%s", shown, want)
+	}
+	// A null array is not an empty one: the rest shows it as it came.
+	shown, _ = numberUnits("get_capacity_analytics", nil, `{"at_scaling_max":null,"over_reserved":{"available":true,"data":{"rows":[{"service_id":"`+paymentsID+`"}]}}}`, 1)
+	if want := `[not citable] {"at_scaling_max":null,"over_reserved":{"available":true,"data":{"rows":[]}}}` + "\n" + `[e1] {"service_id":"` + paymentsID + `"}`; shown != want {
+		t.Errorf("shown %q, want %q", shown, want)
+	}
+	// With every row cited, the panel is still named.
+	shown, _ = numberUnits("get_capacity_analytics", nil, `{"at_scaling_max":[{"service_id":"`+paymentsID+`"}]}`, 1)
+	if want := `[not citable] {"at_scaling_max":[]}` + "\n" + `[e1] {"service_id":"` + paymentsID + `"}`; shown != want {
+		t.Errorf("shown %q, want %q", shown, want)
+	}
+}
+
+func TestInvestigator_NestedUnitsCarryTheRowsOwnService(t *testing.T) {
+	p := fake.New(calls(provider.ToolCall{ID: "c1", Name: "get_cost_analytics", Arguments: map[string]any{}}), calls(submitCall(plainSummary, cite("e3"), cite("e1"))))
+	res := requireResult(t, investigate(t, newLoop(p, replies(map[string]string{"get_cost_analytics": nestedCostBody})), p, investigatorInput()))
+	if len(res.Evidence) != 2 || res.EvidenceDropped != 0 {
+		t.Fatalf("evidence %+v, dropped %d; shown\n%s", res.Evidence, res.EvidenceDropped, resultText(t, requestAt(t, p, 1), "c1"))
+	}
+	for i, want := range []struct{ service, text string }{{checkoutID, `"status":"candidate"`}, {paymentsID, `"monthly":1`}} {
+		if e := res.Evidence[i]; e.ServiceID != want.service || e.Tool != "get_cost_analytics" || e.Action != "view" || !strings.Contains(e.Excerpt, want.text) {
+			t.Errorf("item %d = %+v, want service %s and %s", i, e, want.service, want.text)
+		}
+	}
+}
+
+// bigCostBody is a cost answer shaped like the handler's: totals first, then three advisor arrays of n services,
+// each row a kilobyte or so. The rows of services[i] carry monthly i.
+func bigCostBody(n int) string {
+	row := func(i int, extra string) string {
+		id := model.ServiceKey{ClusterKey: prodCluster, Service: fmt.Sprintf("svc-%d", i)}.ID()
+		return fmt.Sprintf(`{"service_id":%q,"service":"svc-%d","cluster":"core","monthly":%d,%s"steps":[%s]}`,
+			id, i, i, extra, strings.TrimSuffix(strings.Repeat(`{"from_headroom_pct":10,"suggestion":null},`, 12), ","))
+	}
+	var rightsizing, spot, arm []string
+	for i := range n {
+		rightsizing = append(rightsizing, row(i, `"status":"ok",`))
+		spot = append(spot, row(i, `"status":"candidate",`))
+		arm = append(arm, row(i, `"images":[],`))
+	}
+	return `{"tab":"cost","kpis":{"monthly_total":4821.5,"spot_monthly":310.25,"priced_tasks":412},` +
+		`"by_account":[{"key":"123","label":"prod","monthly":4000}],"by_tag":[{"key":"3","label":"Prod","monthly":4821.5}],` +
+		`"rightsizing":{"state":"ok","services":[` + strings.Join(rightsizing, ",") + `]},` +
+		`"spot":{"min_tasks":2,"services":[` + strings.Join(spot, ",") + `]},` +
+		`"arm64":{"already_arm64":4,"services":[` + strings.Join(arm, ",") + `]}}`
+}
+
+// An analytics answer larger than the result cap still shows its totals: the rest comes before the units, so the
+// cut takes rows and never the totals, and the units that remain keep their markers and their own service.
+func TestInvestigator_NestedTotalsSurviveTheByteCap(t *testing.T) {
+	for _, n := range []int{75, 120} {
+		body := bigCostBody(n)
+		if len(body) <= 100_000 {
+			t.Fatalf("%d services: the body is %d bytes, not over the cap", n, len(body))
+		}
+		last := 0
+		p := fake.Func(func(req provider.Request) fake.Step {
+			if len(req.Messages) == 1 {
+				return calls(provider.ToolCall{ID: "c1", Name: "get_cost_analytics", Arguments: map[string]any{}})
+			}
+			shown := resultText(t, req, "c1")
+			for _, totals := range []string{`"kpis":{"monthly_total":4821.5`, `"by_tag":[{"key":"3"`, `"by_account":[{"key":"123"`} {
+				if !strings.Contains(shown, totals) {
+					t.Errorf("%d services: the shown result lacks %s", n, totals)
+				}
+			}
+			if !strings.HasPrefix(strings.TrimPrefix(shown, "<tool_result_aaa111 tool=\"get_cost_analytics\">\n"), notCitable) {
+				t.Errorf("%d services: the data does not begin with the rest: %.120s", n, shown)
+			}
+			last = lastShownRef(t, shown)
+			return calls(submitCall(plainSummary, cite("e1"), cite(fmt.Sprintf("e%d", last))))
+		})
+		l := newLoop(p, replies(map[string]string{"get_cost_analytics": body}), func(l *Limits) { l.MaxResultBytes = 100_000 })
+		res := requireResult(t, investigate(t, l, p, investigatorInput()))
+		if last < 10 || last >= 3*n {
+			t.Fatalf("%d services: the cut showed %d markers", n, last)
+		}
+		if len(res.Evidence) != 2 || res.EvidenceDropped != 0 {
+			t.Fatalf("%d services: evidence %d items, dropped %d", n, len(res.Evidence), res.EvidenceDropped)
+		}
+		firstID := model.ServiceKey{ClusterKey: prodCluster, Service: "svc-0"}.ID()
+		if res.Evidence[0].ServiceID != firstID || res.Evidence[0].Action != "view" {
+			t.Errorf("%d services: first item %+v", n, res.Evidence[0])
+		}
+	}
+}
+
+// With the rest first, a unit's marker ends after the rest; a cut inside the marker shows no unit, in the loop and
+// when the final call is what cuts the result.
+func TestInvestigator_NestedMarkersNeedTheirWholeMarkerAfterTheRest(t *testing.T) {
+	body := bigCostBody(3)
+	shown, units := numberUnits("get_cost_analytics", nil, body, 1)
+	if !strings.HasPrefix(shown, notCitable) || len(units) != 9 {
+		t.Fatalf("%d units, shown begins %.60s", len(units), shown)
+	}
+	second := units[1]
+	start := second.end - len("[e2]")
+	if shown[start:second.end] != "[e2]" || !strings.HasPrefix(shown[start-1:], "\n[e2]") {
+		t.Fatalf("marker = %q", shown[start:second.end])
+	}
+	for cut := start - 1; cut <= second.end+1; cut++ {
+		want := cut >= second.end
+		f := newFindings()
+		res := &toolResult{tag: "tool_result_aaa111", tool: "get_cost_analytics", data: shown, units: units}
+		f.unseen = []*toolResult{res}
+		f.noteShown([]provider.Message{{Role: provider.RoleTool, Text: res.render(cut)}})
+		if _, got := f.units["e2"]; got != want {
+			t.Errorf("cut %d bytes after the marker's start: e2 citable %v, want %v", cut-start, got, want)
+		}
+		if _, got := f.units["e1"]; !got {
+			t.Errorf("cut %d: e1 is not citable", cut-start)
+		}
+	}
+}
+
+// The frame tells the model what [not citable] covers. A nested result begins with that line and cites the rows
+// below it, so the wording must be about the line, not about everything after it.
+func TestInvestigator_FrameWordsNotCitableByLineForNestedResults(t *testing.T) {
+	p := fake.New(calls(provider.ToolCall{ID: "c1", Name: "get_cost_analytics", Arguments: map[string]any{}}), calls(submitCall(plainSummary)))
+	investigate(t, newLoop(p, replies(map[string]string{"get_cost_analytics": nestedCostBody})), p, investigatorInput())
+	shown := strings.TrimPrefix(resultText(t, requestAt(t, p, 1), "c1"), "<tool_result_aaa111 tool=\"get_cost_analytics\">\n")
+	if !strings.HasPrefix(shown, notCitable) || !strings.Contains(shown, "\n[e1] ") {
+		t.Fatalf("a nested result must begin with the [not citable] line and cite below it:\n%s", shown)
+	}
+	system := requestAt(t, p, 0).System
+	if !strings.Contains(system, "A line that begins with [not citable], and a result without markers, you may read and reason from but cannot cite.") {
+		t.Errorf("the frame does not scope [not citable] to its line")
+	}
+	if strings.Contains(system, "What follows [not citable]") {
+		t.Errorf("the frame still says everything after [not citable] is uncitable")
 	}
 }

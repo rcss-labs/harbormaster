@@ -99,14 +99,22 @@ func commonPrefix(a, b string) int {
 var oneLine = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ", "\v", " ", "\f", " ", "\u0085", " ", "\u2028", " ", "\u2029", " ")
 
 // numberUnits splits a scrubbed answer into units numbered from next, and
-// returns the text that shows them: one line each, then what no unit covers. An
-// answer without units is returned as it is.
+// returns the text that shows them: one line each, then what no unit covers
+// (before the units for a nested answer). An answer without units is returned as
+// it is.
 func numberUnits(tool string, args map[string]any, text string, next int) (string, []numberedUnit) {
 	found := hmtools.Units(tool, args, text)
 	if len(found) == 0 || next+len(found)-1 > maxUnitNumber {
 		return text, nil
 	}
 	var shown strings.Builder
+	rest := restOf(tool, text, found)
+	// The totals of an analytics answer come before its rows: a result over the byte cap is cut from the end,
+	// and the rows are what can be spared.
+	restFirst := rest != "" && restComesFirst(tool)
+	if restFirst {
+		shown.WriteString(notCitable + oneLine.Replace(rest) + "\n")
+	}
 	units := make([]numberedUnit, len(found))
 	for i, u := range found {
 		if i > 0 {
@@ -119,16 +127,26 @@ func numberUnits(tool string, args map[string]any, text string, next int) (strin
 		}}
 		shown.WriteString(" " + oneLine.Replace(u.Text))
 	}
-	if rest := restOf(tool, text, found); rest != "" {
+	if rest != "" && !restFirst {
 		shown.WriteString("\n" + notCitable + oneLine.Replace(rest))
 	}
 	return shown.String(), units
 }
 
+// restComesFirst is true for the tools whose answers hold totals beside their rows.
+func restComesFirst(tool string) bool {
+	rule, _ := hmtools.EvidenceRuleFor(tool)
+	return rule.Kind == hmtools.EvidencePerItemNested
+}
+
 // restOf is the part of a JSON answer that no unit covers, as compact JSON, or
-// "" when there is none. Units come in document order, so one walk finds it.
+// "" when there is none. Units come in document order, so one walk finds it; a
+// nested answer is walked by hmtools, which makes its units.
 func restOf(tool, text string, units []hmtools.Unit) string {
 	rule, _ := hmtools.EvidenceRuleFor(tool)
+	if rule.Kind == hmtools.EvidencePerItemNested {
+		return hmtools.NestedRest(tool, text)
+	}
 	covered := func(piece string) bool {
 		if len(units) == 0 || units[0].Text != piece {
 			return false
