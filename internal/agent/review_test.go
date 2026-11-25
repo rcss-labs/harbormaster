@@ -327,7 +327,7 @@ func TestReviewer_AUnitThatNeedsMoreThanViewIsNotCitable(t *testing.T) {
 			t.Errorf("%s: %d units, shown %q", role, len(res.units), res.data)
 		}
 		r.found.noteShown([]provider.Message{{Role: provider.RoleTool, Text: res.render(len(res.data))}})
-		result := buildResult(submission{summary: plainSummary, evidence: []citation{{ref: "e1"}}}, r.found.units, &r.found.corpus, agentresult.ReplacementReviewSummary)
+		result := buildResult(submission{summary: plainSummary, evidence: []citation{{ref: "e1"}}}, r.found.units, &r.found.corpus, agentresult.ReplacementReviewSummary, nil, nil)
 		if len(result.Evidence) != want {
 			t.Errorf("%s: evidence %+v", role, result.Evidence)
 		}

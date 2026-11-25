@@ -213,6 +213,7 @@ func (l *Loop) Run(ctx context.Context, in RunInput, emit func(Event)) error {
 	if r.found != nil {
 		defer r.logFindings()
 		r.found.allowSubject(in.Task.Subject)
+		r.found.nameTask(in.Role, *in.Task)
 		if r.customReview() {
 			r.request = r.cleanText(in.Task.Review.Instructions)
 		}

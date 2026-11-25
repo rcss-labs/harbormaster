@@ -25,11 +25,11 @@ type toolResult struct {
 	readCap bool // the answer reached the upstream read cap: more existed than was read
 }
 
-// newResult prepares a tool answer: scrub, then remove the run's codes,
+// newResult prepares a text that no name is kept in: scrub, then remove the run's codes,
 // and only then cut, so a cut cannot split a secret and the cap holds for what is
 // sent.
 func (r *session) newResult(tool, text string) *toolResult {
-	res, clean := r.cleanResult(tool, text)
+	res, clean := r.cleanResult(tool, text, secretshape.Names{})
 	res.keep(clean, r.resultLimit())
 	return res
 }
@@ -41,22 +41,26 @@ func (r *session) resultLimit() int {
 	return defaultResultBytes
 }
 
-// cleanResult returns the answer's text scrubbed and without the run's codes,
-// and a result that does not hold it yet.
-func (r *session) cleanResult(tool, text string) (*toolResult, string) {
+// cleanResult returns the answer's text scrubbed, except for the names in keep,
+// and without the run's codes, and a result that does not hold it yet.
+func (r *session) cleanResult(tool, text string, keep secretshape.Names) (*toolResult, string) {
 	res := &toolResult{tag: "tool_result_" + r.tagCode, tool: tool}
 	if strings.HasSuffix(text, answerTooLargeNote) {
 		text = strings.TrimSuffix(text, answerTooLargeNote)
 		res.readCap = true
 	}
-	return res, r.cleanText(text)
+	return res, r.cleanTextKeeping(text, keep)
 }
 
 // cleanText is text from outside the run, scrubbed and without the run's codes.
 func (r *session) cleanText(text string) string {
+	return r.cleanTextKeeping(text, secretshape.Names{})
+}
+
+func (r *session) cleanTextKeeping(text string, keep secretshape.Names) string {
 	// An invalid byte travels as a three-byte replacement, so it is replaced
 	// before anything is counted.
-	text = secretshape.ScrubText(strings.ToValidUTF8(text, "\uFFFD"))
+	text = secretshape.ScrubTextKeeping(strings.ToValidUTF8(text, "\uFFFD"), keep)
 	return r.codes.ReplaceAllString(text, "[removed]")
 }
 

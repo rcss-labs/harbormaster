@@ -5,6 +5,7 @@ import (
 
 	"github.com/rcss-labs/harbormaster/internal/agent/provider"
 	"github.com/rcss-labs/harbormaster/internal/agentresult"
+	"github.com/rcss-labs/harbormaster/internal/secretshape"
 )
 
 // submitTool is how an investigator or a reviewer finishes. The loop handles the call itself:
@@ -115,13 +116,17 @@ func parseSubmission(call provider.ToolCall) (sub submission, problem string) {
 	return sub, ""
 }
 
+// maxNameIDs is the most ids of learned names a result reports.
+const maxNameIDs = 32
+
 // buildResult makes the result of a run. The model's words reach it only as the
 // checked summary and notes; the rest comes from units. A reference that is not
 // a unit the model was shown, or is repeated, is dropped. replacement stands in for
-// a summary that failed its check.
-func buildResult(sub submission, units map[string]citedUnit, corpus *agentresult.ReadCorpus, replacement string) agentresult.Result {
+// a summary that failed its check. The words may use the names of taskIDs and of
+// those of the learned ids that the result reports, so that Harbormaster can repeat
+// the check with the same names.
+func buildResult(sub submission, units map[string]citedUnit, corpus *agentresult.ReadCorpus, replacement string, taskIDs, learned []string) agentresult.Result {
 	result := agentresult.Result{Evidence: []agentresult.Evidence{}}
-	result.Summary, result.SummaryReplaced = agentresult.CheckReadSummaryAs(sub.summary, corpus, replacement)
 	cited := map[string]bool{}
 	for _, c := range sub.evidence {
 		unit, known := units[c.ref]
@@ -131,11 +136,50 @@ func buildResult(sub submission, units map[string]citedUnit, corpus *agentresult
 		}
 		cited[c.ref] = true
 		result.Evidence = append(result.Evidence, agentresult.Evidence{
-			Tool: unit.tool, ServiceID: unit.serviceID, Action: unit.action,
-			Note: agentresult.CheckReadNote(c.note, corpus), Excerpt: unit.excerpt,
+			Tool: unit.tool, ServiceID: unit.serviceID, Action: unit.action, Note: c.note, Excerpt: unit.excerpt,
 		})
 	}
+
+	keep := secretshape.NamesOf(taskIDs...)
+	if len(learned) > 0 {
+		keep.Add(learned...)
+		text := []string{sub.summary}
+		for _, e := range result.Evidence {
+			text = append(text, agentresult.CheckReadNoteNaming(e.Note, corpus, keep), e.Excerpt)
+		}
+		result.NameIDs = reportedIDs(strings.Join(text, "\n"), keep, taskIDs, learned)
+		keep = secretshape.NamesOf(taskIDs...)
+		keep.Add(result.NameIDs...)
+	}
+	result.Summary, result.SummaryReplaced = agentresult.CheckReadSummaryNaming(sub.summary, corpus, replacement, keep)
+	for i := range result.Evidence {
+		result.Evidence[i].Note = agentresult.CheckReadNoteNaming(result.Evidence[i].Note, corpus, keep)
+	}
 	return result
+}
+
+// reportedIDs returns the first of the learned ids whose names stand in text, at most maxNameIDs. One that stands there
+// by its cluster alone is left out when the task or an earlier one gives that name: every service of a cluster would
+// count for the cluster's name otherwise, and leave no room for those whose own names are used.
+func reportedIDs(text string, keep secretshape.Names, taskIDs, learned []string) (ids []string) {
+	clusters := map[string]bool{}
+	for _, id := range taskIDs {
+		cluster, _, _ := secretshape.IDNames(id)
+		clusters[cluster] = true
+	}
+	for _, id := range keep.NamedIn(text, learned...) {
+		if len(ids) == maxNameIDs {
+			break
+		}
+		cluster, service, _ := secretshape.IDNames(id)
+		own := len(keep.NamedIn(service, id)) > 0 && strings.Contains(text, service)
+		if clusters[cluster] && !own {
+			continue
+		}
+		clusters[cluster] = true
+		ids = append(ids, id)
+	}
+	return ids
 }
 
 // dropEchoes replaces the summary and the notes of a result that repeat request.
@@ -157,7 +201,7 @@ func (r *session) submit(call provider.ToolCall) (problem string) {
 	if problem != "" {
 		return problem
 	}
-	result := buildResult(sub, r.found.units, &r.found.corpus, r.replacementSummary())
+	result := buildResult(sub, r.found.units, &r.found.corpus, r.replacementSummary(), r.found.taskIDs, r.found.learned)
 	dropEchoes(&result, r.request, r.replacementSummary())
 	r.result = &result
 	r.emit(Event{Type: "result", Result: &result})
