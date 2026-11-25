@@ -113,8 +113,9 @@ Scheduled reviews run as the same agent identity. A review reads what the identi
 | One evidence item | View on its service. A review cites View evidence only, so an item stored with any other action is hidden from everyone, admins included. Hidden items are counted, not described. |
 | The list of results (**Reviews**) | Signed in. It holds only the results the person may read. |
 | Creating, changing, switching, running or deleting a review, the model for reviews, and the list in **Settings > AI agent** | Global admin. |
+| The instructions of a custom review, the copy kept with each run, and a test run | Global admin only, whatever tags the run covered. A reader of a result never receives the instructions. |
 
-Access tokens and run tokens cannot read reviews or manage them. An unknown or unreadable result answers `404`, never `403`. See [Scheduled AI reviews](../guides/ai-agent-reviews.md#who-sees-what).
+Access tokens and run tokens cannot read reviews or manage them, and no tool of the agent reads a review's definition. An unknown or unreadable result answers `404`, never `403`. A test run is hidden from every non-admin, also under the code of the earlier release. See [Scheduled AI reviews](../guides/ai-agent-reviews.md#who-sees-what).
 
 ## How tags match clusters, services and tasks
 

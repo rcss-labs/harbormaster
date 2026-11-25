@@ -99,6 +99,7 @@ The agent is a separate service. Harbormaster calls it for chat runs, and its co
     1. In **Settings > AI agent**, choose **Model for reviews**. Without it, reviews are skipped as `not_configured`.
     2. In **Agent identity** on the same page, give the agent identity View on the tags to review. A review never reads logs, so it needs no Logs. With no access, every review is skipped as `not_visible`.
     3. In **Settings > AI agent > Reviews**, add a review with a type, a scope, a schedule and 1 to 5 routes, and switch it on.
+    4. Optional: to let admins write their own review instructions, set `HM_AGENT_CUSTOM_REVIEWS=true` in `extra_env`. It is off by default. Read [Custom reviews](../guides/ai-agent-reviews.md#custom-reviews) first: the text goes to your model provider and is kept in the audit log. Create custom reviews after the deploy has finished.
 
     Read [Scheduled AI reviews](../guides/ai-agent-reviews.md) first: it spends from the same allowance as the chat and puts the model's text into your notification destinations on a timetable. Both the web and the coordinator tasks need `HM_AGENT_URL`, as above, because the coordinator runs the reviews. An agent that is older than Harbormaster does not offer the reviewer role: a due review waits up to `HM_AGENT_REVIEW_MAX_LATE` and is then recorded as `missed` until both are new. Set `HM_AGENT_REVIEWS_PER_DAY=0` to turn reviews off. See [Upgrading](upgrading.md#the-release-that-adds-scheduled-reviews).
 
@@ -117,6 +118,7 @@ Bedrock needs no API key. List `bedrock` in `model_providers`, set `bedrock_regi
 - `GET /api/agent/status` answers `404` while `HM_AGENT_URL` is unset.
 - The audit log shows `agent_settings_update` for your save and `agent_run` for each question.
 - With investigations on, an alert on a service the identity can see shows **Investigating** and then **Diagnosis ready** in **Needs attention**, and `agent_run` rows with the agent identity as actor appear.
+- With custom reviews on, **Custom** is offered as a review type. **Test run** on any review stores a result, marked as a test run, under **Reviews** and in the review's past results. Only admins see it, and no route gets it.
 - With reviews on, **Run now** on a review in **Settings > AI agent > Reviews** produces a result under **Reviews**, a message on each of its routes, and an `agent_run` row with the role `reviewer`.
 
 ## Try it locally

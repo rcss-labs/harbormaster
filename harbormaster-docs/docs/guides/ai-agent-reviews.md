@@ -1,8 +1,8 @@
 # Scheduled AI reviews
 
-How Harbormaster can run the AI agent on a schedule to write a short review of your costs, image security findings, reliability or capacity, and send it to notification routes. For admins who set reviews up and for anyone who reads their results.
+How Harbormaster can run the AI agent on a schedule to write a short review of your costs, image security findings, reliability or capacity, or of a subject an admin describes in words, and send it to notification routes. For admins who set reviews up and for anyone who reads their results.
 
-A review is a read-only run of the AI agent. An admin gives it a type, a scope, a schedule and the routes that get the result. At each scheduled time the agent reads the data Harbormaster already holds and writes a summary. Setting up the agent is an operator task: see [Install the AI agent](../install/ai-agent.md). The chat and the investigations of alerts are separate features: see [AI chat](ai-agent-chat.md) and [Automatic AI investigations](ai-agent-investigator.md).
+A review is a read-only run of the AI agent. An admin gives it a type, a scope, a schedule and the routes that get the result. A type of `custom` also carries instructions the admin wrote: see [Custom reviews](#custom-reviews). At each scheduled time the agent reads the data Harbormaster already holds and writes a summary. Setting up the agent is an operator task: see [Install the AI agent](../install/ai-agent.md). The chat and the investigations of alerts are separate features: see [AI chat](ai-agent-chat.md) and [Automatic AI investigations](ai-agent-investigator.md).
 
 ## What you need to know first
 
@@ -16,7 +16,7 @@ A review is a read-only run of the AI agent. An admin gives it a type, a scope, 
 
 ## What each type reads
 
-All four types have the same tools, the same identity and the same checks. The type decides only what the agent is asked to read first and how it is asked to write the summary. The summary has three parts, in a fixed order.
+All four built-in types have the same tools, the same identity and the same checks. A fifth type, `custom`, is off unless the operator turns it on, and has no fixed parts: see [Custom reviews](#custom-reviews). The type decides only what the agent is asked to read first and how it is asked to write the summary. The summary has three parts, in a fixed order.
 
 | Type | Label | Reads first | The three parts of the summary |
 | --- | --- | --- | --- |
@@ -59,6 +59,89 @@ While `HM_AGENT_REVIEWS_PER_DAY` is `0`, the section says "Reviews are turned of
 - At most 10 scope entries and 5 routes for a review.
 - The time zone is an IANA name such as `Europe/Berlin`.
 
+## Custom reviews
+
+A custom review is a review whose subject an admin writes in words. It is the fifth type, `custom` (label Custom). It has the same schedule, scope, routes, tools, identity, limits and checks as every other review. Only the type's instructions differ: the admin writes them, and the agent is told to follow them.
+
+Custom reviews are off until the operator sets `HM_AGENT_CUSTOM_REVIEWS=true` on every Harbormaster service (see [Configuration](../reference/configuration.md#ai-agent)). While it is off, **Custom** is not offered, a custom review cannot be created or changed, and none is recorded or run.
+
+To add one, open **Settings > AI agent > Reviews**, select **Add review**, choose **Custom** and write the instructions. The type of a review cannot be changed to or from `custom` after it is created. To change it, make a new review.
+
+### What instructions can and cannot do
+
+Instructions can choose what the review looks at and how the summary is laid out: "compare the three most expensive tags, then list anything that grew since last week, as a short list".
+
+Instructions cannot:
+
+- add tools or log access. A custom review has the 35 read-only tools and 60 calls of every review, and no log tools;
+- widen what the agent sees. The agent identity's access is still the only boundary;
+- change who the agent runs as;
+- change the form or the checks of the result. The result is still one summary of at most 1200 characters and up to 12 cited items, and every check of [the summary check](#what-the-summary-check-does-and-does-not-catch) still applies;
+- decide who reads the result or where it is sent.
+
+The agent is told to leave a request to do any of these undone and to say so in one sentence. A model can still follow a request badly, or be talked round by text it reads. See the [security model](../security/security-model.md#custom-reviews) for what holds when it does.
+
+### Where the text goes
+
+The instructions are sent to the model provider chosen for reviews, in every call of the run. They are stored in Harbormaster's database. They are also written, old and new, into the audit log on every change, and shown to admins beside each past result as "Instructions used". They are never shown to people who are not admins, and they are never sent to a route. Do not write anything in them that you would not send to your model provider or keep in the audit log for a year.
+
+### What is refused
+
+A save is refused, and nothing is stored or audited, when the instructions:
+
+| Problem | Code | What to do |
+| --- | --- | --- |
+| Are empty | `instructions_required` | Write what the review should look at. |
+| Hold more than 2000 characters or 8000 bytes | `instructions_too_long` | Shorten them. The limit counts code points after cleaning, so a letter with an accent is one character, but an emoji can be two or more. Emoji that use a variation selector or a joiner are refused as hidden characters. The 8000-byte limit counts the bytes of the cleaned text. |
+| Hold a NUL character | `instructions_not_text` | Type them again. |
+| Hold hidden characters: controls other than line feed and tab, zero-width and other invisible format characters, variation selectors | `instructions_hidden` | Paste them as plain text. Text in a script that needs a zero-width joiner cannot be saved. |
+| Look like a secret: a key, a token, a password, or a long random-looking name | `instructions_secret` | Remove it. To name a service whose name looks random, use its tag or the scope. |
+| Are given to a built-in type | `instructions_not_allowed` | Only a custom review takes instructions. |
+
+The secret check is best effort. It looks for known shapes, so a secret in an unusual form, or a JSON value in the middle of a line, can pass it. The model provider would then see it. The agent removes what it can before sending, but do not rely on that, and never paste a credential into instructions.
+
+Bytes that are not valid text in a request are stored as replacement characters. The editor shows the problem under the field before you save, without a model call.
+
+### How the text is cleaned
+
+Before it is checked, stored, hashed and sent, the text is cleaned in one way: a carriage return and a line feed, a lone carriage return, and the Unicode line and paragraph separators (U+2028 and U+2029) each become a line feed, and white space at both ends is removed. Nothing else changes. The limits count the cleaned text.
+
+### What the result looks like
+
+A custom summary has no fixed parts. It is the model's own words.
+
+- **A summary that repeats the instructions is replaced.** If it repeats 80 or more characters in a row of the request (ignoring case and punctuation), it is replaced by the fixed sentence "The review finished. Open it in Harbormaster to read the findings." A note that does so is emptied. A stretch that lies wholly inside one long word, such as a service name, is not counted. The agent checks this, and Harbormaster checks it again before it stores the result.
+- **The other copy check still applies.** A summary that repeats 32 or more characters of text the run read is replaced, as for every review. Names are exempt as described [below](#what-the-summary-check-does-and-does-not-catch). One that names a tag or an account label of 32 characters or more, taken from a tool answer, is replaced too, because only the names of services and clusters that the agent read in an id are exempt. A custom review that asks for a report for each tag or account is likelier to hit this than the built-in types.
+- **Check the outcome with a test run** before a route gets the result.
+
+### Test runs
+
+**Test run** on a saved review starts one run that is stored and not sent. It is for any review type, not only custom. It has the same cost as any run: it reserves what a run reserves, counts in `HM_AGENT_REVIEWS_PER_DAY`, and is refused while that review already has a run waiting or running. It is audited as `agent_review_run` with `test`.
+
+- Only admins can read a test run, whatever tags it covered, and it does not appear for anyone else in **Reviews**. This holds under the code of the earlier release too.
+- A test run is never sent to a route. It is marked as already planned for delivery when it is made, so no release plans a message for it.
+- Only a saved review can be run. The text is saved, validated and audited first: there is no way to run a draft. The preview in the editor checks the text and counts services and cost, and makes no model call.
+- The API call is `POST /api/agent/reviews/{id}/run` with `{"deliver": false}`. See the [API reference](../reference/api.md#ai-agent-reviews).
+
+### Edits while a run waits
+
+A run uses the text that was saved when it started, and keeps a copy. A retry of the same run uses the same copy, even if you edit the review in between. An edit before the run starts applies to it. An edit after it applies to the next run. Editing the instructions raises the review's version but does not move its schedule.
+
+If the text no longer passes the checks when a run is about to start (for example after an upgrade made them stricter), nothing is sent to the model and the run is skipped as `instructions`. Save the text again to fix it.
+
+### Cost
+
+A custom review reserves what any review reserves: the run's token limit at the reviewer model's higher price. The request is at most 8000 bytes and is sent with every model call of the run, so a long request makes each run cost somewhat more, within that same reservation. A test run is a run: it is paid for.
+
+A model that declines the request ends as any reviewer that submits nothing does: one reminder, then the run fails as `no_result`, and nothing is sent.
+
+### Turning custom reviews off
+
+- **Disable a custom review before you switch the operator's setting off.** While `HM_AGENT_CUSTOM_REVIEWS` is off, a custom review cannot be edited or switched off, only deleted. One that was on is still on in the database: it becomes due again when the setting returns. To keep one for later, switch it off first, then switch the setting off.
+- **Delete or disable custom reviews before a roll back.** An older release cannot update a custom review. It lists it with a note that its type is unknown, and it can delete it.
+
+See the [runbook](../operations/runbooks/ai-agent.md#16-reviews-upgrade-and-rollback).
+
 ## Scope
 
 The scope tells the agent where to look. An entry is a Harbormaster tag, a cluster, or an account (with a region if you want one). Entries add together. A review with no entry looks at everything the agent identity can see.
@@ -95,7 +178,8 @@ One run is one conversation with the model, under the limits of every agent run 
 | Not run: no model is set up for reviews. | Reason `not_configured`. |
 | Not run: too many reviews in the last day. | Reason `rate_limited`. |
 | Not run: it could not start in time. | Reason `missed`. |
-| Not run: the review was turned off. | Reason `disabled`. The review was switched off or deleted before the run started, or before its retry. A manual run of a switched-off review is not skipped for this; a manual run of a deleted review is. |
+| Not run: the review was turned off. | Reason `disabled`. The review was switched off or deleted before the run started, or before its retry. A manual run of a switched-off review is not skipped for this; a manual run of a deleted review is. A custom review is also skipped as `disabled` while the operator's switch for custom reviews is off. |
+| Not run: its instructions no longer pass the checks. | Reason `instructions`. Custom reviews only. See [Custom reviews](#custom-reviews). |
 
 The runbook lists every reason and what to do: [States and reasons](../operations/runbooks/ai-agent.md#13-review-states-and-reasons).
 
@@ -118,6 +202,7 @@ Reading is checked on every request against your current permissions, not those 
 - **The evidence.** Each item is for one service. You need View on that service now. A review cites View evidence only, so no item needs Logs, and an item with any other action is hidden from everyone, admins included. Hidden items are counted, not described: the page says only "Some evidence is not shown because you do not have permission to read it."
 - **The list.** **Reviews** lists only the results you may read. A result you may not read answers "not found", as if it did not exist.
 - **Managing reviews.** Only global admins can create, change, run, switch or delete a review, and choose the model for reviews.
+- **Instructions and test runs.** Only admins read the instructions of a custom review and the copy kept with each result. A test run is read by admins only.
 
 See [Permissions](../reference/permissions.md#who-reads-a-review).
 
@@ -129,7 +214,7 @@ The model does not write evidence. It points at numbered pieces of tool output i
 
 Harbormaster checks every summary and note before it is stored, and again before every message is sent. The checks are those of [investigations](ai-agent-investigator.md#what-the-summary-check-does-and-does-not-catch). A summary that is empty, too long, has hidden characters or image markup, or is changed by the secret scrubber is replaced whole by a fixed sentence. For a review it is "The review finished. Open it in Harbormaster to read the findings." The copy rule has one length and one exemption.
 
-- **Copying.** The summary is replaced when it repeats 32 or more characters in a row, ignoring case and punctuation, of text the agent read in that run. A review reads no log messages.
+- **Copying.** The summary is replaced when it repeats 32 or more characters in a row, ignoring case and punctuation, of text the agent read in that run. A review reads no log messages. For a custom review the request has its own rule: see [Custom reviews](#what-the-result-looks-like).
 - **Names are exempt.** A review has to name services and clusters, and a name can be longer than 32 characters. A name is not counted as copied text when it appears in an id of a service or cluster that the agent read. A name is one word of letters, digits, hyphens and underscores, up to 128 characters. This applies to the summary, not to notes.
 - **What the exemption does not cover.** A name with spaces, dots or other characters. A stretch of text that takes in a name and the words beside it, which is checked in full. A name the agent did not read in an id. Anything in a note. Text a person wrote, such as a tag name or a review name, is not exempt unless it is also part of a service or cluster id the agent read.
 
@@ -139,7 +224,7 @@ The check is best effort, as for investigations: paraphrase is not caught, a bar
 
 For each run, the following go to the provider of the reviewer model:
 
-- the instructions of the type, the type's label, the range, the period (for example "Week 48, 2026"), the number of services in scope and the scope entries (kind, ids, region and the names of tags and clusters), each scrubbed and cut. The review's own name is not sent;
+- the instructions of the type (for a custom review, the text the admin wrote, in an envelope of its own), the type's label, the range, the period (for example "Week 48, 2026"), the number of services in scope and the scope entries (kind, ids, region and the names of tags and clusters), each scrubbed and cut. The review's own name is not sent;
 - the tool definitions, and the scrubbed results of the tools the agent called: analytics and security rows, names and sizes of services and clusters, task definitions with environment values redacted, scaling limits and the like. No log line.
 
 Environment values in task definitions are redacted unless an admin lifted that for the provider. `HM_TOKEN_REDACT_ENV=true` overrides the lift. Secret-looking values are always redacted, best effort. Because nobody asks for these runs, check the provider terms before you set the reviewer model, and prefer a provider inside your own AWS account (Amazon Bedrock) for sensitive estates.
@@ -150,15 +235,15 @@ A review message sends the summary to each route's destination. That is a second
 
 Stored in Harbormaster's database:
 
-- The review: name, type, schedule, scope, routes and whether it is on.
-- Each run: the review's name and type at that time, the period, the scope label, the number of services, the tags covered, the state and reason, and the summary.
+- The review: name, type, schedule, scope, routes and whether it is on. For a custom review, also its instructions.
+- Each run: the review's name and type at that time, the period, the scope label, the number of services, the tags covered, the state and reason, and the summary. A custom run also holds a copy of the instructions it used, and a test run is marked.
 - The evidence: up to 12 excerpts of tool output for each run, at most 1500 bytes each, scrubbed in the agent and again in Harbormaster, with the notes, the tool name and the service.
-- The run record and an `agent_run` audit entry: model, tools, tokens and cost, never text. An admin's changes to reviews are audited too. See [Audit log](audit-log.md).
+- The run record and an `agent_run` audit entry: model, tools, tokens and cost, never text. An admin's changes to reviews are audited too. For a custom review the audit entry holds the instructions before and after, in full, and their SHA-256. The `agent_run` entry holds the hash only. See [Audit log](audit-log.md).
 - One row for each message in the notification delivery log. It holds the review's name, not the summary: the message is built from the stored result when it is sent.
 
 Stored evidence is never sent back to a model.
 
-Finished results are deleted `HM_RETENTION_AGENT_RUNS` after they finish (90 days by default). A waiting or running one, and one that finished less than 48 hours ago, is never deleted. The newest scheduled run of each review stays however old, because it is what stops a period that already ran from running again. Rows in the delivery log go after `HM_RETENTION_NOTIFICATION_LOG` (30 days). See [Data retention](../operations/data-retention.md).
+Finished results are deleted `HM_RETENTION_AGENT_RUNS` after they finish (90 days by default), and the copy of the instructions with them. The audit log keeps the text for `HM_RETENTION_AUDIT_LOG` (365 days by default). A waiting or running one, and one that finished less than 48 hours ago, is never deleted. The newest scheduled run of each review stays however old, because it is what stops a period that already ran from running again. Rows in the delivery log go after `HM_RETENTION_NOTIFICATION_LOG` (30 days). See [Data retention](../operations/data-retention.md).
 
 ## Cost and limits
 
@@ -175,4 +260,5 @@ Finished results are deleted `HM_RETENTION_AGENT_RUNS` after they finish (90 day
 - [Alert notifications](alert-notifications.md#review-messages)
 - [AI agent runbook](../operations/runbooks/ai-agent.md)
 - [Security model](../security/security-model.md#scheduled-reviews)
+- [Custom reviews in the security model](../security/security-model.md#custom-reviews)
 - [Configuration reference](../reference/configuration.md#ai-agent)
