@@ -1,6 +1,6 @@
 # harbormaster-agent module
 
-Deploys the Harbormaster AI agent (`harbormaster-agent`) on AWS: an ECS Fargate service behind an internal Application Load Balancer. Harbormaster calls it for chat runs; the agent calls model providers and reads Harbormaster through its internal load balancer with a short-lived, read-only run token.
+Deploys the Harbormaster AI agent (`harbormaster-agent`) on AWS: an ECS Fargate service behind an internal Application Load Balancer. Harbormaster calls it for chat runs and, from its coordinator, for the automatic investigations of alerts; the agent calls model providers and reads Harbormaster through its internal load balancer with a short-lived, read-only run token.
 
 ## What it creates
 

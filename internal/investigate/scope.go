@@ -63,39 +63,48 @@ func (s *sight) can(key model.ServiceKey, action authz.Action) bool {
 	return err == nil
 }
 
-// scope is the part of the subject that the identity can see; it names no service when there is none.
-func (j *job) scope(ctx context.Context) (agentclient.TaskSubject, error) {
+// scope is the part of an investigation's subject that the identity can see.
+type scope struct {
+	subject agentclient.TaskSubject
+	visible []model.ServiceKey // every visible service; the subject names the first maxTaskServices of them
+}
+
+// scope works out what the identity can see now; it holds no service when there is none.
+func (j *job) scope(ctx context.Context) (scope, error) {
 	v := j.inv
 	cluster := model.ClusterKey{AccountID: v.AccountID, Region: v.Region, Cluster: v.ClusterName}
-	subject := agentclient.TaskSubject{Kind: v.SubjectKind, AccountID: v.AccountID, Region: v.Region}
+	s := scope{subject: agentclient.TaskSubject{Kind: v.SubjectKind, AccountID: v.AccountID, Region: v.Region}}
 	var candidates []model.ServiceKey
 	switch v.SubjectKind {
 	case "service":
-		subject.ClusterID = cluster.ID()
+		s.subject.ClusterID = cluster.ID()
 		candidates = []model.ServiceKey{{ClusterKey: cluster, Service: v.ServiceName}}
 	case "cluster", "account":
 		if v.SubjectKind == "cluster" {
-			subject.ClusterID = cluster.ID()
+			s.subject.ClusterID = cluster.ID()
 		}
 		for _, m := range v.Members {
 			member := model.ClusterKey{AccountID: v.AccountID, Region: v.Region, Cluster: m.Cluster}
 			candidates = append(candidates, model.ServiceKey{ClusterKey: member, Service: m.Service})
 		}
 	default:
-		return subject, nil
+		return s, nil
 	}
 	see, err := j.r.sightOf(ctx, j.identity.ID)
 	if err != nil {
-		return subject, err
+		return s, err
 	}
 	taken := map[model.ServiceKey]bool{}
 	for _, key := range candidates {
 		id := key.ID()
-		if len(subject.ServiceIDs) == maxTaskServices || taken[key] || len(id) > maxTaskIDBytes || !see.can(key, authz.View) {
+		if taken[key] || len(id) > maxTaskIDBytes || !see.can(key, authz.View) {
 			continue
 		}
 		taken[key] = true
-		subject.ServiceIDs = append(subject.ServiceIDs, id)
+		s.visible = append(s.visible, key)
+		if len(s.subject.ServiceIDs) < maxTaskServices {
+			s.subject.ServiceIDs = append(s.subject.ServiceIDs, id)
+		}
 	}
-	return subject, see.err
+	return s, see.err
 }
