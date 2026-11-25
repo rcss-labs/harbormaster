@@ -204,6 +204,92 @@ describe('AgentDrawer', () => {
       expect(within(dialog).queryByText('partial answer')).not.toBeInTheDocument()
     })
 
+    /** Conversation 2 whose GET can be held back, and whose POSTs answer with the streams in order. */
+    const mockTwoTurns = (streams: ReturnType<typeof openStream>[]) => {
+      const state = { saved: false, hold: false, held: 0, release: () => {} }
+      let posts = 0
+      server.use(
+        http.get('/api/agent/conversations/2', async () => {
+          if (state.hold) {
+            state.held++
+            await new Promise<void>((resolve) => {
+              state.release = resolve
+            })
+          }
+          return HttpResponse.json({ ...DETAILS[0], messages: state.saved ? [...DETAILS[0].messages, savedUser, savedAnswer] : DETAILS[0].messages })
+        }),
+        http.post('/api/agent/conversations/2/messages', () => streams[posts++].response()),
+      )
+      return state
+    }
+
+    it('a recheck that was hanging when the next question started does not clear that question', async () => {
+      const [first, second] = [openStream(), openStream()]
+      mockAgent({ conversations: CONVERSATIONS.slice(0, 1), details: DETAILS })
+      const server2 = mockTwoTurns([first, second])
+      const dialog = await startAndStop(first)
+      await waitFor(() => expect(within(dialog).getByRole('textbox', { name: 'Message' })).toBeEnabled())
+      server2.hold = true
+      await waitFor(() => expect(server2.held).toBe(1), { timeout: 4000 }) // the recheck is asking, and waits
+      const user = userEvent.setup()
+      await user.type(within(dialog).getByRole('textbox', { name: 'Message' }), 'again{Enter}')
+      second.send('text', { delta: 'second partial' })
+      await within(dialog).findByText('second partial')
+      server2.saved = true // the first answer is saved: not the second
+      server2.hold = false
+      server2.release()
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      expect(within(dialog).getByText('second partial')).toBeInTheDocument()
+      expect(within(dialog).getByRole('button', { name: 'Stop' })).toBeInTheDocument()
+    })
+
+    it('a second Stop before the first answer is saved keeps its own partial', async () => {
+      const [first, second] = [openStream(), openStream()]
+      mockAgent({ conversations: CONVERSATIONS.slice(0, 1), details: DETAILS })
+      const state = mockTwoTurns([first, second])
+      const dialog = await startAndStop(first)
+      await waitFor(() => expect(within(dialog).getByRole('textbox', { name: 'Message' })).toBeEnabled())
+      const user = userEvent.setup()
+      await user.type(within(dialog).getByRole('textbox', { name: 'Message' }), 'again{Enter}')
+      second.send('text', { delta: 'second partial' })
+      await within(dialog).findByText('second partial')
+      state.saved = true // only the first answer is saved
+      await user.click(within(dialog).getByRole('button', { name: 'Stop' }))
+      await waitFor(() => expect(within(dialog).getByRole('textbox', { name: 'Message' })).toBeEnabled())
+      expect(within(dialog).getByText('second partial')).toBeInTheDocument()
+      expect(within(dialog).getByText('Stopped before finishing.')).toBeInTheDocument()
+    })
+
+    it('a later read that holds the answer clears the kept partial', async () => {
+      const stream = openStream()
+      mockAgent({ conversations: CONVERSATIONS.slice(0, 1), details: DETAILS })
+      const state = mockTwoTurns([stream])
+      const dialog = await startAndStop(stream)
+      await waitFor(() => expect(within(dialog).getByRole('textbox', { name: 'Message' })).toBeEnabled())
+      expect(within(dialog).getByText('partial answer')).toBeInTheDocument()
+      state.saved = true
+      window.dispatchEvent(new Event('visibilitychange')) // a background refetch, well before the 1.5 s recheck
+      expect(await within(dialog).findByText('The saved answer.', {}, { timeout: 1000 })).toBeInTheDocument()
+      expect(within(dialog).queryByText('partial answer')).not.toBeInTheDocument()
+    })
+
+    it('deleting the conversation drops the kept partial', async () => {
+      const stream = openStream()
+      mockAgent({ conversations: CONVERSATIONS.slice(0, 1), details: DETAILS })
+      mockTwoTurns([stream])
+      server.use(http.delete('/api/agent/conversations/2', () => new HttpResponse(null, { status: 204 })))
+      const dialog = await startAndStop(stream)
+      await waitFor(() => expect(within(dialog).getByRole('textbox', { name: 'Message' })).toBeEnabled())
+      const user = userEvent.setup()
+      await user.click(within(dialog).getByRole('button', { name: 'Conversations' }))
+      await user.click(await within(dialog).findByRole('button', { name: 'Delete Why is payments slow' }))
+      const confirm = await screen.findByRole('dialog', { name: /Delete/ })
+      await user.click(within(confirm).getByRole('button', { name: 'Delete' }))
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: /Delete/ })).not.toBeInTheDocument())
+      await user.click(within(dialog).getByRole('button', { name: 'Back to chat' }))
+      expect(within(dialog).queryByText('partial answer')).not.toBeInTheDocument()
+    })
+
     it('a normal end shows the saved answer at once, with no stopped note', async () => {
       const stream = openStream()
       let saved = false

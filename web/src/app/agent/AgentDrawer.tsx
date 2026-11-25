@@ -52,6 +52,12 @@ interface ToolRun {
 
 /** The turn in flight: what the user asked and what has streamed back so far. */
 interface LiveTurn {
+  /** Names this turn. A late recheck or refetch clears only the turn it was started for, never one that began since. */
+  id: number
+  /** The conversation the turn belongs to; set when it ends. */
+  conversationId?: number
+  /** How many assistant messages the conversation holds once this turn's answer is saved. */
+  answersNeeded: number
   /** The conversation as it was when the question was sent. While the turn is live this, not a fetch, is what shows. */
   before: AgentMessageDTO[]
   question: string
@@ -63,7 +69,7 @@ interface LiveTurn {
   completed?: boolean
 }
 
-const highestAssistantId = (messages: AgentMessageDTO[]) => messages.reduce((top, message) => (message.role === 'assistant' ? Math.max(top, message.id) : top), 0)
+const assistantCount = (messages: AgentMessageDTO[] | undefined) => (messages ?? []).filter((message) => message.role === 'assistant').length
 
 const byNewest = (a: AgentConversationSummaryDTO, b: AgentConversationSummaryDTO) => b.updated_at.localeCompare(a.updated_at)
 
@@ -90,6 +96,7 @@ function OpenAgentDrawer() {
   const [toDelete, setToDelete] = useState<AgentConversationSummaryDTO | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const recheckRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const turnSeq = useRef(0)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -97,6 +104,8 @@ function OpenAgentDrawer() {
   const currentId = chosen !== undefined ? chosen : (sorted[0]?.id ?? null)
   const conversation = useConversation(currentId)
   const running = live !== null && !live.ended
+  // A kept partial goes as soon as any read of its conversation, not only the recheck, shows the saved answer.
+  const shownLive = live?.ended && live.conversationId === currentId && assistantCount(conversation.data?.messages) >= live.answersNeeded ? null : live
   const loadError = conversation.isError
     ? conversation.error instanceof ApiError && conversation.error.status === 404
       ? 'This conversation no longer exists.'
@@ -130,8 +139,12 @@ function OpenAgentDrawer() {
     setProblem(null)
     if (recheckRef.current) clearTimeout(recheckRef.current)
     const shown = conversation.data?.messages ?? []
-    const answersSeen = highestAssistantId(shown)
-    setLive({ before: shown, question: text, text: '', tools: [] })
+    // A kept partial whose answer is still not saved will be saved too, and counts before this turn's own.
+    const carried = live?.ended && assistantCount(shown) < live.answersNeeded ? 1 : 0
+    const turnId = ++turnSeq.current
+    const answersNeeded = assistantCount(shown) + carried + 1
+    setLive({ id: turnId, before: shown, answersNeeded, question: text, text: '', tools: [] })
+    const ofThisTurn = (change: (turn: LiveTurn) => LiveTurn) => setLive((turn) => (turn && turn.id === turnId ? change(turn) : turn))
     const controller = new AbortController()
     abortRef.current = controller
     let id = currentId
@@ -149,15 +162,14 @@ function OpenAgentDrawer() {
         {
           onText: (delta) => {
             streamed = true
-            setLive((turn) => turn && { ...turn, text: turn.text + delta })
+            ofThisTurn((turn) => ({ ...turn, text: turn.text + delta }))
           },
           onToolStart: (name) => {
             streamed = true
-            setLive((turn) => turn && { ...turn, tools: [...turn.tools, { name, state: 'running' }] })
+            ofThisTurn((turn) => ({ ...turn, tools: [...turn.tools, { name, state: 'running' }] }))
           },
           onToolEnd: (name, ok) =>
-            setLive((turn) => {
-              if (!turn) return turn
+            ofThisTurn((turn) => {
               const index = turn.tools.findIndex((tool) => tool.name === name && tool.state === 'running')
               if (index === -1) return turn
               const tools = turn.tools.slice()
@@ -187,21 +199,22 @@ function OpenAgentDrawer() {
     // The saved answer normally comes with the refetch above. After Stop, or when the refetch failed, it may not be there
     // yet: keep what streamed on screen, and read the conversation once more shortly.
     const savedAnswerIsIn = (conversationId: number) =>
-      highestAssistantId(queryClient.getQueryData<AgentConversationDTO>(conversationKey(conversationId))?.messages ?? []) > answersSeen
+      assistantCount(queryClient.getQueryData<AgentConversationDTO>(conversationKey(conversationId))?.messages) >= answersNeeded
+    const clearThisTurn = () => setLive((turn) => (turn && turn.id === turnId ? null : turn))
     if (id === null || !streamed || savedAnswerIsIn(id)) {
-      setLive(null)
+      clearThisTurn()
       return
     }
-    setLive((turn) => turn && { ...turn, ended: true, completed })
     const conversationId = id
+    ofThisTurn((turn) => ({ ...turn, ended: true, completed, conversationId }))
     recheckRef.current = setTimeout(() => {
       void (async () => {
         await queryClient.refetchQueries({ queryKey: conversationKey(conversationId), exact: true })
-        if (savedAnswerIsIn(conversationId)) setLive(null)
+        if (savedAnswerIsIn(conversationId)) clearThisTurn()
         void queryClient.invalidateQueries({ queryKey: CONVERSATIONS_KEY })
       })()
     }, LATE_SAVE_RECHECK_MS)
-  }, [draft, running, currentId, page, queryClient, conversation.data])
+  }, [draft, running, live, currentId, page, queryClient, conversation.data])
 
   const stop = () => abortRef.current?.abort()
 
@@ -235,7 +248,10 @@ function OpenAgentDrawer() {
     const { id } = toDelete
     remove.mutate(id, {
       onSuccess: () => {
-        if (currentId === id) setChosen(null)
+        if (currentId === id) {
+          leaveLiveTurn()
+          setChosen(null)
+        }
         setToDelete(null)
       },
       onError: (error) => {
@@ -295,17 +311,17 @@ function OpenAgentDrawer() {
             <>
               {label && <p className={styles.looking}>{`Looking at: ${label}`}</p>}
               <div ref={scrollRef} className={styles.messages} aria-live="polite">
-                {live ? (
+                {shownLive ? (
                   <>
-                    {live.before.map((message) => <Message key={message.id} message={message} />)}
-                    <LiveMessages turn={live} />
-                    {live.ended && !live.completed && <p className={styles.notice}>{STOPPED}</p>}
+                    {shownLive.before.map((message) => <Message key={message.id} message={message} />)}
+                    <LiveMessages turn={shownLive} />
+                    {shownLive.ended && !shownLive.completed && <p className={styles.notice}>{STOPPED}</p>}
                     {notices.map((notice) => (
                       <p key={notice} className={styles.notice}>
                         {notice}
                       </p>
                     ))}
-                    {live.ended && problem && problem !== STOPPED && (
+                    {shownLive.ended && problem && problem !== STOPPED && (
                       <p className={styles.problem} role="alert">
                         {problem}
                       </p>
