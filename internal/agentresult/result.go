@@ -18,6 +18,8 @@ const (
 
 	// ReplacementSummary stands in for a summary that failed a check.
 	ReplacementSummary = "The investigation finished. Open it in Harbormaster to read the findings."
+	// ReplacementReviewSummary stands in for a review summary that failed a check.
+	ReplacementReviewSummary = "The review finished. Open it in Harbormaster to read the findings."
 	// ReplacementNote stands in for a note that failed a check.
 	ReplacementNote = "See the excerpt."
 	// URLPlaceholder stands in for a removed link.

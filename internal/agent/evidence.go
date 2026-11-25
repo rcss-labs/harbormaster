@@ -9,6 +9,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/agent/provider"
 	"github.com/rcss-labs/harbormaster/internal/agentresult"
 	"github.com/rcss-labs/harbormaster/internal/hmtools"
+	"github.com/rcss-labs/harbormaster/internal/secretshape"
 )
 
 // maxUnitNumber is the largest N of a unit reference e<N>. A result whose
@@ -32,7 +33,7 @@ type numberedUnit struct {
 // findings is what an investigator run has read. It lives in memory for the
 // run only and is never logged.
 type findings struct {
-	corpus agentresult.Corpus
+	corpus agentresult.ReadCorpus
 	last   int // the last number given
 	units  map[string]citedUnit
 	unseen []*toolResult // results with units the model may not have been shown yet
@@ -40,12 +41,21 @@ type findings struct {
 
 func newFindings() *findings { return &findings{units: map[string]citedUnit{}} }
 
+// allowSubject lets the summary name what the run is about: the services and
+// clusters its subject's ids decode to, and no others.
+func (f *findings) allowSubject(subject TaskSubject) {
+	for _, id := range append([]string{subject.ClusterID}, subject.ServiceIDs...) {
+		cluster, service, _ := secretshape.IDNames(id)
+		f.corpus.AllowNames(cluster, service)
+	}
+}
+
 // readResult prepares a successful tool answer: its scrubbed text counts as
 // read, and its units get their numbers. A unit whose marker does not survive
 // the result cap is forgotten, and an answer cut by the read cap has none.
 func (r *session) readResult(tool string, args map[string]any, text string) *toolResult {
 	res, clean := r.cleanResult(tool, text)
-	r.found.corpus.Add(clean)
+	r.found.corpus.Add(tool, clean)
 	if res.readCap {
 		res.keep(clean, r.resultLimit())
 		return res

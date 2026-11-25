@@ -290,6 +290,18 @@ func TestRunner_EndReportsWhetherTheRunWasSettled(t *testing.T) {
 	}
 }
 
+func TestRunner_TheFinishedLineNamesTheUser(t *testing.T) {
+	user := int64(4711)
+	for want, id := range map[string]*int64{"user_id=4711 ": &user, "user_id=0 ": nil} {
+		var logs bytes.Buffer
+		r := &Runner{Store: &fakeRunnerStore{}, Log: slog.New(slog.NewTextHandler(&logs, nil))}
+		r.End(t.Context(), store.AgentRun{ID: uuid.New(), UserID: id}, Actor{Name: "a"}, "", Ending{Outcome: "interrupted"}, nil)
+		if !strings.Contains(logs.String(), want) {
+			t.Errorf("want %q in %q", want, logs.String())
+		}
+	}
+}
+
 var errPanic = errors.New("panic")
 
 // panicSettle is a store whose settle panics.
