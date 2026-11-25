@@ -12,6 +12,8 @@ import { Clusters } from './clusters/Clusters'
 import { InvestigationPage } from './investigations/InvestigationPage'
 import { LogSearchPage } from './logsearch/LogSearchPage'
 import { ConfigSearchPage } from './configsearch/ConfigSearchPage'
+import { ReviewRunPage } from './reviews/ReviewRunPage'
+import { ReviewsPage } from './reviews/ReviewsPage'
 import { MorePage } from './more/MorePage'
 import { NetworkRegionRedirect, NetworksPage, NetworkVpcRedirect } from './networks/NetworksPage'
 import { Overview } from './overview/Overview'
@@ -100,6 +102,8 @@ export function AppRoutes() {
           <Route path="security" element={<SecurityPage />} />
           <Route path="investigations/incident/:incidentId" element={<InvestigationPage byIncident />} />
           <Route path="investigations/:id" element={<InvestigationPage />} />
+          <Route path="reviews" element={<ReviewsPage />} />
+          <Route path="reviews/runs/:id" element={<ReviewRunPage />} />
           <Route path="logs" element={<LogSearchPage />} />
           <Route path="config" element={<ConfigSearchPage />} />
           <Route path="*" element={<p>Page not found.</p>} />

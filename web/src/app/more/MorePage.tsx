@@ -136,6 +136,7 @@ export function MorePage() {
         <Row icon="analytics" label="Analytics" to="/analytics/delivery" />
         <Row icon="logs" label="Log search" to="/logs" />
         <Row icon="search" label="Config search" to="/config" />
+        {me.reviews_enabled && <Row icon="history" label="Reviews" to="/reviews" />}
       </Panel>
 
       {me.admin && (

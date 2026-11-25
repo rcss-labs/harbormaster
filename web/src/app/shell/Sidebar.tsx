@@ -226,6 +226,7 @@ export function Sidebar() {
         <NavItem to="/security" icon="shield" label="Security" />
         <NavItem to="/logs" icon="logs" label="Log search" />
         <NavItem to="/config" icon="search" label="Config search" />
+        {me?.reviews_enabled && <NavItem to="/reviews" icon="history" label="Reviews" />}
         {isAdmin ? (
           <>
             <div className={styles.navSection}>Admin</div>

@@ -64,6 +64,8 @@ export interface MeDTO {
   agent_enabled?: boolean
   /** This user may use the agent chat. */
   ai_chat?: boolean
+  /** Scheduled AI reviews are on: the agent is enabled and reviews are not turned off. Absent on older servers. */
+  reviews_enabled?: boolean
 }
 
 // ---- Agent chat ----
