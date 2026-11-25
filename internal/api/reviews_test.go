@@ -61,6 +61,15 @@ func (e *invEnv) seedRunEvidence(t *testing.T, id int64, ordinal int, action str
 	}
 }
 
+// dropTestNoTagsCheck lifts the schema's refusal of a test run that holds covered tags. Such a row cannot exist in
+// production; the read predicates are still tested against it as the second line of defence.
+func (e *invEnv) dropTestNoTagsCheck(t *testing.T) {
+	t.Helper()
+	if _, err := e.st.Pool.Exec(t.Context(), `alter table agent_review_runs drop constraint agent_review_runs_test_no_tags`); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func runPath(id int64) string { return fmt.Sprintf("/api/reviews/runs/%d", id) }
 
 func getReviewRunDetail(t *testing.T, c *apiClient, id int64) ReviewRunDetailDTO {
@@ -589,6 +598,7 @@ func TestReviewRun_CustomTypeIsReadableByTheReaderRule(t *testing.T) {
 
 func TestReviewRun_TestRunIsAdminOnly(t *testing.T) {
 	e := newInvEnv(t)
+	e.dropTestNoTagsCheck(t)
 	dev := []authz.TagID{e.tagID(t, "Dev")}
 	// The rows hold the covered tag, so nothing but the test mark keeps the reader out.
 	test := e.seedRun(t, reviewSeed{summary: "Findings.", covered: dev, test: true})
@@ -615,6 +625,7 @@ func TestReviewRun_TestRunIsAdminOnly(t *testing.T) {
 
 func TestReviewRun_ReadBodiesNeverHoldInstructions(t *testing.T) {
 	e := newInvEnv(t)
+	e.dropTestNoTagsCheck(t)
 	dev := []authz.TagID{e.tagID(t, "Dev")}
 	id := e.seedRun(t, reviewSeed{typ: "custom", summary: "Findings.", covered: dev, instructions: "ZEBRAMARKER look here"})
 	test := e.seedRun(t, reviewSeed{typ: "custom", summary: "Findings.", covered: dev, test: true, instructions: "ZEBRAMARKER look here"})

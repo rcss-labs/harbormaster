@@ -76,6 +76,11 @@ func TestReadableReviewRuns_EveryKnownTypeAndStateIsListed(t *testing.T) {
 // Test runs are for admins only even when the row holds covered tags (a row StartReviewRun did not write).
 func TestReadableReviewRuns_TestRunsAreForAdminsOnly(t *testing.T) {
 	s := storetest.Open(t)
+	// The schema now forbids a test row that holds covered tags (agent_review_runs_test_no_tags), so a row like this one
+	// cannot exist in production. The predicate is still tested: it is the second line of defence if a row slips in.
+	if _, err := s.Pool.Exec(context.Background(), `alter table agent_review_runs drop constraint agent_review_runs_test_no_tags`); err != nil {
+		t.Fatal(err)
+	}
 	normal := seedReadableRun(t, s, "custom", "done", false, revNow)
 	test := seedReadableRun(t, s, "cost", "done", true, revNow.Add(time.Minute))
 	if got := readableRunIDs(t, s, false); !slices.Equal(got, []int64{normal}) {
