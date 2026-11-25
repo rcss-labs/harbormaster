@@ -9,9 +9,9 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// reviewMessageMaxAge is how long after a run finished its messages may still be planned. A task that was down longer
+// ReviewMessageMaxAge is how long after a run finished its messages may still be planned. A task that was down longer
 // than that does not send yesterday's result, and a run whose rows were already deleted is never planned again.
-const reviewMessageMaxAge = 24 * time.Hour
+const ReviewMessageMaxAge = 24 * time.Hour
 
 // PlanReviewDeliveries plans the messages of finished review runs, exactly once per run. Each run that is done, has a
 // summary and has no delivery_planned_at is handled in one transaction that locks its row: for every route on its
@@ -68,7 +68,7 @@ func (t Tx) planReviewRun(ctx context.Context, runID int64, now time.Time, heldU
 		return 0, err
 	}
 	var routes []NotificationRoute
-	if reviewID != nil && finishedAt != nil && now.Sub(*finishedAt) <= reviewMessageMaxAge {
+	if reviewID != nil && finishedAt != nil && now.Sub(*finishedAt) <= ReviewMessageMaxAge {
 		rows, err := t.tx.Query(ctx, `select `+prefixColumns("r", notificationRouteColumns)+` from notification_routes r
 			join agent_review_routes l on l.route_id = r.id
 			where l.review_id = $1 and r.enabled and r.destination <> 'pagerduty' order by r.id`, *reviewID)

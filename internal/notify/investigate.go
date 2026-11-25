@@ -17,12 +17,18 @@ const (
 	// followUpWorkers is how many diagnosis and review rows this process works on at once, over every cycle. A worker
 	// can hold a database connection while its lookup waits, and the coordinator's pool is small.
 	followUpWorkers = 2
+	// reviewSendMaxAge is how old a review result may be when it is sent: the time it may wait to be planned, and a day
+	// for what comes after. The longest of that is quiet hours, at most 12 hours (the window is 10, and the clocks of
+	// one zone go back two hours at night). A row left pending for longer, while reviews were off or after a
+	// rollback, is cancelled.
+	reviewSendMaxAge = store.ReviewMessageMaxAge + 24*time.Hour
 
 	noteInvestigateOff     = "Investigate with AI is off."
 	notePagerDutyNoMessage = "PagerDuty has no diagnosis message."
 	noteInvestigationGone  = "The investigation is no longer available."
 	notePagerDutyNoReview  = "PagerDuty has no review message."
 	noteReviewGone         = "The review result is no longer available."
+	noteReviewTooOld       = "The review result is too old to send."
 	noteRouteOffReview     = "This route is no longer on the review."
 	noteFollowUpPanicked   = "The message could not be prepared."
 )
@@ -167,7 +173,7 @@ func (d *Dispatcher) reviewStep(ctx context.Context, deadline, now time.Time, na
 }
 
 // reviewOf reads what a review message to the route reports, or a note saying why it is not sent: the run or its
-// result is gone, or its review is gone or no longer sends to the route. Both lookups share one timeout.
+// result is gone or too old, or its review is gone or no longer sends to the route. Both lookups share one timeout.
 func (d *Dispatcher) reviewOf(ctx context.Context, runID, routeID int64) (review *Review, note string, err error) {
 	lookupCtx, cancel := context.WithTimeout(ctx, d.investigateTimeout())
 	defer cancel()
@@ -177,6 +183,9 @@ func (d *Dispatcher) reviewOf(ctx context.Context, runID, routeID int64) (review
 	}
 	if err != nil {
 		return nil, "", err
+	}
+	if run.FinishedAt == nil || d.now().Sub(*run.FinishedAt) > reviewSendMaxAge {
+		return nil, noteReviewTooOld, nil
 	}
 	onReview := false
 	if run.ReviewID != nil {
