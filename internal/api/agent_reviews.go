@@ -1,8 +1,10 @@
 package api
 
 import (
+	"bufio"
 	"context"
 	"errors"
+	"io"
 	"maps"
 	"net/http"
 	"regexp"
@@ -13,6 +15,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/rcss-labs/harbormaster/internal/agentresult"
 	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/authz"
 	"github.com/rcss-labs/harbormaster/internal/model"
@@ -32,11 +35,20 @@ const (
 // clusterNamePattern is what an ECS cluster name may hold, the rule the review job reads scope entries by.
 var clusterNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,255}$`)
 
-// reviewTypeOptions are the review types the form offers, in its order, with their fixed labels. The ids are the
-// store's; the agent's catalogue says which of them it supports.
+// reviewTypeOptions are the review types in the form's order, with their fixed labels; offeredReviewTypes is what the
+// form offers. The ids are the store's; the agent's catalogue says which of them it supports. Custom is the last one.
 var reviewTypeOptions = []AgentReviewTypeDTO{
 	{ID: "cost", Label: "Cost"}, {ID: "security", Label: "Security findings"},
 	{ID: "reliability", Label: "Reliability"}, {ID: "capacity", Label: "Capacity"},
+	{ID: store.ReviewTypeCustom, Label: "Custom"},
+}
+
+// offeredReviewTypes leaves the custom type out while HM_AGENT_CUSTOM_REVIEWS is off.
+func (s *Server) offeredReviewTypes() []AgentReviewTypeDTO {
+	if s.Cfg.AgentCustomReviews {
+		return reviewTypeOptions
+	}
+	return slices.DeleteFunc(slices.Clone(reviewTypeOptions), func(t AgentReviewTypeDTO) bool { return t.ID == store.ReviewTypeCustom })
 }
 
 var (
@@ -61,6 +73,56 @@ func (e *reviewFieldError) Error() string { return e.message }
 
 func reviewInvalid(field, message string) *reviewFieldError {
 	return &reviewFieldError{field: field, code: "invalid", message: message}
+}
+
+var (
+	errCustomReviewsOff = &reviewFieldError{field: "type", code: "custom_reviews_off",
+		message: "Custom reviews are turned off on this server."}
+	errReviewTypeFixed = &reviewFieldError{field: "type", code: "type_fixed",
+		message: "A review cannot be changed to or from the custom type. Create a new review instead."}
+)
+
+// instructionMessages are the answers for a refused text. They are fixed: a refusal never repeats any part of it.
+var instructionMessages = map[string]string{
+	"instructions_required": "Write what the review should look at.",
+	"instructions_too_long": "The instructions can have at most 2000 characters and 8000 bytes.",
+	"instructions_not_text": "The instructions hold something that is not text. Type them again.",
+	"instructions_hidden":   "The instructions hold hidden or control characters. Type them again, or paste them as plain text.",
+	"instructions_secret": "Part of the instructions looks like a secret, such as a key, a token or a password, or is a long random-looking name. " +
+		"Instructions are sent to the model provider, so remove it. To name a service whose name looks random, use its tag or the scope.",
+	instructionsNotAllowed: "Only a custom review takes instructions.",
+}
+
+const instructionsNotAllowed = "instructions_not_allowed"
+
+// instructionsProblem is the code a save of the text answers, or "" when it is accepted. clean is the text after
+// agentresult.CleanInstructions.
+func instructionsProblem(reviewType, clean string) string {
+	if reviewType != store.ReviewTypeCustom {
+		if clean != "" {
+			return instructionsNotAllowed
+		}
+		return ""
+	}
+	if problem := agentresult.CheckInstructions(clean); problem != agentresult.InstructionsOK {
+		return "instructions_" + string(problem)
+	}
+	return ""
+}
+
+// reviewInstructions cleans and checks the text of a save.
+func reviewInstructions(reviewType, raw string) (string, error) {
+	clean := agentresult.CleanInstructions(raw)
+	if code := instructionsProblem(reviewType, clean); code != "" {
+		return "", &reviewFieldError{field: "instructions", code: code, message: instructionMessages[code]}
+	}
+	return clean, nil
+}
+
+// customOff reports whether a review of the type can be neither saved nor run: it is custom and the operator's switch
+// is off. Such a review stays listed and can be deleted.
+func (s *Server) customOff(reviewType string) bool {
+	return reviewType == store.ReviewTypeCustom && !s.Cfg.AgentCustomReviews
 }
 
 // failReview answers like fail, and adds the field of a refusal that has one.
@@ -183,6 +245,7 @@ func (s *Server) reviewDTOs(r *http.Request, reviews []store.Review) ([]ReviewDT
 			Scope:             []NotificationSelectorDTO{},
 			Routes:            []ReviewRouteDTO{},
 			WorstCaseMonthUSD: worstCaseMonthUSD(review.Cadence, runCost, costKnown),
+			Instructions:      review.Instructions,
 		}
 		for _, info := range notify.DescribeScope(review.Scope, targets, tags) {
 			dto.Scope = append(dto.Scope, selectorDTO(info))
@@ -211,7 +274,9 @@ func (s *Server) reviewDTOFor(r *http.Request, review store.Review) (ReviewDTO, 
 	return dtos[0], nil
 }
 
-// reviewAuditView is the audit snapshot of a review: its definition, with the scope as short entries.
+// reviewAuditView is the audit snapshot of a review: its definition, with the scope as short entries. The instructions
+// are there in full, with their hash, so the audit log (admins only) says what a run was told; both are empty for a
+// built-in type.
 func reviewAuditView(review store.Review) map[string]any {
 	scope := make([]string, len(review.Scope))
 	for i, sel := range review.Scope {
@@ -227,7 +292,12 @@ func reviewAuditView(review store.Review) map[string]any {
 			scope[i] = "tag:" + strconv.FormatInt(int64(sel.TagID), 10)
 		}
 	}
+	hash := ""
+	if review.Instructions != "" {
+		hash = agentresult.InstructionsHash(review.Instructions)
+	}
 	return map[string]any{
+		"instructions": review.Instructions, "instructions_sha256": hash,
 		"name": review.Name, "type": review.Type, "enabled": review.Enabled, "scope": scope, "route_ids": nonNilIDs(review.RouteIDs), "version": review.Version,
 		"schedule": map[string]any{"cadence": review.Cadence, "at_minute": review.AtMinute, "weekday": optionalInt(review.Weekday),
 			"month_day": optionalInt(review.MonthDay), "timezone": review.Timezone},
@@ -364,7 +434,7 @@ func (s *Server) reviewRouteIDs(ctx context.Context, in []int64) ([]int64, error
 	return ids, nil
 }
 
-// buildReview validates in in the order the form shows it (name, type, schedule, scope, routes) and builds the
+// buildReview validates in in the order the form shows it (name, type, instructions, schedule, scope, routes) and builds the
 // definition to store. Nothing is written. stored is the review being edited, when there is one.
 func (s *Server) buildReview(ctx context.Context, in ReviewInput, stored *store.Review) (store.Review, error) {
 	name, err := reviewName(in.Name)
@@ -373,6 +443,16 @@ func (s *Server) buildReview(ctx context.Context, in ReviewInput, stored *store.
 	}
 	if !slices.ContainsFunc(reviewTypeOptions, func(t AgentReviewTypeDTO) bool { return t.ID == in.Type }) {
 		return store.Review{}, reviewInvalid("type", "Choose a review type.")
+	}
+	if s.customOff(in.Type) {
+		return store.Review{}, errCustomReviewsOff
+	}
+	if stored != nil && (stored.Type == store.ReviewTypeCustom) != (in.Type == store.ReviewTypeCustom) {
+		return store.Review{}, errReviewTypeFixed
+	}
+	instructions, err := reviewInstructions(in.Type, in.Instructions)
+	if err != nil {
+		return store.Review{}, err
 	}
 	schedule, err := reviewSchedule(in.Schedule)
 	if err != nil {
@@ -391,7 +471,7 @@ func (s *Server) buildReview(ctx context.Context, in ReviewInput, stored *store.
 		return store.Review{}, err
 	}
 	review := store.Review{Name: name, Type: in.Type, Enabled: in.Enabled, Cadence: schedule.Cadence, AtMinute: schedule.AtMinute,
-		Weekday: schedule.Weekday, MonthDay: schedule.MonthDay, Timezone: schedule.Timezone, Scope: scope, RouteIDs: routeIDs}
+		Weekday: schedule.Weekday, MonthDay: schedule.MonthDay, Timezone: schedule.Timezone, Scope: scope, RouteIDs: routeIDs, Instructions: instructions}
 	if stored != nil {
 		review.ID = stored.ID
 	}
@@ -418,7 +498,8 @@ func (s *Server) onlyTurnsOff(ctx context.Context, in ReviewInput, stored store.
 	}
 	same := strings.TrimSpace(in.Name) == stored.Name && in.Type == stored.Type && in.Schedule.Cadence == stored.Cadence &&
 		in.Schedule.AtMinute == stored.AtMinute && in.Schedule.Timezone == stored.Timezone &&
-		derefInt(in.Schedule.Weekday) == stored.Weekday && derefInt(in.Schedule.MonthDay) == stored.MonthDay
+		derefInt(in.Schedule.Weekday) == stored.Weekday && derefInt(in.Schedule.MonthDay) == stored.MonthDay &&
+		agentresult.CleanInstructions(in.Instructions) == stored.Instructions
 	if !same {
 		return false, nil
 	}
@@ -465,6 +546,8 @@ func reviewStoreError(err error) error {
 	switch {
 	case errors.Is(err, store.ErrReviewLimit):
 		return &reviewFieldError{field: "name", code: errReviewLimit.Code, message: errReviewLimit.Message}
+	case errors.Is(err, store.ErrReviewTypeFixed):
+		return errReviewTypeFixed
 	case errors.Is(err, store.ErrReviewInvalid):
 		// Everything was checked before the write; this is a change that raced it (a route deleted, say).
 		return reviewInvalid("", "The review is not valid any more. Reload and try again.")
@@ -532,6 +615,10 @@ func (s *Server) updateAgentReview(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, errReviewStale) // before anything else is looked at
 		return
 	}
+	if s.customOff(before.Type) { // turning it off included: it does not run anyway
+		s.failReview(w, errCustomReviewsOff)
+		return
+	}
 	var review store.Review
 	if only, err := s.onlyTurnsOff(ctx, in, before); err != nil {
 		s.fail(w, err)
@@ -595,8 +682,9 @@ func (s *Server) deleteAgentReview(w http.ResponseWriter, r *http.Request) {
 
 // previewAgentReview answers what a draft would cover: its services and how many the agent identity cannot View now
 // (the counting of a route's preview), its next occurrence and its month's worst case. It validates the name, type,
-// schedule and scope, and ignores what is off (the switch, reviews being off, the routes) and a missing model: the
-// money members are then null. Nothing is written.
+// schedule and scope, and ignores what is off (the switches, reviews being off, the routes) and a missing model: the
+// money members are then null. The draft's instructions are checked as a save checks them and the problem is reported
+// beside the counts. No model is called and nothing is written.
 func (s *Server) previewAgentReview(w http.ResponseWriter, r *http.Request) {
 	var in ReviewInput
 	if err := decodeStrictJSON(w, r, &in); err != nil {
@@ -650,13 +738,43 @@ func (s *Server) previewAgentReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, ReviewPreviewDTO{ServicesTotal: counts.ServicesTotal, ServicesUnseen: counts.ServicesUnseen,
-		NextRunAt: nextOccurrence(schedule, s.now()), WorstCaseMonthUSD: worstCaseMonthUSD(schedule.Cadence, runCost, known)})
+		NextRunAt: nextOccurrence(schedule, s.now()), WorstCaseMonthUSD: worstCaseMonthUSD(schedule.Cadence, runCost, known),
+		InstructionsProblem: instructionsProblem(in.Type, agentresult.CleanInstructions(in.Instructions))})
+}
+
+// reviewRunIsTest reads the optional body of a run now. No body, an empty object or "deliver": true is an ordinary run;
+// "deliver": false is a test run. Everything else is refused, so a misread body never sends a message.
+func reviewRunIsTest(w http.ResponseWriter, r *http.Request) (bool, error) {
+	body := bufio.NewReader(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+	if _, err := body.Peek(1); errors.Is(err, io.EOF) {
+		return false, nil
+	}
+	r.Body = io.NopCloser(body) // the server closes the original
+	var in *ReviewRunInput
+	if err := decodeStrictJSON(w, r, &in); err != nil {
+		return false, err
+	}
+	if in != nil {
+		switch string(in.Deliver) {
+		case "", "true":
+			return false, nil
+		case "false":
+			return true, nil
+		}
+	}
+	return false, invalid("Invalid request body.")
 }
 
 // runAgentReviewNow records a run of the review for the job to take up and kicks it. It reserves nothing and calls no
-// model: the job does both, under the monthly allowance, like any scheduled run. A disabled review can be run.
+// model: the job does both, under the monthly allowance, like any scheduled run. A disabled review can be run. A test
+// run is the same run with its result stored and never sent.
 func (s *Server) runAgentReviewNow(w http.ResponseWriter, r *http.Request) {
 	id, err := notificationIDFrom(r)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	test, err := reviewRunIsTest(w, r)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -671,6 +789,10 @@ func (s *Server) runAgentReviewNow(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, errReviewsOff)
 		return
 	}
+	if s.customOff(review.Type) {
+		s.failReview(w, errCustomReviewsOff)
+		return
+	}
 	settings, err := s.Store.GetAgentSettings(ctx)
 	if err != nil {
 		s.fail(w, err)
@@ -681,7 +803,11 @@ func (s *Server) runAgentReviewNow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := s.now()
-	run, err := s.Store.RequestManualReviewRun(ctx, id, "Run on "+now.UTC().Format("2 Jan 2006, 15:04")+" UTC", false, now)
+	verb, summary := "Run", "Ran review "+strconv.Quote(review.Name)+" now."
+	if test {
+		verb, summary = "Test", "Ran a test of review "+strconv.Quote(review.Name)+", which is not sent."
+	}
+	run, err := s.Store.RequestManualReviewRun(ctx, id, verb+" on "+now.UTC().Format("2 Jan 2006, 15:04")+" UTC", test, now)
 	switch {
 	case errors.Is(err, store.ErrConflict):
 		s.fail(w, errReviewBusy)
@@ -690,8 +816,8 @@ func (s *Server) runAgentReviewNow(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	s.auditAdmin(r, "agent_review_run", review.Name, "Ran review "+strconv.Quote(review.Name)+" now.",
-		map[string]any{"review_id": review.ID, "run_id": run.ID, "type": review.Type})
+	s.auditAdmin(r, "agent_review_run", review.Name, summary,
+		map[string]any{"review_id": review.ID, "run_id": run.ID, "type": review.Type, "test": test})
 	s.kickReview()
 	writeJSON(w, http.StatusAccepted, ReviewRunStartedDTO{RunID: run.ID})
 }
@@ -701,7 +827,7 @@ func reviewRunRowDTO(run store.ReviewRun, cost string) AgentReviewRunDTO {
 		ID: run.ID, ReviewID: run.ReviewID, Name: run.ReviewName, Type: run.ReviewType, Manual: run.Manual, State: run.State, Reason: run.Reason,
 		PeriodLabel: run.PeriodLabel, ScopeLabel: run.ScopeLabel, ServicesTotal: run.ServicesTotal, ScheduledFor: run.ScheduledFor,
 		RequestedAt: run.RequestedAt, StartedAt: run.StartedAt, FinishedAt: run.FinishedAt, Provider: run.Provider, Model: run.Model,
-		Attempts: run.Attempts, CostUSD: cost,
+		Attempts: run.Attempts, CostUSD: cost, Test: run.Test, Instructions: run.Instructions,
 	}
 	if run.State == "done" { // a summary is shown for a finished run only
 		dto.Summary, dto.SummaryReplaced = run.Summary, run.SummaryReplaced

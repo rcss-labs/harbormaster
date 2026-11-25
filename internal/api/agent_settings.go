@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/rcss-labs/harbormaster/internal/agentclient"
+	"github.com/rcss-labs/harbormaster/internal/agentresult"
 	"github.com/rcss-labs/harbormaster/internal/agentrun"
 	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/secretshape"
@@ -217,10 +218,11 @@ func (s *Server) agentSettingsDTO(r *http.Request) (AgentSettingsDTO, error) {
 	}
 	out.Reviews = AgentReviewsDTO{
 		Enabled: s.Cfg.AgentReviewsPerDay > 0, PerDay: s.Cfg.AgentReviewsPerDay, MaxLateMinutes: int(s.Cfg.AgentReviewMaxLate / time.Minute),
-		MaxReviews: store.MaxAgentReviews, Types: reviewTypeOptions, SupportedTypes: []string{},
+		MaxReviews: store.MaxAgentReviews, Types: s.offeredReviewTypes(), SupportedTypes: []string{},
+		CustomEnabled: s.Cfg.AgentCustomReviews, MaxInstructionChars: agentresult.MaxInstructionChars,
 	}
 	if catErr == nil {
-		for _, option := range reviewTypeOptions {
+		for _, option := range out.Reviews.Types {
 			if cat.SupportsReview(option.ID) {
 				out.Reviews.SupportedTypes = append(out.Reviews.SupportedTypes, option.ID)
 			}
