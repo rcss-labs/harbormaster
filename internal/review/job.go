@@ -40,6 +40,7 @@ const (
 	reasonRateLimited   = "rate_limited"
 	reasonMissed        = "missed"
 	reasonDisabled      = "disabled"
+	reasonInstructions  = "instructions"
 	reasonUnavailable   = "agent_unavailable"
 	reasonLimitReached  = "limit_reached"
 	reasonNoResult      = "no_result"
@@ -50,7 +51,7 @@ const (
 // knownType is the closed set of review types this code runs; a type of a later release is not one of them.
 func knownType(reviewType string) bool {
 	switch reviewType {
-	case "cost", "security", "reliability", "capacity":
+	case "cost", "security", "reliability", "capacity", store.ReviewTypeCustom:
 		return true
 	}
 	return false
@@ -80,7 +81,8 @@ func failed(reason string) ending  { return ending{kind: endFailed, reason: reas
 func skipped(reason string) ending { return ending{kind: endSkipped, reason: reason, word: reason} }
 
 // job is one claimed review run. One goroutine owns it; however it ends, finish runs once. It never logs or audits the
-// review's name, its scope, the agent's message or anything of the result. The paid run itself is the driver's.
+// review's name, its scope or instructions, the agent's message or anything of the result. The paid run itself is the
+// driver's.
 type job struct {
 	r     *Runner
 	run   store.ReviewRun
@@ -89,6 +91,7 @@ type job struct {
 
 	identity store.User
 	prepared agentjob.Prepared
+	text     string            // the instructions of a custom review's run, "" for every other type
 	start    store.ReviewStart // what is recorded with the start, but for the run
 	task     agentclient.Task
 	leave    int64
@@ -195,6 +198,9 @@ func (j *job) prepare(ctx context.Context) *ending {
 		return j.unready(ctx)
 	}
 	j.identity = identity
+	if j.run.ReviewType == store.ReviewTypeCustom {
+		j.text = j.run.Instructions // the copy of an earlier start, which every later attempt uses
+	}
 	if err := j.endPreviousRun(ctx); err != nil {
 		// It may still hold its reservation, or cost more: no second run beside it.
 		return failedStep("the previous run is not settled", err)
@@ -202,6 +208,9 @@ func (j *job) prepare(ctx context.Context) *ending {
 
 	if !knownType(j.run.ReviewType) {
 		return skip(reasonNotConfigured)
+	}
+	if j.r.off(j.run.ReviewType) {
+		return skip(reasonDisabled)
 	}
 	rv, err := j.review(ctx)
 	if errors.Is(err, store.ErrNotFound) {
@@ -250,6 +259,15 @@ func (j *job) prepare(ctx context.Context) *ending {
 		return j.waitForTheAgent()
 	}
 	j.prepared = prepared
+	if j.run.ReviewType == store.ReviewTypeCustom {
+		if j.text == "" {
+			j.text = rv.Instructions
+		}
+		// Saved under older rules, or not through the API.
+		if agentresult.CheckInstructions(j.text) != agentresult.InstructionsOK || agentresult.CleanInstructions(j.text) != j.text {
+			return skip(reasonInstructions)
+		}
+	}
 
 	covered, err := agentjob.Within(ctx, func(ctx context.Context) (Covered, error) {
 		subject, err := agentjob.ReadOnlySubject(ctx, j.r.Store, identity.ID)
@@ -265,10 +283,10 @@ func (j *job) prepare(ctx context.Context) *ending {
 		return skip(reasonNotVisible)
 	}
 	span := reviewsched.Range(cadence(j.run, rv))
-	j.start = store.ReviewStart{ScopeLabel: covered.Label, Range: span, CoveredTags: covered.Tags, ServicesTotal: covered.Services}
+	j.start = store.ReviewStart{ScopeLabel: covered.Label, Range: span, CoveredTags: covered.Tags, ServicesTotal: covered.Services, Instructions: j.text}
 	j.task = agentclient.Task{
 		Kind:   "review",
-		Review: &agentclient.TaskReview{Type: j.run.ReviewType, Range: span, Period: periodText(j.run)},
+		Review: &agentclient.TaskReview{Type: j.run.ReviewType, Range: span, Period: periodText(j.run), Instructions: j.text},
 		Scope:  &agentclient.TaskScope{Entries: covered.Entries, ServicesTotal: min(covered.Services, maxTaskServices)},
 	}
 	j.leave = agentrun.LeaveFor(prepared.Catalogue, prepared.Settings, "chat", "investigator")
@@ -302,13 +320,19 @@ func (j *job) endPreviousRun(ctx context.Context) error {
 	return j.drv.EndEarlier(ctx, j.identity, run, j.details())
 }
 
-// details are what the audit row of a run says besides the run: ids and fixed words only.
+// details are what the audit row of a run says besides the run: ids, fixed words and the hash of its instructions, by
+// which the audit entry that introduced them is found.
 func (j *job) details() map[string]any {
 	var reviewID any
 	if j.run.ReviewID != nil {
 		reviewID = *j.run.ReviewID
 	}
-	return map[string]any{"review_id": reviewID, "review_run_id": j.run.ID, "review_type": j.run.ReviewType}
+	hash := ""
+	if j.text != "" {
+		hash = agentresult.InstructionsHash(j.text)
+	}
+	return map[string]any{"review_id": reviewID, "review_run_id": j.run.ID, "review_type": j.run.ReviewType,
+		"instructions_sha256": hash, "test": j.run.Test}
 }
 
 // conclude is what the driver asks, once, of a run that was reserved: what becomes of the review run, and the write
@@ -457,7 +481,7 @@ func (j *job) storeOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	accepted := agentjob.Accept(*j.result, see.Can, agentjob.AcceptOptions{Replacement: agentresult.ReplacementReviewSummary})
+	accepted := agentjob.Accept(*j.result, see.Can, agentjob.AcceptOptions{Replacement: agentresult.ReplacementReviewSummary, Echo: j.text})
 	if err := see.Err(); err != nil {
 		return err
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -643,5 +644,41 @@ func TestStartReview_CopyHoldsAgainstAnUncommittedCopyAndAFreeRelease(t *testing
 	}
 	if got := reviewRunState(t, s2, other.ID); got.Instructions != "other writer" {
 		t.Fatalf("copy = %q, want the other transaction's copy kept", got.Instructions)
+	}
+}
+
+// Phase 3's readers decide by tags and know no test run: the finish leaves a test run without any, as the start does.
+func TestTestRun_StoresNoCoveredTagsAtTheFinish(t *testing.T) {
+	for name, c := range map[string]struct {
+		test          bool
+		state, reason string
+		also, want    []int64
+	}{
+		"a test run that is done":  {true, "done", "", []int64{7, 9}, []int64{}},
+		"a test run that failed":   {true, "failed", "error", nil, []int64{}},
+		"an ordinary run":          {false, "done", "", []int64{9}, []int64{7, 9}},
+		"an ordinary run, no more": {false, "done", "", nil, []int64{7}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, ctx := storetest.Open(t), context.Background()
+			rv := oldReview(t, s, "a", reviewRoute(t, s, "r").ID)
+			if _, err := s.RequestManualReviewRun(ctx, rv.ID, "by hand", c.test, revNow); err != nil {
+				t.Fatal(err)
+			}
+			run := claimReview(t, s, revNow)
+			if err := s.StartReviewRun(ctx, run.Claim(), store.ReviewStart{RunID: uuid.New(), Provider: "p", Model: "m", CoveredTags: []int64{7}}, revNow); err != nil {
+				t.Fatal(err)
+			}
+			var res *store.InvestigationResult
+			if c.state == "done" {
+				res = &store.InvestigationResult{Summary: "s"}
+			}
+			if err := s.FinishReviewRun(ctx, run.Claim(), c.state, c.reason, res, c.also, revNow); err != nil {
+				t.Fatal(err)
+			}
+			if got := reviewRunState(t, s, run.ID).CoveredTags; !reflect.DeepEqual(got, c.want) {
+				t.Errorf("covered = %v, want %v", got, c.want)
+			}
+		})
 	}
 }

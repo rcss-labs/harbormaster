@@ -32,6 +32,13 @@ func TestServe_ReviewJobNeedsTheAgentAndACap(t *testing.T) {
 		r.Driver == nil || r.Driver.Store == nil || r.Driver.Auth == nil || r.Driver.Guard != nil || r.Now == nil {
 		t.Fatalf("job = %+v", r)
 	}
+	if r.CustomReviews {
+		t.Error("custom reviews run although they are not switched on")
+	}
+	on.AgentCustomReviews = true
+	if custom := newReviewer(on, st, nil, nil, log); !custom.CustomReviews {
+		t.Error("custom reviews do not run although they are switched on")
+	}
 	r.KickNotify()
 	d := &notify.Dispatcher{}
 	wireReviews(d, r)
