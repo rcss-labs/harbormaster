@@ -4,6 +4,7 @@ import { http, HttpResponse } from 'msw'
 import { describe, expect, it, vi } from 'vitest'
 import { SERVICE_PAYMENTS } from '../../../test/fixtures'
 import { server } from '../../../test/msw'
+import { INVESTIGATION_DONE, mockInvestigations } from '../../../test/investigationFixtures'
 import { renderApp } from '../../../test/renderApp'
 import { LOG_ERRORS_NO_LOGS, LOG_ERRORS_OK, LOG_ERRORS_UNAVAILABLE, TIMELINE_EMPTY, TIMELINE_FAILING } from '../../../test/timelineFixtures'
 
@@ -252,5 +253,49 @@ describe('TimelineTab', () => {
 
     expect(screen.getByText('Turn on at least one lane.')).toBeInTheDocument()
     expect(screen.getByText(`You need Logs on ${SERVICE_PAYMENTS.tag.name}`)).toBeInTheDocument()
+  })
+})
+
+describe('TimelineTab investigations', () => {
+  it('lists investigations and opens one', async () => {
+    mockInvestigations()
+    renderApp(route)
+    const user = userEvent.setup()
+
+    const section = await screen.findByRole('region', { name: 'Investigations' })
+    const open = await within(section).findByRole('button', { name: 'Diagnosis ready' })
+    expect(within(section).getByText('The tasks fail to start because the image tag does not exist.')).toBeInTheDocument()
+    expect(within(section).queryByText(/A second line/)).not.toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /^\d\d:\d\d Investigation$/ })).toBeInTheDocument()
+
+    await user.click(open)
+
+    const drawer = await screen.findByRole('dialog', { name: 'Investigation' })
+    expect(await within(drawer).findByText('CannotPullContainerError: manifest unknown')).toBeInTheDocument()
+    expect(screen.getByTestId('search')).toHaveTextContent(`investigation=${INVESTIGATION_DONE.id}`)
+
+    await user.click(within(drawer).getByRole('button', { name: 'Close panel' }))
+    expect(screen.queryByRole('dialog', { name: 'Investigation' })).not.toBeInTheDocument()
+    expect(screen.getByTestId('search')).not.toHaveTextContent('investigation=')
+  })
+
+  it('opens from the query parameter', async () => {
+    mockInvestigations()
+    renderApp(`${route}?investigation=${INVESTIGATION_DONE.id}`)
+
+    const drawer = await screen.findByRole('dialog', { name: 'Investigation' })
+    expect(await within(drawer).findByText('CannotPullContainerError: manifest unknown')).toBeInTheDocument()
+  })
+
+  it('no request when the agent is off', async () => {
+    const requested = mockInvestigations([INVESTIGATION_DONE], false)
+    renderApp(`${route}?investigation=${INVESTIGATION_DONE.id}`)
+
+    await within(await screen.findByRole('table')).findByRole('button', { name: 'Deployed revision 6' })
+    await new Promise((resolve) => setTimeout(resolve, 100))
+
+    expect(requested).toEqual([])
+    expect(screen.queryByRole('region', { name: 'Investigations' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Investigation' })).not.toBeInTheDocument()
   })
 })

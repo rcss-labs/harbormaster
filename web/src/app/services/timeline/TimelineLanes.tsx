@@ -19,6 +19,9 @@ interface TimelineLanesProps {
   selectedId: string | null
   laneStates: Record<TimelineLane, LaneRowState>
   onSelect: (group: MarkerGroup) => void
+  /** Where investigations were requested, as a row of their own; absent when the agent is off or there are none in range. */
+  investigations?: { id: number; pct: number; label: string }[]
+  onSelectInvestigation?: (id: number) => void
 }
 
 const LANE_ORDER = Object.keys(LANES) as TimelineLane[]
@@ -31,7 +34,7 @@ const markerClass: Record<TimelineEvent['severity'], string> = {
   info: styles.info,
 }
 
-export function TimelineLanes({ groups, from, to, selectedId, laneStates, onSelect }: TimelineLanesProps) {
+export function TimelineLanes({ groups, from, to, selectedId, laneStates, onSelect, investigations = [], onSelectInvestigation }: TimelineLanesProps) {
   const withDate = to - from > DAY_MS
   return (
     <div className={styles.scroll}>
@@ -78,6 +81,24 @@ export function TimelineLanes({ groups, from, to, selectedId, laneStates, onSele
             </div>
           )
         })}
+        {investigations.length > 0 && (
+          <div className={styles.laneRow}>
+            <div className={styles.laneLabel}>Investigations</div>
+            <div className={styles.laneTrack}>
+              {investigations.map((marker) => (
+                <button
+                  key={marker.id}
+                  type="button"
+                  className={`${styles.marker} ${styles.acc}`}
+                  style={{ left: `${marker.pct}%` }}
+                  title={marker.label}
+                  aria-label={marker.label}
+                  onClick={() => onSelectInvestigation?.(marker.id)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
         <div className={styles.axis} aria-hidden="true">
           {axisTicks(from, to).map((tick) => (
             <span key={tick.pct} className={styles.tick} style={{ left: `${tick.pct}%` }}>

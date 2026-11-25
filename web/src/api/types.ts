@@ -730,6 +730,14 @@ export interface AlertDTO {
   next_step: AlertStepDTO
   /** The newest change just before the alert; null when unknown, never guessed. */
   just_before: AlertChangeDTO | null
+  /** The investigation of this alert's incident. Only for session callers on a server with the agent; absent or null otherwise. */
+  investigation?: AlertInvestigationDTO | null
+}
+/** The alert's own link to its investigation. */
+export interface AlertInvestigationDTO {
+  id: number
+  state: string
+  reason: string
 }
 export interface AlertStepDTO {
   label: string
