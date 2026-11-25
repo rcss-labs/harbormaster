@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../app/auth/AuthProvider'
 import { api, ApiError, getCsrfToken } from './client'
 import type { AgentConversationDTO, AgentConversationSummaryDTO, AgentPageContext, AgentStatusDTO } from './types'
@@ -227,16 +227,57 @@ export interface AgentSettingsDTO {
   version: number
   monthly_budget_usd: string
   unredacted_providers: string[]
-  role_models: { chat?: AgentChatModel }
+  role_models: { chat?: AgentChatModel; investigator?: AgentChatModel }
   catalogue: { providers: { provider: string; models: AgentCatalogueModel[] }[] }
   agent_reachable: boolean
   spend: { month: string; settled_usd: string; reserved_usd: string }
+  identity: AgentIdentityDTO
+  /** Read-only: set by the operator's configuration. */
+  investigator: AgentInvestigatorLimits
+}
+export interface AgentIdentityPermission {
+  tag_id: number
+  tag_name: string
+  /** View and logs; false is View only. A tag without an entry gives no access. */
+  logs: boolean
+}
+export interface AgentIdentityDTO {
+  username: string
+  permissions: AgentIdentityPermission[]
+}
+export interface AgentInvestigatorLimits {
+  window_minutes: number
+  per_hour: number
+  concurrent: number
+  max_wait_minutes: number
+}
+export type InvestigationState = 'requested' | 'running' | 'done' | 'failed' | 'skipped'
+export interface AgentInvestigationDTO {
+  id: number
+  state: InvestigationState
+  reason: string
+  subject: { kind: 'service' | 'cluster' | 'account'; service_id: string; service: string; cluster: string; cluster_id: string; account_id: string; region: string }
+  alert: { kind: string; title: string }
+  requested_at: string
+  started_at: string | null
+  finished_at: string | null
+  summary: string
+  summary_replaced: boolean
+  provider: string
+  model: string
+  attempts: number
+  cost_usd: string
+}
+export interface AgentInvestigationsPage {
+  items: AgentInvestigationDTO[]
+  /** Empty on the last page. */
+  next_cursor: string
 }
 export interface AgentSettingsUpdate {
   version: number
   monthly_budget_usd: string
   unredacted_providers: string[]
-  role_models: { chat?: { provider: string; model: string } }
+  role_models: { chat?: { provider: string; model: string }; investigator?: { provider: string; model: string } }
 }
 export interface AgentTestResult {
   ok: boolean
@@ -250,8 +291,8 @@ export interface AgentUsageDTO {
 
 const SETTINGS_KEY = ['agent', 'settings'] as const
 
-export function useAgentSettings() {
-  return useQuery({ queryKey: SETTINGS_KEY, queryFn: () => api.get<AgentSettingsDTO>('/api/agent/settings') })
+export function useAgentSettings(enabled = true) {
+  return useQuery({ queryKey: SETTINGS_KEY, queryFn: () => api.get<AgentSettingsDTO>('/api/agent/settings'), enabled })
 }
 
 export function useSaveAgentSettings() {
@@ -259,9 +300,30 @@ export function useSaveAgentSettings() {
   return useMutation({
     mutationFn: (body: AgentSettingsUpdate) => api.put<AgentSettingsDTO>('/api/agent/settings', body),
     onSuccess: (saved) => {
-      queryClient.setQueryData(SETTINGS_KEY, saved)
+      // The identity has its own save; a settings answer made before it must not put the old access back.
+      queryClient.setQueryData<AgentSettingsDTO>(SETTINGS_KEY, (current) => (current ? { ...saved, identity: current.identity } : saved))
       void queryClient.invalidateQueries({ queryKey: STATUS_KEY })
     },
+  })
+}
+
+export function useSaveAgentIdentity() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { permissions: { tag_id: number; logs: boolean }[] }) => api.put<AgentIdentityDTO>('/api/agent/identity', body),
+    onSuccess: (identity) => {
+      queryClient.setQueryData<AgentSettingsDTO>(SETTINGS_KEY, (current) => (current ? { ...current, identity } : current))
+    },
+  })
+}
+
+/** Past investigations, newest first, a page at a time. */
+export function useAgentInvestigations() {
+  return useInfiniteQuery({
+    queryKey: ['agent', 'investigations'],
+    queryFn: ({ pageParam }) => api.get<AgentInvestigationsPage>(`/api/agent/investigations${pageParam ? `?cursor=${encodeURIComponent(pageParam)}` : ''}`),
+    initialPageParam: '',
+    getNextPageParam: (last) => last.next_cursor || undefined,
   })
 }
 
