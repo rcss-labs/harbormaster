@@ -260,6 +260,51 @@ func TestRunner_EndSettlesDeletesTheTokenAndAudits(t *testing.T) {
 	}
 }
 
+// The one who ends a run learns whether it was settled, and a run that had ended before is not reported as ended again.
+func TestRunner_EndReportsWhetherTheRunWasSettled(t *testing.T) {
+	bad := errors.New("no")
+	for name, c := range map[string]struct {
+		settle error
+		want   error
+		logged bool
+	}{
+		"settled":        {nil, nil, true},
+		"ended before":   {store.ErrAgentRunNotRunning, nil, false},
+		"not there":      {store.ErrNotFound, store.ErrNotFound, false},
+		"not settled":    {bad, bad, false},
+		"a settle panic": {errPanic, nil, false},
+	} {
+		st := &fakeRunnerStore{}
+		st.settleErr = c.settle
+		var logs bytes.Buffer
+		r := &Runner{Store: st, Log: slog.New(slog.NewTextHandler(&logs, nil))}
+		if c.settle == errPanic {
+			r.Store = panicSettle{st}
+		}
+		res := r.End(t.Context(), store.AgentRun{ID: uuid.New()}, Actor{Name: "a"}, "", Ending{Outcome: "interrupted"}, nil)
+		if c.settle == errPanic {
+			var p *PanicError
+			if !errors.As(res.SettleErr, &p) {
+				t.Errorf("%s: SettleErr = %v", name, res.SettleErr)
+			}
+		} else if !errors.Is(res.SettleErr, c.want) {
+			t.Errorf("%s: SettleErr = %v, want %v", name, res.SettleErr, c.want)
+		}
+		if got := strings.Contains(logs.String(), "agent run finished"); got != c.logged {
+			t.Errorf("%s: logged as finished: %v, want %v", name, got, c.logged)
+		}
+	}
+}
+
+var errPanic = errors.New("panic")
+
+// panicSettle is a store whose settle panics.
+type panicSettle struct{ *fakeRunnerStore }
+
+func (panicSettle) SettleAgentRun(context.Context, uuid.UUID, string, *store.AgentUsage, []string, time.Time) error {
+	panic("boom")
+}
+
 // Finish needs no meter, no clock and no logger: the defaults stand in.
 func TestRunner_FinishWithNoMeterOrDefaults(t *testing.T) {
 	st := &fakeRunnerStore{}

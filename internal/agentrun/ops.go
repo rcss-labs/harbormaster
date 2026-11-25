@@ -3,6 +3,7 @@ package agentrun
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -32,6 +33,8 @@ type StoreOps struct {
 	Now           func() time.Time
 	SaveAnswer    func(ctx context.Context) (int64, error) // nil when the run has no answer to save
 	SlotToRelease func()                                   // nil when the run holds no slot
+
+	endedBefore atomic.Bool // Settle found the run ended
 }
 
 func (o *StoreOps) DeleteToken(ctx context.Context) error {
@@ -48,6 +51,7 @@ func (o *StoreOps) Settle(ctx context.Context) error {
 	}
 	err := o.Store.SettleAgentRun(ctx, o.Run.ID, o.State, usage, o.Tools, o.Now())
 	if errors.Is(err, store.ErrAgentRunNotRunning) {
+		o.endedBefore.Store(true)
 		return nil
 	}
 	return err

@@ -30,6 +30,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/deploy"
 	"github.com/rcss-labs/harbormaster/internal/devseed"
 	"github.com/rcss-labs/harbormaster/internal/focus"
+	"github.com/rcss-labs/harbormaster/internal/investigate"
 	"github.com/rcss-labs/harbormaster/internal/kv"
 	"github.com/rcss-labs/harbormaster/internal/lease"
 	"github.com/rcss-labs/harbormaster/internal/notify"
@@ -373,6 +374,17 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		notifyDispatcher = &notify.Dispatcher{Store: st, Senders: notifySenders, Box: notifyBox, BaseURL: cfg.BaseURL,
 			Interval: cfg.Notify.Interval, Settle: cfg.Notify.Settle, Now: time.Now, Log: log, Telemetry: telemetry.Default}
 	}
+	var agentClient *agentclient.Client // stays nil while HM_AGENT_URL is unset
+	if cfg.AgentEnabled() && (role.ServesAPI() || role.Coordinates()) {
+		if agentClient, err = agentclient.New(cfg.AgentURL, cfg.AgentCAPEM); err != nil {
+			return err
+		}
+	}
+	// The investigator runs under the coordinator lease, as the agent's own identity.
+	var investigator *investigate.Runner
+	if role.Coordinates() {
+		investigator = newInvestigator(ctx, cfg, st, agentClient, notifyDispatcher.Kick, log)
+	}
 	telemetry.Default.SetBuildInfo(version) // plan 06
 
 	// What each role serves: the API and web app (all, web), or only /healthz and /metrics (poller, coordinator).
@@ -401,12 +413,6 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		var storeHealth kv.Upper // stays a nil interface when there is no shared store
 		if kvHealth != nil {
 			storeHealth = kvHealth
-		}
-		var agentClient *agentclient.Client // stays nil while HM_AGENT_URL is unset
-		if cfg.AgentEnabled() {
-			if agentClient, err = agentclient.New(cfg.AgentURL, cfg.AgentCAPEM); err != nil {
-				return err
-			}
 		}
 		apiServer = api.New(api.Server{
 			Agent: agentClient,
@@ -476,6 +482,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 			if cfg.AgentEnabled() {
 				coordinatorRunner.AgentRuns = &agentrun.Reconciler{Store: st, Now: time.Now, Log: log}
 			}
+			coordinatorRunner.Investigate = investigator
 			pollerConfig.Coordinator = coordinatorRunner
 		}
 		pollerInstance = poller.New(st, clients, pollerConfig, log)
@@ -574,6 +581,24 @@ func imagePlatformResolver(cfg config.Config, st *store.Store, clients awsx.Clie
 		resolver.Public = &registry.Client{HTTP: registry.NewHTTPClient(safedial.Policy{}, nil)}
 	}
 	return resolver
+}
+
+// newInvestigator builds the job that runs the AI investigations of alerts and makes sure its identity exists, or
+// returns nil while the agent is off (no identity row may appear then). An identity that cannot be made now is no reason
+// not to serve: the job asks for it again. With HM_AGENT_INVESTIGATIONS_PER_HOUR=0 the job starts nothing and only ends
+// what was still requested.
+func newInvestigator(ctx context.Context, cfg config.Config, st *store.Store, agent *agentclient.Client, kickNotify func(), log *slog.Logger) *investigate.Runner {
+	if !cfg.AgentEnabled() {
+		return nil
+	}
+	if _, err := st.EnsureAgentIdentity(ctx); err != nil {
+		log.Error("agent identity not ready", "error", err)
+	}
+	return &investigate.Runner{
+		Store: st, Auth: auth.NewService(st, cfg), Agent: agent,
+		Concurrent: cfg.AgentInvestigationsConcurrent, PerHour: cfg.AgentInvestigationsPerHour, MaxWait: cfg.AgentInvestigationMaxWait,
+		KickNotify: kickNotify, Now: time.Now, Log: log,
+	}
 }
 
 // demoSeedOptions picks the extras fake AWS mode seeds: the demo notification routes, and the AI agent demo only when

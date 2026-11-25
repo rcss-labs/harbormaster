@@ -1002,6 +1002,32 @@ func TestLoad_AgentRunTokenTTLAndCAValidation(t *testing.T) {
 	}
 }
 
+func TestLoad_InvestigationSettingsValidation(t *testing.T) {
+	for name, values := range map[string]struct{ good, bad []string }{
+		"HM_AGENT_INVESTIGATION_WINDOW":      {[]string{"1m", "15m", "24h"}, []string{"0s", "59s", "24h1s", "-1m", "soon"}},
+		"HM_AGENT_INVESTIGATIONS_CONCURRENT": {[]string{"1", "8"}, []string{"0", "9", "-1", "two"}},
+		"HM_AGENT_INVESTIGATIONS_PER_HOUR":   {[]string{"0", "1", "500"}, []string{"-1", "many"}},
+		"HM_AGENT_INVESTIGATION_MAX_WAIT":    {[]string{"1m", "24h"}, []string{"0s", "59s", "24h1s", "-1m"}},
+	} {
+		for _, v := range values.good {
+			if _, err := Load(tokenEnv(map[string]string{name: v})); err != nil {
+				t.Errorf("%s=%s refused: %v", name, v, err)
+			}
+		}
+		for _, v := range values.bad {
+			if _, err := Load(tokenEnv(map[string]string{name: v})); err == nil || !strings.Contains(err.Error(), name) {
+				t.Errorf("%s=%s: err = %v, want one naming it", name, v, err)
+			}
+		}
+	}
+	cfg, err := Load(tokenEnv(map[string]string{"HM_AGENT_INVESTIGATION_WINDOW": "30m", "HM_AGENT_INVESTIGATIONS_CONCURRENT": "4",
+		"HM_AGENT_INVESTIGATIONS_PER_HOUR": "0", "HM_AGENT_INVESTIGATION_MAX_WAIT": "5m"}))
+	if err != nil || cfg.AgentInvestigationWindow != 30*time.Minute || cfg.AgentInvestigationsConcurrent != 4 ||
+		cfg.AgentInvestigationsPerHour != 0 || cfg.AgentInvestigationMaxWait != 5*time.Minute {
+		t.Errorf("cfg = %v %d %d %v, %v", cfg.AgentInvestigationWindow, cfg.AgentInvestigationsConcurrent, cfg.AgentInvestigationsPerHour, cfg.AgentInvestigationMaxWait, err)
+	}
+}
+
 // testCertPEM returns a throwaway self-signed certificate in PEM form.
 func testCertPEM(t *testing.T) string {
 	t.Helper()

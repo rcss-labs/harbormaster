@@ -35,6 +35,8 @@ type Operations interface {
 type Result struct {
 	MessageID int64
 	SaveErr   error
+	// SettleErr is why the run may not be settled: its last try failed. The reconcile pass settles it later.
+	SettleErr error
 }
 
 // Finisher ends a run. The token, the usage and settlement, and the answer do not depend on each other and go in
@@ -70,8 +72,10 @@ func (f *Finisher) Finish(ctx context.Context) Result {
 		return nil
 	}))
 	if settleErr != nil {
-		f.report("settle the run again", f.step(ctx, settleRetryLimit, f.Ops.Settle))
+		settleErr = f.step(ctx, settleRetryLimit, f.Ops.Settle)
+		f.report("settle the run again", settleErr)
 	}
+	res.SettleErr = settleErr
 	f.report("write the audit row", f.step(ctx, auditLimit, func(ctx context.Context) error {
 		return f.Ops.Audit(ctx, res.SaveErr == nil)
 	}))
