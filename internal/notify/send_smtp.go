@@ -18,7 +18,7 @@ import (
 // sendEmail sends one message to every recipient of the route. The SMTP host is deployer configuration, so the
 // dial guard does not apply to it.
 func (s *Senders) sendEmail(ctx context.Context, r store.NotificationRoute, _ Secret, m Message) Result {
-	if m.checkDiagnosis() != nil {
+	if m.checkMessage() != nil {
 		return Result{Note: "The message could not be built."}
 	}
 	_, msg := Email(m, s.SMTP.From, r.Config.Recipients)

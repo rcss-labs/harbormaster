@@ -23,6 +23,9 @@ func (m Message) Link() string {
 	if m.isDiagnosis() && m.Diagnosis != nil {
 		return base + "/investigations/" + strconv.FormatInt(m.Diagnosis.InvestigationID, 10)
 	}
+	if m.isReview() && m.Review != nil {
+		return base + "/reviews/runs/" + strconv.FormatInt(m.Review.RunID, 10)
+	}
 	switch m.Subject.Scope {
 	case "cluster":
 		return base + "/clusters/" + m.Subject.Key.ClusterKey.ID()
@@ -78,6 +81,10 @@ func (m Message) plainHeadline() string {
 		return "Update: " + m.Subject.Title
 	case EventDiagnosis:
 		return "Diagnosis: " + m.Subject.Title
+	case EventReview:
+		if m.Review != nil {
+			return m.reviewTitle()
+		}
 	case EventTest:
 		return "Test message from Harbormaster"
 	}
@@ -97,11 +104,11 @@ var slackEscape = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
 
 // SlackBody renders an incoming-webhook payload: a section (title, then text) and a context line.
 func SlackBody(m Message) ([]byte, error) {
-	if err := m.checkDiagnosis(); err != nil {
+	if err := m.checkMessage(); err != nil {
 		return nil, err
 	}
-	if m.isDiagnosis() {
-		return slackDiagnosisBody(m)
+	if m.isAI() {
+		return slackAIBody(m)
 	}
 	var title string
 	switch {
@@ -133,8 +140,8 @@ const pagerDutySummaryMax = 1024
 // PagerDutyBody renders an Events API v2 event. Trigger and resolve share the dedup key so a resolve closes the
 // incident the trigger opened.
 func PagerDutyBody(m Message, routingKey string) ([]byte, error) {
-	if m.isDiagnosis() {
-		return nil, errors.New("PagerDuty does not receive diagnosis messages")
+	if m.isAI() {
+		return nil, errors.New("PagerDuty does not receive AI-written messages")
 	}
 	s := m.Subject
 	action, dedup := "trigger", DedupKey(s)
@@ -188,12 +195,12 @@ func PagerDutyBody(m Message, routingKey string) ([]byte, error) {
 
 // WebhookBody renders the flat JSON object posted to a webhook.
 func WebhookBody(m Message) ([]byte, error) {
-	if err := m.checkDiagnosis(); err != nil {
+	if err := m.checkMessage(); err != nil {
 		return nil, err
 	}
 	s := m.Subject
 	event := map[Event]string{EventOpened: "alert.raised", EventRepeat: "alert.repeated", EventUpdate: "alert.updated",
-		EventResolved: "alert.resolved", EventTest: "test", EventDiagnosis: "diagnosis"}[m.Event]
+		EventResolved: "alert.resolved", EventTest: "test", EventDiagnosis: "diagnosis", EventReview: "review"}[m.Event]
 	scope := s.Scope
 	switch {
 	case scope != "":
@@ -209,6 +216,12 @@ func WebhookBody(m Message) ([]byte, error) {
 	}
 	if m.isDiagnosis() {
 		body["summary"], body["investigation_id"], body["ai_generated"] = m.summary(), m.Diagnosis.InvestigationID, true
+	}
+	if m.isReview() {
+		body["scope"], body["title"] = "review", m.plainHeadline()
+		body["summary"], body["ai_generated"] = m.summary(), true
+		body["review_run_id"], body["review_name"], body["review_type"], body["period"] =
+			m.Review.RunID, m.Review.Name, reviewTypes[m.Review.TypeLabel], m.Review.PeriodLabel
 	}
 	if s.Scope != "" {
 		services := make([]map[string]any, len(s.Members))
@@ -245,6 +258,10 @@ func crlf(text string) string {
 // emailText is the body: title, text, where it happened and the link.
 func emailText(m Message) string {
 	var b strings.Builder
+	if m.isReview() {
+		b.WriteString(diagnosisNotice + "\r\n\r\n" + headerValue(m.Review.PeriodLabel) + "\r\n\r\n" + crlf(m.summary()) + "\r\n\r\n" + m.Link() + "\r\n")
+		return b.String()
+	}
 	if m.isDiagnosis() {
 		b.WriteString(diagnosisNotice + "\r\n\r\n" + crlf(m.summary()) + "\r\n\r\n" + m.Link() + "\r\n")
 		return b.String()
@@ -282,7 +299,7 @@ func Email(m Message, from string, to []string) (subject string, body []byte) {
 	fmt.Fprintf(&b, "Message-ID: <hm-%d-%d@harbormaster.invalid>\r\n", m.DeliveryID, m.Subject.At.Unix())
 	b.WriteString("MIME-Version: 1.0\r\n")
 	b.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
-	if m.isDiagnosis() {
+	if m.isAI() {
 		// Model text can hold lines of any length; quoted-printable keeps every line short and safe.
 		b.WriteString("Content-Transfer-Encoding: quoted-printable\r\n\r\n")
 		encoder := quotedprintable.NewWriter(&b)
@@ -301,7 +318,7 @@ type Preview struct{ Destination, Title, Body, JSON string }
 
 // RenderPreview renders m the way the destination's sender would, so the preview cannot drift from what is sent.
 func RenderPreview(destination string, m Message) (Preview, error) {
-	if err := m.checkDiagnosis(); err != nil {
+	if err := m.checkMessage(); err != nil {
 		return Preview{}, err
 	}
 	p := Preview{Destination: destination}
@@ -312,7 +329,7 @@ func RenderPreview(destination string, m Message) (Preview, error) {
 		}
 		p.Title = m.plainHeadline()
 		text := m.Subject.Text
-		if m.isDiagnosis() {
+		if m.isAI() {
 			text = diagnosisNotice + "\n" + m.summary()
 		}
 		p.Body = strings.TrimSpace(text + "\n" + m.where())

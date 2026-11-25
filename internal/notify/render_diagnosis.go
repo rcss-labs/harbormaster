@@ -9,13 +9,22 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/agentresult"
 )
 
-var errNoDiagnosis = errors.New("a diagnosis message needs its diagnosis")
+var (
+	errNoDiagnosis = errors.New("a diagnosis message needs its diagnosis")
+	errNoReview    = errors.New("a review message needs its review, a run to point at and a known type")
+)
+
+// reviewTypes maps the fixed label of each review type to its id. A message carries the label, so only these four
+// strings can reach a headline.
+var reviewTypes = map[string]string{"Cost": "cost", "Security findings": "security", "Reliability": "reliability", "Capacity": "capacity"}
 
 const (
 	// diagnosisNotice is the code-owned line every diagnosis carries, ahead of the model's text.
 	diagnosisNotice = "Written by AI. Check it before acting."
 	// investigationLinkText is the link label of a diagnosis message.
 	investigationLinkText = "Open the investigation"
+	// reviewLinkText is the link label of a review message.
+	reviewLinkText = "Open the review"
 
 	slackMaxTitle   = 256  // characters of the escaped title in a headline
 	slackMaxSection = 3000 // characters Slack accepts in one section's text
@@ -29,35 +38,79 @@ const (
 // most 1200 runes. It runs at send time, so a text stored before a rule was tightened is still held to the current
 // rule. Callers pass the stored summary through unchanged.
 func CleanSummary(summary, baseURL string) string {
-	raw, replaced := agentresult.RecheckSummary(summary)
+	return cleanSummaryAs(summary, baseURL, agentresult.ReplacementSummary)
+}
+
+// CleanReviewSummary is CleanSummary with the review sentence as the replacement, under the same order of checks.
+func CleanReviewSummary(summary, baseURL string) string {
+	return cleanSummaryAs(summary, baseURL, agentresult.ReplacementReviewSummary)
+}
+
+func cleanSummaryAs(summary, baseURL, replacement string) string {
+	raw, replaced := agentresult.RecheckSummaryAs(summary, replacement)
 	if replaced {
 		return raw
 	}
-	clean, _ := agentresult.RecheckSummary(agentresult.StripForeignURLs(raw, baseURL))
+	clean, _ := agentresult.RecheckSummaryAs(agentresult.StripForeignURLs(raw, baseURL), replacement)
 	return clean
 }
 
 // isDiagnosis reports whether m is a diagnosis message.
 func (m Message) isDiagnosis() bool { return m.Event == EventDiagnosis }
 
-// checkDiagnosis refuses a diagnosis message that has no diagnosis or no investigation to point at, so nothing
-// half-built is sent.
-func (m Message) checkDiagnosis() error {
-	if m.isDiagnosis() && (m.Diagnosis == nil || m.Diagnosis.InvestigationID <= 0) {
+// isReview reports whether m is a review message.
+func (m Message) isReview() bool { return m.Event == EventReview }
+
+// isAI reports whether m carries model-written text, which every destination renders as plain text behind the notice.
+func (m Message) isAI() bool { return m.isDiagnosis() || m.isReview() }
+
+// checkMessage refuses an AI message that has nothing to point at (no diagnosis or review, a record id of 0 or
+// less, a review of an unknown type), so nothing half-built is sent.
+func (m Message) checkMessage() error {
+	switch {
+	case m.isDiagnosis() && (m.Diagnosis == nil || m.Diagnosis.InvestigationID <= 0):
 		return errNoDiagnosis
+	case m.isReview():
+		if _, known := reviewTypes[m.reviewLabel()]; m.Review == nil || m.Review.RunID <= 0 || !known {
+			return errNoReview
+		}
 	}
 	return nil
 }
 
-// summary is the cleaned diagnosis text, never empty (a Slack text object may not be).
-func (m Message) summary() string {
-	if m.Diagnosis == nil {
+func (m Message) reviewLabel() string {
+	if m.Review == nil {
 		return ""
 	}
-	if clean := CleanSummary(m.Diagnosis.Summary, m.BaseURL); clean != "" {
-		return clean
+	return m.Review.TypeLabel
+}
+
+// summary is the cleaned model text, never empty (a Slack text object may not be).
+func (m Message) summary() string {
+	switch {
+	case m.isDiagnosis() && m.Diagnosis != nil:
+		if clean := CleanSummary(m.Diagnosis.Summary, m.BaseURL); clean != "" {
+			return clean
+		}
+		return agentresult.ReplacementSummary
+	case m.isReview() && m.Review != nil:
+		if clean := CleanReviewSummary(m.Review.Summary, m.BaseURL); clean != "" {
+			return clean
+		}
+		return agentresult.ReplacementReviewSummary
 	}
-	return agentresult.ReplacementSummary
+	return ""
+}
+
+// reviewTitle is the headline of a review: the fixed type label and the name, which is admin text.
+func (m Message) reviewTitle() string { return m.reviewLabel() + " review: " + m.Review.Name }
+
+// linkText is the label of the link of an AI message.
+func (m Message) linkText() string {
+	if m.isReview() {
+		return reviewLinkText
+	}
+	return investigationLinkText
 }
 
 // pagerDutyLink is the link of a PagerDuty event. The Opened event of a route that investigates points at the
@@ -97,29 +150,45 @@ func slackPlainText(text string) string {
 	return text
 }
 
-// slackDiagnosisBody renders a diagnosis for Slack. The model's text goes in a plain_text section, where Slack
-// interprets nothing; the headline, whose title is alert text, is verbatim mrkdwn with the title escaped and capped.
-func slackDiagnosisBody(m Message) ([]byte, error) {
-	title := "Diagnosis: " + slackCutEscaped(m.Subject.Title, slackMaxTitle)
-	where := slackEscape.Replace(m.where()) + " · <" + m.Link() + "|" + investigationLinkText + ">"
+// slackAIBody renders a diagnosis or a review for Slack. The model's text goes in a plain_text section, where Slack
+// interprets nothing; the headline, whose title is alert or admin text, is verbatim mrkdwn with the title escaped
+// and capped.
+func slackAIBody(m Message) ([]byte, error) {
+	var title, second, where string
+	if m.isReview() {
+		title = slackCutEscaped(m.reviewTitle(), slackMaxTitle)
+		second = slackCutEscaped(m.Review.PeriodLabel, slackMaxTitle)
+		where = "<" + m.Link() + "|" + reviewLinkText + ">"
+	} else {
+		title = "Diagnosis: " + slackCutEscaped(m.Subject.Title, slackMaxTitle)
+		where = slackEscape.Replace(m.where()) + " · <" + m.Link() + "|" + investigationLinkText + ">"
+	}
+	headline := "*" + title + "*\n" + diagnosisNotice
+	if second != "" {
+		headline = "*" + title + "*\n" + second + "\n" + diagnosisNotice
+	}
 	return json.Marshal(map[string]any{
 		"text":         title,
 		"unfurl_links": false,
 		"unfurl_media": false,
 		"blocks": []any{
-			map[string]any{"type": "section", "text": map[string]any{"type": "mrkdwn", "verbatim": true, "text": "*" + title + "*\n" + diagnosisNotice}},
+			map[string]any{"type": "section", "text": map[string]any{"type": "mrkdwn", "verbatim": true, "text": headline}},
 			map[string]any{"type": "section", "text": map[string]any{"type": "plain_text", "emoji": false, "text": slackPlainText(m.summary())}},
 			map[string]any{"type": "context", "elements": []any{map[string]any{"type": "mrkdwn", "verbatim": true, "text": where}}},
 		},
 	})
 }
 
-// telegramDiagnosisText renders a diagnosis for Telegram. The summary sits in a pre element, where Telegram makes
-// no mention, command, hashtag or link of what it holds; the tags count against the budget.
-func telegramDiagnosisText(m Message) string {
+// telegramAIText renders a diagnosis or a review for Telegram. The summary sits in a pre element, where Telegram
+// makes no mention, command, hashtag or link of what it holds; the tags count against the budget.
+func telegramAIText(m Message) string {
+	second := m.where()
+	if m.isReview() {
+		second = m.Review.PeriodLabel
+	}
 	head := "<b>" + telegramEscape.Replace(cutRunes(m.plainHeadline(), telegramMaxTitle)) + "</b>"
-	tail := "\n" + `<a href="` + telegramAttrEscape.Replace(m.Link()) + `">` + investigationLinkText + `</a>`
-	lead := "\n" + telegramEscape.Replace(cutRunes(m.where(), telegramMaxTitle)) + "\n" + diagnosisNotice + "\n<pre>"
+	tail := "\n" + `<a href="` + telegramAttrEscape.Replace(m.Link()) + `">` + m.linkText() + `</a>`
+	lead := "\n" + telegramEscape.Replace(cutRunes(second, telegramMaxTitle)) + "\n" + diagnosisNotice + "\n<pre>"
 	budget := telegramMaxUnits - utf16Units(head) - utf16Units(lead) - utf16Units("</pre>") - utf16Units(tail)
 	return head + lead + cutEscaped(m.summary(), budget) + "</pre>" + tail
 }

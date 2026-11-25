@@ -70,8 +70,8 @@ func cutRunes(s string, max int) string {
 // dynamic string is escaped for & < >; the link is also escaped for ". The alert text is cut, with an ellipsis, so
 // the whole message fits Telegram's limit.
 func TelegramText(m Message) string {
-	if m.isDiagnosis() {
-		return telegramDiagnosisText(m)
+	if m.isAI() {
+		return telegramAIText(m)
 	}
 	var title string
 	switch {
@@ -98,7 +98,7 @@ func TelegramText(m Message) string {
 // TelegramBody renders the sendMessage JSON. The chat id is sent as the string given (a number, negative for
 // groups and channels, or @channelname); the topic id is sent only when set.
 func TelegramBody(m Message, chatID string, threadID int) ([]byte, error) {
-	if err := m.checkDiagnosis(); err != nil {
+	if err := m.checkMessage(); err != nil {
 		return nil, err
 	}
 	body := map[string]any{
