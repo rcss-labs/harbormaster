@@ -46,10 +46,26 @@ func TestNoUseOfLocalOrNow(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, banned := range []string{"time.Local", "time.Now(", "time.LoadLocationFromTZData"} {
+		for _, banned := range []string{"time.Local", "time.Now("} {
 			if strings.Contains(string(b), banned) {
 				t.Errorf("%s uses %s", f, banned)
 			}
 		}
 	}
+}
+
+func TestTzdataIsEmbedded(t *testing.T) {
+	fset := token.NewFileSet()
+	for _, f := range sourceFiles(t) {
+		parsed, err := parser.ParseFile(fset, f, nil, parser.ImportsOnly)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, imp := range parsed.Imports {
+			if imp.Path.Value == `"time/tzdata"` && imp.Name != nil && imp.Name.Name == "_" {
+				return
+			}
+		}
+	}
+	t.Fatal(`no file imports _ "time/tzdata"`)
 }

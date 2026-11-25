@@ -5,9 +5,10 @@ package reviewsched
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
-	_ "time/tzdata" // zone data travels with the binary; the host zone is never consulted
+	_ "time/tzdata" // fallback zone data for hosts without a zoneinfo database
 )
 
 const (
@@ -30,9 +31,11 @@ const searchDays = 70
 
 var zones sync.Map // name -> *time.Location
 
+// location loads a canonical IANA zone name. Names that would reach the host
+// zone, a file outside the zone database or an alias of one are refused.
 func location(name string) (*time.Location, error) {
-	if name == "" || name == "Local" {
-		return nil, fmt.Errorf("timezone %q is not an IANA zone name", name)
+	if err := canonicalZoneName(name); err != nil {
+		return nil, fmt.Errorf("timezone %q: %w", name, err)
 	}
 	if loc, ok := zones.Load(name); ok {
 		return loc.(*time.Location), nil
@@ -41,8 +44,29 @@ func location(name string) (*time.Location, error) {
 	if err != nil {
 		return nil, fmt.Errorf("timezone %q: %w", name, err)
 	}
+	if loc.String() != name {
+		return nil, fmt.Errorf("timezone %q is not a canonical zone name", name)
+	}
 	zones.Store(name, loc)
 	return loc, nil
+}
+
+func canonicalZoneName(name string) error {
+	switch {
+	case name == "":
+		return fmt.Errorf("is empty")
+	case strings.EqualFold(name, "local"), strings.EqualFold(name, "localtime"),
+		strings.EqualFold(name, "posixrules"), strings.EqualFold(name, "factory"):
+		return fmt.Errorf("is not an IANA zone")
+	case strings.HasPrefix(name, "posix/"), strings.HasPrefix(name, "right/"):
+		return fmt.Errorf("is not an IANA zone")
+	}
+	for _, seg := range strings.Split(name, "/") {
+		if seg == "" || seg == "." || seg == ".." {
+			return fmt.Errorf("is not an IANA zone")
+		}
+	}
+	return nil
 }
 
 // Validate checks every field and that the zone loads.
@@ -80,8 +104,7 @@ func Last(s Schedule, now time.Time) (time.Time, error) {
 		return time.Time{}, err
 	}
 	y, m, d := now.In(loc).Date()
-	// Start a day ahead: with an early-instant overlap or a far zone the
-	// nominal date of the latest occurrence can trail the local date.
+	// i = -1 also tries tomorrow, in case an occurrence is dated ahead of the local date.
 	for i := -1; i < searchDays; i++ {
 		day := time.Date(y, m, d, 0, 0, 0, 0, time.UTC).AddDate(0, 0, -i)
 		if !matches(s, day) {
@@ -176,23 +199,42 @@ func sameWall(local, wallUTC time.Time) bool {
 		local.Hour() == wallUTC.Hour() && local.Minute() == wallUTC.Minute()
 }
 
-// PeriodKey identifies the period an occurrence belongs to, from its local
-// date: d:YYYY-MM-DD, w:YYYY-Www (ISO week) or m:YYYY-MM. An invalid schedule
-// gives the empty string.
+// scheduledDate is the calendar date an occurrence was scheduled for. Usually
+// that is the local date of the instant. A wall time skipped by a spring
+// change runs when the gap ends, which can be on a later local date, so the
+// search looks back from the local date for the day whose occurrence is at.
+// Where two scheduled days share one instant (a midnight schedule across a
+// skipped day) the later date wins, the local date of the instant. An instant
+// that is no occurrence falls back to its local date.
+func scheduledDate(s Schedule, loc *time.Location, at time.Time) time.Time {
+	y, m, d := at.In(loc).Date()
+	local := time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 3; i++ {
+		day := local.AddDate(0, 0, -i)
+		if matches(s, day) && occurrence(day, s.AtMinute, loc).Equal(at) {
+			return day
+		}
+	}
+	return local
+}
+
+// PeriodKey identifies the period an occurrence belongs to, from the local
+// date it was scheduled for: d:YYYY-MM-DD, w:YYYY-Www (ISO week) or m:YYYY-MM.
+// An invalid schedule gives the empty string.
 func PeriodKey(s Schedule, at time.Time) string {
 	loc, err := prepare(s)
 	if err != nil {
 		return ""
 	}
-	local := at.In(loc)
+	date := scheduledDate(s, loc, at)
 	switch s.Cadence {
 	case Weekly:
-		y, w := local.ISOWeek()
+		y, w := date.ISOWeek()
 		return fmt.Sprintf("w:%04d-W%02d", y, w)
 	case Monthly:
-		return local.Format("m:2006-01")
+		return date.Format("m:2006-01")
 	}
-	return local.Format("d:2006-01-02")
+	return date.Format("d:2006-01-02")
 }
 
 // PeriodLabel is the period as shown to people: 25 Nov 2026, Week 48, 2026 or
@@ -202,15 +244,15 @@ func PeriodLabel(s Schedule, at time.Time) string {
 	if err != nil {
 		return ""
 	}
-	local := at.In(loc)
+	date := scheduledDate(s, loc, at)
 	switch s.Cadence {
 	case Weekly:
-		y, w := local.ISOWeek()
+		y, w := date.ISOWeek()
 		return fmt.Sprintf("Week %d, %d", w, y)
 	case Monthly:
-		return local.Format("January 2006")
+		return date.Format("January 2006")
 	}
-	return local.Format("2 Jan 2006")
+	return date.Format("2 Jan 2006")
 }
 
 // Range is the analytics range a cadence reviews; unknown cadences get 7d.

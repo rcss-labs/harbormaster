@@ -230,8 +230,9 @@ func TestPeriodKey_WeeklyIsTheISOWeekAcrossAYearEnd(t *testing.T) {
 }
 
 func TestPeriodKey_ConsecutiveOccurrencesDiffer(t *testing.T) {
-	for _, z := range []string{"Europe/Berlin", "America/New_York"} {
+	for _, z := range []string{"Europe/Berlin", "America/New_York", "America/Nuuk", "America/Scoresbysund"} {
 		for _, s := range []Schedule{
+			{Cadence: "daily", AtMinute: 23*60 + 30, Timezone: z},
 			{Cadence: "daily", AtMinute: 2*60 + 30, Timezone: z},
 			{Cadence: "weekly", AtMinute: 2*60 + 30, Weekday: 7, Timezone: z},
 			{Cadence: "monthly", AtMinute: 2*60 + 30, MonthDay: 28, Timezone: z},
@@ -275,9 +276,11 @@ func TestLastAndNext_AreInverses(t *testing.T) {
 		case "monthly":
 			s.MonthDay = 1 + rng.Intn(28)
 		}
-		if i%3 == 0 { // bias towards the hours where zones change
-			s.AtMinute = (rng.Intn(4) + 1) * 60 // 01:00 to 04:00 plus midnight-ish
-			s.AtMinute += []int{0, 30}[rng.Intn(2)]
+		if i%3 == 0 { // bias towards the wall times where zones change: 01:00 to 04:30, plus 23:30 for Nuuk
+			s.AtMinute = (rng.Intn(4)+1)*60 + []int{0, 30}[rng.Intn(2)]
+			if i%9 == 0 {
+				s.AtMinute = 23*60 + 30
+			}
 		}
 		now := base.Add(time.Duration(rng.Int63n(int64(3 * 366 * 24 * time.Hour))))
 		at, err := Last(s, now)
@@ -319,21 +322,139 @@ func TestLastAndNext_AreInverses(t *testing.T) {
 }
 
 func TestLast_DoesNotDependOnTheZoneOfNow(t *testing.T) {
-	s := Schedule{Cadence: "weekly", AtMinute: 7*60 + 15, Weekday: 2, Timezone: "America/New_York"}
 	now := time.Date(2026, 11, 25, 3, 0, 0, 0, time.UTC)
-	want, err := Last(s, now)
+	for _, sz := range testZones {
+		s := Schedule{Cadence: "weekly", AtMinute: 7*60 + 15, Weekday: 2, Timezone: sz}
+		want, err := Last(s, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantNext, _ := Next(s, now)
+		for _, nz := range testZones {
+			in := now.In(mustLoc(t, nz))
+			if got, err := Last(s, in); err != nil || !got.Equal(want) {
+				t.Errorf("schedule in %s, now in %s: Last %v %v, want %s", sz, nz, got, err, want)
+			}
+			if got, _ := Next(s, in); !got.Equal(wantNext) {
+				t.Errorf("schedule in %s, now in %s: Next %s, want %s", sz, nz, got, wantNext)
+			}
+		}
+	}
+}
+
+func TestOccurrence_LordHoweHalfHourChanges(t *testing.T) {
+	// Spring: 4 Oct 2026 02:00 +10:30 becomes 02:30 +11:00, so 02:15 does not exist.
+	spring := Schedule{Cadence: "daily", AtMinute: 2*60 + 15, Timezone: "Australia/Lord_Howe"}
+	got, err := Last(spring, time.Date(2026, 10, 4, 6, 0, 0, 0, time.UTC))
+	if want := time.Date(2026, 10, 3, 15, 30, 0, 0, time.UTC); err != nil || !got.Equal(want) {
+		t.Fatalf("spring gap: %v %v, want %s", got, err, want)
+	}
+	// Autumn: 5 Apr 2026 02:00 +11:00 becomes 01:30 +10:30, so 01:45 happens twice.
+	autumn := Schedule{Cadence: "daily", AtMinute: 1*60 + 45, Timezone: "Australia/Lord_Howe"}
+	got, err = Last(autumn, time.Date(2026, 4, 5, 6, 0, 0, 0, time.UTC))
+	if want := time.Date(2026, 4, 4, 14, 45, 0, 0, time.UTC); err != nil || !got.Equal(want) {
+		t.Fatalf("autumn overlap: %v %v, want %s", got, err, want)
+	}
+}
+
+// Nuuk and Scoresbysund skip 23:00 to 24:00 on 28 March 2026, so a 23:30
+// schedule runs when the gap ends, after midnight, yet it belongs to the 28th.
+func TestPeriodKey_IsTheScheduledDateWhenAGapPushesTheInstantPastMidnight(t *testing.T) {
+	for _, zone := range []string{"America/Nuuk", "America/Scoresbysund"} {
+		s := Schedule{Cadence: "daily", AtMinute: 23*60 + 30, Timezone: zone}
+		gapEnd := time.Date(2026, 3, 29, 1, 0, 0, 0, time.UTC)
+		got, err := Last(s, time.Date(2026, 3, 29, 12, 0, 0, 0, time.UTC))
+		if err != nil || !got.Equal(gapEnd) {
+			t.Fatalf("%s: Last %v %v, want %s", zone, got, err, gapEnd)
+		}
+		next, _ := Next(s, got)
+		prev, _ := Last(s, got.Add(-time.Second))
+		keys := []string{PeriodKey(s, prev), PeriodKey(s, got), PeriodKey(s, next)}
+		want := []string{"d:2026-03-27", "d:2026-03-28", "d:2026-03-29"}
+		for i := range keys {
+			if keys[i] != want[i] {
+				t.Errorf("%s: keys %v want %v", zone, keys, want)
+				break
+			}
+		}
+		if l := PeriodLabel(s, got); l != "28 Mar 2026" {
+			t.Errorf("%s: label of the gap occurrence %q", zone, l)
+		}
+		if l := PeriodLabel(s, next); l != "29 Mar 2026" {
+			t.Errorf("%s: label of the next occurrence %q", zone, l)
+		}
+	}
+}
+
+// A period key of an instant that is no occurrence falls back to its local date.
+func TestPeriodKey_NonOccurrenceInstantUsesItsLocalDate(t *testing.T) {
+	s := Schedule{Cadence: "daily", AtMinute: 23*60 + 30, Timezone: "America/Nuuk"}
+	if k := PeriodKey(s, time.Date(2026, 3, 29, 1, 5, 0, 0, time.UTC)); k != "d:2026-03-29" {
+		t.Errorf("key %s", k)
+	}
+}
+
+// Samoa skipped 30 Dec 2011 entirely: clocks went from 29 Dec 23:59 to 31 Dec 00:00.
+func TestPeriodKey_ApiaSkippedDay(t *testing.T) {
+	from := time.Date(2011, 12, 29, 21, 0, 0, 0, time.UTC) // after 29 Dec 10:00 local
+	mid := Schedule{Cadence: "daily", AtMinute: 10 * 60, Timezone: "Pacific/Apia"}
+	at, err := Next(mid, from)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, z := range testZones {
-		got, err := Last(s, now.In(mustLoc(t, z)))
-		if err != nil || !got.Equal(want) {
-			t.Errorf("now in %s: %v %v, want %s", z, got, err, want)
+	if want := time.Date(2011, 12, 30, 10, 0, 0, 0, time.UTC); !at.Equal(want) {
+		t.Fatalf("skipped-day occurrence %s, want the gap end %s", at, want)
+	}
+	if k := PeriodKey(mid, at); k != "d:2011-12-30" {
+		t.Errorf("the skipped day keeps its own key: %s", k)
+	}
+	nxt, _ := Next(mid, at)
+	if k := PeriodKey(mid, nxt); k != "d:2011-12-31" || !nxt.After(at) {
+		t.Errorf("next occurrence %s key %s", nxt, k)
+	}
+	// A midnight schedule has two dates, 30 and 31 Dec, at one instant. The
+	// documented choice is that the date of the instant wins: it runs once, as the 31st.
+	midnight := Schedule{Cadence: "daily", AtMinute: 0, Timezone: "Pacific/Apia"}
+	a, _ := Next(midnight, from)
+	b, _ := Next(midnight, a)
+	if !b.After(a) || PeriodKey(midnight, a) != "d:2011-12-31" || PeriodKey(midnight, b) != "d:2012-01-01" {
+		t.Errorf("midnight: %s %s %s %s", a, b, PeriodKey(midnight, a), PeriodKey(midnight, b))
+	}
+}
+
+func TestPeriodKeyAndLabel_FarZoneAndYearEnd(t *testing.T) {
+	at := time.Date(2026, 11, 30, 12, 0, 0, 0, time.UTC)
+	kiri := Schedule{Cadence: "monthly", MonthDay: 1, Timezone: "Pacific/Kiritimati"}
+	if l := PeriodLabel(kiri, at); l != "December 2026" {
+		t.Errorf("Kiritimati month label %q", l)
+	}
+	pago := Schedule{Cadence: "monthly", MonthDay: 1, Timezone: "Pacific/Pago_Pago"}
+	if l := PeriodLabel(pago, at); l != "November 2026" {
+		t.Errorf("Pago Pago month label %q", l)
+	}
+	wk := Schedule{Cadence: "weekly", Weekday: 1, Timezone: "Europe/Berlin"}
+	if l := PeriodLabel(wk, wall(t, "Europe/Berlin", 2025, time.December, 29, 12, 0)); l != "Week 1, 2026" {
+		t.Errorf("year-end week label %q", l)
+	}
+	if l := PeriodLabel(wk, wall(t, "Europe/Berlin", 2027, time.January, 3, 12, 0)); l != "Week 53, 2026" {
+		t.Errorf("week 53 label %q", l)
+	}
+}
+
+func TestValidate_RefusesNonCanonicalZoneNames(t *testing.T) {
+	for _, name := range []string{
+		"", "Local", "local", "LOCAL", "localtime", "posixrules", "Factory",
+		"posix/Europe/Berlin", "right/Europe/Berlin", "posix/UTC",
+		"/Europe/Berlin", "Europe//Berlin", "Europe/", ".", "..", "Europe/../UTC", "./UTC", "Europe/./Berlin",
+		"Europe/Nowhere",
+	} {
+		if err := Validate(Schedule{Cadence: "daily", Timezone: name}); err == nil {
+			t.Errorf("zone %q was accepted", name)
 		}
-		n, _ := Next(s, now.In(mustLoc(t, z)))
-		n0, _ := Next(s, now)
-		if !n.Equal(n0) {
-			t.Errorf("Next now in %s: %s want %s", z, n, n0)
+	}
+	for _, name := range []string{"UTC", "Europe/Berlin", "America/Argentina/Buenos_Aires", "Etc/GMT+5"} {
+		if err := Validate(Schedule{Cadence: "daily", Timezone: name}); err != nil {
+			t.Errorf("zone %q refused: %v", name, err)
 		}
 	}
 }
