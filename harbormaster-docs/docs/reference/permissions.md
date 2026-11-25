@@ -105,7 +105,7 @@ Access tokens and run tokens cannot read investigations. See [Automatic AI inves
 
 ### Who reads a review
 
-Scheduled reviews run as the same agent identity. A review reads what the identity may View, with Logs never used, and the identity's access is the only boundary: the scope of a review is a focus, not a permission. Each run stores the tags the identity could View when it started (its covered tags). A person's access to a review result is checked on every request, from their current permissions:
+Scheduled reviews run as the same agent identity. A review reads what the identity may View, with Logs never used, and the identity's access is the only boundary: the scope of a review is a focus, not a permission. Each run stores the tags the identity could View when it started and when it finished (its covered tags). A tag granted and removed again during one run is not covered. A person's access to a review result is checked on every request, from their current permissions:
 
 | Item | Needs |
 | --- | --- |

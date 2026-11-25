@@ -95,7 +95,7 @@ One run is one conversation with the model, under the limits of every agent run 
 | Not run: no model is set up for reviews. | Reason `not_configured`. |
 | Not run: too many reviews in the last day. | Reason `rate_limited`. |
 | Not run: it could not start in time. | Reason `missed`. |
-| Not run: the review was turned off. | Reason `disabled`. |
+| Not run: the review was turned off. | Reason `disabled`. The review was switched off or deleted before the run started, or before its retry. A manual run of a switched-off review is not skipped for this; a manual run of a deleted review is. |
 
 The runbook lists every reason and what to do: [States and reasons](../operations/runbooks/ai-agent.md#13-review-states-and-reasons).
 
@@ -107,14 +107,14 @@ A schedule is a cadence, a local time of day, a weekday (weekly) or a day of the
 - **A new or edited review starts from its next time.** A review made at 10:00 for 08:00 first runs the next day. A change to the cadence, the time, the weekday, the day of the month or the zone, and switching a review on, restarts this: only a time after the change counts. Changing the name, scope or routes does not.
 - **Clock changes.** A local time that does not exist (the hour skipped when clocks go forward) is the moment the gap ends. A local time that happens twice (when clocks go back) is the earlier one.
 - **Zone data.** The rules of a zone come from the time zone data in the container image, or from a copy built into Harbormaster when the image has none. A government's new daylight saving rule takes effect when you run an image or release that contains it.
-- **Late and missed runs.** A run that is due starts when it can. If Harbormaster was down at the scheduled time, a run that is at most `HM_AGENT_REVIEW_MAX_LATE` (6 hours by default) late still happens. A later one is recorded as `missed` and does not run. After a long outage a review has one record, not one for every period it missed.
+- **Late and missed runs.** A run that is due starts when it can. If Harbormaster was down at the scheduled time, a run that is at most `HM_AGENT_REVIEW_MAX_LATE` (6 hours by default) late still happens. A later one is recorded as `missed` and does not run. A retry that had to start later than `HM_AGENT_REVIEW_MAX_LATE` plus the run's lease after the scheduled time is not started: the run ends as `interrupted`, and one that waited past the limit for an agent that did not offer the role ends as `agent_unavailable`. After a long outage a review has one record, not one for every period it missed.
 - **Run now.** An admin can start a review at once, also one that is switched off. It is a period of its own and does not replace the scheduled run.
 
 ## Who sees what
 
 Reading is checked on every request against your current permissions, not those you had when the review ran. Access tokens and the MCP gateway cannot read reviews, and neither can the agent. The routes are for signed-in people only.
 
-- **The summary.** A global admin reads every result. Anyone else needs View on every tag the review covered. The tags covered are all the tags the agent identity could View when the run started, not only the tags of the services in scope, because the identity reads everything it may View. They are stored with the run. A result that covered no tag, or a tag that has since been deleted, is for global admins only. When the identity can View many tags, few people other than admins can read a result.
+- **The summary.** A global admin reads every result. Anyone else needs View on every tag the review covered. The tags covered are all the tags the agent identity could View when the run started or when it finished, not only the tags of the services in scope, because the identity reads everything it may View. Both sets are stored with the run. A tag that was granted and removed again during one run is not covered. A result that covered no tag, or a tag that has since been deleted, is for global admins only. When the identity can View many tags, few people other than admins can read a result.
 - **The evidence.** Each item is for one service. You need View on that service now. A review cites View evidence only, so no item needs Logs, and an item with any other action is hidden from everyone, admins included. Hidden items are counted, not described: the page says only "Some evidence is not shown because you do not have permission to read it."
 - **The list.** **Reviews** lists only the results you may read. A result you may not read answers "not found", as if it did not exist.
 - **Managing reviews.** Only global admins can create, change, run, switch or delete a review, and choose the model for reviews.
@@ -127,10 +127,10 @@ The model does not write evidence. It points at numbered pieces of tool output i
 
 ## What the summary check does and does not catch
 
-Harbormaster checks every summary and note before it is stored, and again before every message is sent. The checks are those of [investigations](ai-agent-investigator.md#what-the-summary-check-does-and-does-not-catch). A summary that is empty, too long, has hidden characters or image markup, or is changed by the secret scrubber is replaced whole by a fixed sentence. For a review it is "The review finished. Open it in Harbormaster to read the findings." The copy rule has two lengths and one exemption.
+Harbormaster checks every summary and note before it is stored, and again before every message is sent. The checks are those of [investigations](ai-agent-investigator.md#what-the-summary-check-does-and-does-not-catch). A summary that is empty, too long, has hidden characters or image markup, or is changed by the secret scrubber is replaced whole by a fixed sentence. For a review it is "The review finished. Open it in Harbormaster to read the findings." The copy rule has one length and one exemption.
 
-- **Copying.** The summary is replaced when it repeats 32 or more characters in a row, ignoring case and punctuation, of an environment value or a command that the agent read in that run, or 80 or more characters of anything else it read. A review reads no log messages.
-- **Names are exempt.** A review has to name services and clusters, and a name can be longer than that. A name is not counted as copied text when it appears in an id of a service or cluster that the agent read. A name is one word of letters, digits, hyphens and underscores, up to 128 characters. This applies to the summary, not to notes.
+- **Copying.** The summary is replaced when it repeats 32 or more characters in a row, ignoring case and punctuation, of text the agent read in that run. A review reads no log messages.
+- **Names are exempt.** A review has to name services and clusters, and a name can be longer than 32 characters. A name is not counted as copied text when it appears in an id of a service or cluster that the agent read. A name is one word of letters, digits, hyphens and underscores, up to 128 characters. This applies to the summary, not to notes.
 - **What the exemption does not cover.** A name with spaces, dots or other characters. A stretch of text that takes in a name and the words beside it, which is checked in full. A name the agent did not read in an id. Anything in a note. Text a person wrote, such as a tag name or a review name, is not exempt unless it is also part of a service or cluster id the agent read.
 
 The check is best effort, as for investigations: paraphrase is not caught, a bare host name may stay, and the scrubber uses patterns. Treat a review as text written by a model that has read your estate.
@@ -165,8 +165,8 @@ Finished results are deleted `HM_RETENTION_AGENT_RUNS` after they finish (90 day
 - **One allowance.** Reviews spend from the monthly allowance that the chat and the investigations use.
 - **Worst case is reserved.** Before a run starts, Harbormaster reserves its worst case: the run's token limit at the model's higher price. A run is settled once, whatever way it ends.
 - **A review never takes the last room.** A review run starts only if, after its reservation, the allowance still holds the worst case of one chat run and one investigation at the models chosen for them. Otherwise it is skipped as `budget`, and the chat and the investigations keep working. One review runs at a time, and none starts while an investigation is waiting.
-- **At most two runs for each period:** the first, and one retry.
-- **Counts.** `HM_AGENT_REVIEWS_PER_DAY` (24 by default, 0 to 200) caps how many reviews start in 24 hours. `0` turns reviews off. A review past the cap is skipped as `rate_limited`.
+- **At most two attempts for each period:** the first, and one retry. A busy or missing agent does not use one.
+- **Counts.** `HM_AGENT_REVIEWS_PER_DAY` (24 by default, 0 to 200) caps how many reviews start in 24 hours. `0` turns reviews off. A review past the cap is skipped as `rate_limited`, and that period gets no review.
 - **The worst case is shown.** **Settings > AI agent > Reviews** shows "Worst case of one run". The editor shows "Worst case: $X a month at the current model": one reservation for each run the cadence can have in a month (31 daily, 5 weekly, 1 monthly). It leaves out retries, and it is the money kept back, not what is usually spent.
 - **No log search.** A review never uses CloudWatch Logs Insights. Opening a single service can run a CloudWatch metrics query, as the Metrics tab does.
 
