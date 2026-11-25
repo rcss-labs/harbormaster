@@ -31,6 +31,7 @@ const (
 	noteReviewTooOld       = "The review result is too old to send."
 	noteRouteOffReview     = "This route is no longer on the review."
 	noteReviewOff          = "The review is off."
+	noteCustomReviewsOff   = "Custom reviews are off."
 	noteFollowUpPanicked   = "The message could not be prepared."
 )
 
@@ -151,7 +152,7 @@ func (d *Dispatcher) reviewStep(ctx context.Context, deadline, now time.Time, na
 	stepCtx, cancelStep := context.WithDeadline(ctx, deadline)
 	defer cancelStep()
 	planCtx, cancelPlan := context.WithTimeout(stepCtx, time.Until(deadline)/2)
-	_, err := d.Store.PlanReviewDeliveries(planCtx, now, heldAt(now), reviewPlanLimit)
+	_, err := d.Store.PlanReviewDeliveries(planCtx, now, heldAt(now), d.CustomReviews, reviewPlanLimit)
 	cancelPlan()
 	if ctx.Err() != nil {
 		return
@@ -174,8 +175,8 @@ func (d *Dispatcher) reviewStep(ctx context.Context, deadline, now time.Time, na
 }
 
 // reviewOf reads what a review message to the route reports, or a note saying why it is not sent: the run or its
-// result is gone or too old, or its review is gone, no longer sends to the route, or is off and the run was not started
-// by hand. Both lookups share one timeout.
+// result is gone or too old, it is a custom run while custom reviews are off, or its review is gone, no longer sends
+// to the route, or is off and the run was not started by hand. Both lookups share one timeout.
 func (d *Dispatcher) reviewOf(ctx context.Context, runID, routeID int64) (review *Review, note string, err error) {
 	lookupCtx, cancel := context.WithTimeout(ctx, d.investigateTimeout())
 	defer cancel()
@@ -188,6 +189,9 @@ func (d *Dispatcher) reviewOf(ctx context.Context, runID, routeID int64) (review
 	}
 	if run.FinishedAt == nil || d.now().Sub(*run.FinishedAt) > reviewSendMaxAge {
 		return nil, noteReviewTooOld, nil
+	}
+	if run.ReviewType == store.ReviewTypeCustom && !d.CustomReviews {
+		return nil, noteCustomReviewsOff, nil
 	}
 	onReview, reviewOn := false, false
 	if run.ReviewID != nil {

@@ -81,6 +81,9 @@ type Dispatcher struct {
 	// Reviews turns on the planning and sending of review messages in the same end-of-cycle step, after the diagnosis
 	// messages. It does not depend on Investigate: either may be off.
 	Reviews bool
+	// CustomReviews is the operator switch for custom reviews (HM_AGENT_CUSTOM_REVIEWS). While it is off the result of a
+	// custom run is neither planned nor sent, a manual one included.
+	CustomReviews bool
 
 	kickOnce sync.Once
 	kickCh   chan struct{}

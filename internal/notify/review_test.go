@@ -851,6 +851,63 @@ func TestDispatcher_ReviewTurnedOffBeforeSendCancels(t *testing.T) {
 	e.cancelledReview("The review is off.")
 }
 
+// customReviewRun leaves a done run of type custom, the way the reviewer job does while the operator switch is on.
+func (e *env) customReviewRun(manual bool) int64 {
+	e.t.Helper()
+	review := e.review("Custom", e.route("one"))
+	run := e.finishReview(review)
+	e.exec(`update agent_review_runs set review_type = 'custom', manual = $2 where id = $1`, run, manual)
+	return run
+}
+
+// The operator switch for custom reviews is checked at plan and at send; results stay readable, built-in types
+// are unaffected, and a manual run is no exception.
+func TestDispatcher_CustomRunIsNotPlannedWhileTheSwitchIsOff(t *testing.T) {
+	for _, manual := range []bool{false, true} {
+		e := newReviewEnv(t)
+		run := e.customReviewRun(manual)
+		builtIn := e.finishReview(e.review("Cost", e.route("two")))
+		e.cycle()
+		rows := e.reviewRows()
+		if len(rows) != 1 || rows[0].RouteName != "two" {
+			t.Fatalf("manual %v: rows %+v, want only the built-in run's", manual, rows)
+		}
+		for _, id := range []int64{run, builtIn} {
+			if got, err := e.st.GetReviewRun(context.Background(), id); err != nil || got.DeliveryPlannedAt == nil || got.Summary != testReviewSummary {
+				t.Fatalf("manual %v: run %d = %+v, %v, want it marked and still readable", manual, id, got, err)
+			}
+		}
+		e.d.CustomReviews = true
+		e.cycle()
+		if n := len(e.reviewRows()); n != 1 {
+			t.Fatalf("manual %v: %d rows after the switch went on, want the marked run still unplanned", manual, n)
+		}
+	}
+}
+
+func TestDispatcher_CustomRunIsPlannedAndSentWhileTheSwitchIsOn(t *testing.T) {
+	e := newReviewEnv(t)
+	e.d.CustomReviews = true
+	e.customReviewRun(false)
+	e.cycle()
+	if row := e.reviewRow(); row.Status != "delivered" || e.reviewsSent("one") != 1 {
+		t.Fatalf("row = %+v, sent %d, want it delivered", row, e.reviewsSent("one"))
+	}
+}
+
+func TestDispatcher_CustomRunTurnedOffBeforeSendCancels(t *testing.T) {
+	for _, manual := range []bool{false, true} {
+		e := newReviewEnv(t)
+		e.d.CustomReviews = true
+		e.customReviewRun(manual)
+		e.d.Guard = func(context.Context) error { return store.ErrLeaseLost }
+		e.cycle() // planned, not sent
+		e.d.Guard = nil
+		e.d.CustomReviews = false
+		e.cancelledReview("Custom reviews are off.")
+	}
+}
+
 // "Run now" works on a review that is off, and its result is sent.
 func TestDispatcher_ManualRunOfAReviewThatIsOffIsSent(t *testing.T) {
 	e := newReviewEnv(t)
