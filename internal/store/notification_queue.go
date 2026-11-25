@@ -376,6 +376,8 @@ type DeliveryDetails struct {
 	// Generation is the group generation the message shows: the plan-time one, replaced by the one actually rendered
 	// when the message is sent (a held message is rendered when it is released).
 	Generation int `json:"generation"`
+	// InvestigationID is the investigation a diagnosis message reports; an older task ignores the unknown member.
+	InvestigationID int64 `json:"investigation_id,omitempty"`
 }
 
 const notificationDeliveryColumns = `id, route_id, route_name, destination, target, incident_id, event, seq, severity,
@@ -593,7 +595,11 @@ func (s *Store) FinishNotificationDelivery(ctx context.Context, id int64, lease 
 	if o.DurationMS != 0 || o.Delivered {
 		duration = &o.DurationMS
 	}
-	_, err := s.Pool.Exec(ctx, `update notification_deliveries set status = $2, attempts = $3, next_attempt_at = $4,
+	// A diagnosis row keeps next_attempt_at null (the older claim must never see it) and carries its retry time in
+	// diagnosis_due_at; every other event is unchanged.
+	_, err := s.Pool.Exec(ctx, `update notification_deliveries set status = $2, attempts = $3,
+		next_attempt_at = case when event = 'diagnosis' then null else $4::timestamptz end,
+		diagnosis_due_at = case when event = 'diagnosis' and $4::timestamptz is not null then $4::timestamptz else diagnosis_due_at end,
 		claimed_until = null, status_code = $5, duration_ms = $6, note = $7, finished_at = $8,
 		details = case when $10::int > 0 then jsonb_set(details, '{generation}', to_jsonb($10::int)) else details end
 		where id = $1 and status = 'pending' and claimed_until is not distinct from $9`,
@@ -683,7 +689,7 @@ func (s *Store) ReleaseHeldNotificationDeliveries(ctx context.Context, now time.
 	return tx.Commit(ctx)
 }
 
-// CancelUnsentNotificationDeliveries cancels the opened, repeat and update rows of the given incidents that are still
+// CancelUnsentNotificationDeliveries cancels the opened, repeat, update and diagnosis rows of the given incidents that are still
 // pending (with pendingNote) or held (with heldNote) and not under a live lease: a row being sent is left to finish.
 func (s *Store) CancelUnsentNotificationDeliveries(ctx context.Context, incidentIDs []int64, pendingNote, heldNote string, now time.Time) error {
 	if len(incidentIDs) == 0 {
@@ -691,7 +697,7 @@ func (s *Store) CancelUnsentNotificationDeliveries(ctx context.Context, incident
 	}
 	_, err := s.Pool.Exec(ctx, `update notification_deliveries
 		set status = 'cancelled', note = case when status = 'held' then $3 else $2 end, finished_at = $4, claimed_until = null
-		where incident_id = any($1) and event in ('opened', 'repeat', 'update') and status in ('pending', 'held')
+		where incident_id = any($1) and event in ('opened', 'repeat', 'update', 'diagnosis') and status in ('pending', 'held')
 		  and (claimed_until is null or claimed_until <= $4)`, incidentIDs, pendingNote, heldNote, now)
 	if err != nil {
 		return fmt.Errorf("cancel unsent notifications: %w", err)
@@ -703,7 +709,9 @@ func (s *Store) CancelUnsentNotificationDeliveries(ctx context.Context, incident
 // ErrNotFound for an unknown id and ErrConflict when the row is not failed or its route was deleted.
 func (s *Store) RetryNotificationDelivery(ctx context.Context, id int64, now time.Time) (NotificationDelivery, error) {
 	row := s.Pool.QueryRow(ctx, `update notification_deliveries set status = 'pending', attempts = 0, retries = retries + 1,
-		next_attempt_at = $2, finished_at = null, claimed_until = null
+		next_attempt_at = case when event = 'diagnosis' then null else $2::timestamptz end,
+		diagnosis_due_at = case when event = 'diagnosis' then $2::timestamptz else diagnosis_due_at end,
+		finished_at = null, claimed_until = null
 		where id = $1 and status = 'failed' and route_id is not null
 		returning `+notificationDeliveryColumns, id, now)
 	d, err := scanNotificationDelivery(row)
