@@ -141,6 +141,38 @@ func TestEchoes_EightyCharactersInARow(t *testing.T) {
 	}
 }
 
+func TestEchoes_JoinedCopyIsAnEcho(t *testing.T) {
+	request := "Review the services with the most stopped tasks in the last 7 days and say which of them run a single task with no autoscaling"
+	cases := map[string]string{
+		"hyphens":     strings.ReplaceAll(request, " ", "-"),
+		"underscores": strings.ReplaceAll(request, " ", "_"),
+	}
+	for name, candidate := range cases {
+		if !Echoes(candidate, request) {
+			t.Errorf("%s: the whole request joined into one token not reported as an echo", name)
+		}
+	}
+	cjk := "本番環境のデータベースのうち使われていないものを探して停止してよいかどうかを理由と一緒に説明してください" +
+		"特に費用が大きいものと所有者が決まっていないものを先に書いてください"
+	if len(Normalize(cjk)) < EchoRun {
+		t.Fatalf("test setup: clause is %d normalised characters", len(Normalize(cjk)))
+	}
+	if !Echoes("概要: "+cjk, "管理者の依頼: "+cjk) {
+		t.Error("an unspaced clause copied exactly not reported as an echo")
+	}
+}
+
+func TestEchoes_JSONEscapesBothWays(t *testing.T) {
+	plain := "Review the services with the most stopped tasks\nin the last 7 days and say which of them\nrun a single task with no autoscaling."
+	real := strings.ReplaceAll(plain, "\\n", "\n")
+	if !Echoes(real, plain) {
+		t.Error("a copy with real line breaks of a source with escapes not reported as an echo")
+	}
+	if !Echoes(plain, real) {
+		t.Error("a copy with escapes of a source with real line breaks not reported as an echo")
+	}
+}
+
 func TestEchoes_NameIsNeverAnEcho(t *testing.T) {
 	name := "payments-settlement-reconciliation-worker-eu-central-prod-blue-green-canary-shard_07"
 	if len(Normalize(name)) < EchoRun {
