@@ -5,6 +5,7 @@ import {
   useAgentUsage,
   useSaveAgentSettings,
   useTestAgentModel,
+  type AgentCatalogueModel,
   type AgentSettingsDTO,
   type AgentTestResult,
 } from '../../../api/agent'
@@ -19,6 +20,8 @@ import { usePhone } from '../../../components/usePhone'
 import { HeaderAction } from '../HeaderAction'
 import { useStickyBar } from '../useStickyBar'
 import styles from '../settings.module.css'
+import { IdentitySection } from './IdentitySection'
+import { InvestigationsTable } from './InvestigationsTable'
 import { UsageTable } from './UsageTable'
 
 // The install guide lives in the repository docs; the app has no docs site of its own.
@@ -49,18 +52,25 @@ interface Draft {
   budget: string
   provider: string
   model: string
+  investigatorProvider: string
+  investigatorModel: string
   unredacted: string[]
 }
+
+type Role = 'chat' | 'investigator'
 
 type TestOutcome = AgentTestResult & { provider: string; model: string }
 
 function baselineOf(settings: AgentSettingsDTO): Draft {
   const chat = settings.role_models.chat
+  const investigator = settings.role_models.investigator
   return {
     budget: settings.monthly_budget_usd,
     // A model the operator dropped stays in the draft: it is resubmitted unchanged until the admin chooses another.
     provider: chat?.provider ?? '',
     model: chat?.model ?? '',
+    investigatorProvider: investigator?.provider ?? '',
+    investigatorModel: investigator?.model ?? '',
     unredacted: settings.unredacted_providers,
   }
 }
@@ -74,6 +84,69 @@ function mergeUnredacted(loaded: string[], mine: string[], stored: string[]): st
 
 const sameList = (a: string[], b: string[]) => a.length === b.length && a.every((item) => b.includes(item))
 
+interface ModelPanelProps {
+  title: string
+  /** Distinguishes the controls of the two panels for labels and ids. */
+  name: string
+  providers: { provider: string; models: AgentCatalogueModel[] }[]
+  provider: string
+  model: string
+  stale: boolean
+  onProvider: (provider: string) => void
+  onModel: (model: string) => void
+  result: TestOutcome | null
+  testing: boolean
+  onTest: () => void
+}
+
+/** Provider and model for one role, with a test call and the price of the chosen model. */
+function ModelPanel(props: ModelPanelProps) {
+  const { name, providers, provider, model } = props
+  const models = providers.find((entry) => entry.provider === provider)?.models ?? []
+  const chosen = models.find((entry) => entry.id === model)
+  // A result that arrives after another model was chosen is not about the current choice.
+  const shown = props.result && props.result.provider === provider && props.result.model === model ? props.result : null
+  const prefix = name === '' ? '' : `${name} `
+  return (
+    <Panel title={props.title}>
+      {props.stale && <Banner kind="warn">This model is no longer offered by the operator. Choose another.</Banner>}
+      <div className={styles.windowRow}>
+        <label htmlFor={`agent-${name}provider`}>{`${prefix}provider`.replace(/^./, (c) => c.toUpperCase())}</label>
+        <select id={`agent-${name}provider`} className={styles.select} value={provider} onChange={(event) => props.onProvider(event.target.value)}>
+          <option value="">Choose a provider</option>
+          {providers.map((entry) => (
+            <option key={entry.provider} value={entry.provider}>
+              {providerName(entry.provider)}
+            </option>
+          ))}
+        </select>
+        <label htmlFor={`agent-${name}model`}>{`${prefix}model`.replace(/^./, (c) => c.toUpperCase())}</label>
+        <select id={`agent-${name}model`} className={styles.select} value={model} disabled={provider === ''} onChange={(event) => props.onModel(event.target.value)}>
+          <option value="">Choose a model</option>
+          {model !== '' && !models.some((entry) => entry.id === model) && <option value={model}>{model}</option>}
+          {models.map((entry) => (
+            <option key={entry.id} value={entry.id}>
+              {entry.id}
+            </option>
+          ))}
+        </select>
+        <button type="button" className={styles.btn} disabled={!chosen || props.testing} onClick={props.onTest}>
+          {name === '' ? 'Test model' : `Test ${name} model`}
+        </button>
+      </div>
+      {name === '' && <p className={styles.hint}>A test makes one small paid call.</p>}
+      {chosen && (
+        <p className={styles.hint}>
+          {`Input ${dollarsPerMillion(chosen.input_per_mtok_micro_usd)} per million tokens, output ${dollarsPerMillion(chosen.output_per_mtok_micro_usd)} per million tokens.`}
+        </p>
+      )}
+      <p role="status" className={shown && !shown.ok ? styles.error : styles.hint}>
+        {shown ? (shown.ok ? shown.message || 'The model answered.' : shown.message) : ''}
+      </p>
+    </Panel>
+  )
+}
+
 export function AgentSettings() {
   const settings = useAgentSettings()
   const usage = useAgentUsage()
@@ -83,7 +156,8 @@ export function AgentSettings() {
   const phone = usePhone()
   useStickyBar(phone)
   const [edited, setEdited] = useState<Draft | null>(null)
-  const [testResult, setTestResult] = useState<TestOutcome | null>(null)
+  const [testResults, setTestResults] = useState<Partial<Record<Role, TestOutcome>>>({})
+  const [testingRole, setTestingRole] = useState<Role | null>(null)
   const [liftingFor, setLiftingFor] = useState<string | null>(null)
   const [conflict, setConflict] = useState<string | null>(null)
 
@@ -102,14 +176,21 @@ export function AgentSettings() {
   const providers = data.catalogue.providers
   const chat = data.role_models.chat
   const staleModel = chat !== undefined && !chat.available
-  const models = providers.find((entry) => entry.provider === draft.provider)?.models ?? []
-  const chosenModel = models.find((model) => model.id === draft.model)
+  const investigatorModel = data.role_models.investigator
+  const staleInvestigator = investigatorModel !== undefined && !investigatorModel.available
   const budgetValid = ALLOWANCE_PATTERN.test(draft.budget.trim())
-  const dirty = draft.budget !== baseline.budget || draft.provider !== baseline.provider || draft.model !== baseline.model || !sameList(draft.unredacted, baseline.unredacted)
+  const dirty =
+    draft.budget !== baseline.budget ||
+    draft.provider !== baseline.provider ||
+    draft.model !== baseline.model ||
+    draft.investigatorProvider !== baseline.investigatorProvider ||
+    draft.investigatorModel !== baseline.investigatorModel ||
+    !sameList(draft.unredacted, baseline.unredacted)
   // A provider without a model is half a choice; no provider at all is fine and leaves chat out of the request.
-  const modelChosen = draft.provider === '' || draft.model !== ''
+  const modelChosen = (draft.provider === '' || draft.model !== '') && (draft.investigatorProvider === '' || draft.investigatorModel !== '')
   const canSave = dirty && budgetValid && modelChosen && !save.isPending
   const stillStale = staleModel && draft.provider === baseline.provider && draft.model === baseline.model
+  const investigatorStillStale = staleInvestigator && draft.investigatorProvider === baseline.investigatorProvider && draft.investigatorModel === baseline.investigatorModel
 
   const settled = Number(data.spend.settled_usd)
   const reserved = Number(data.spend.reserved_usd)
@@ -134,12 +215,15 @@ export function AgentSettings() {
         version: data.version,
         monthly_budget_usd: draft.budget.trim(),
         unredacted_providers: draft.unredacted,
-        role_models: draft.provider !== '' && draft.model !== '' ? { chat: { provider: draft.provider, model: draft.model } } : {},
+        role_models: {
+          ...(draft.provider !== '' && draft.model !== '' ? { chat: { provider: draft.provider, model: draft.model } } : {}),
+          ...(draft.investigatorProvider !== '' && draft.investigatorModel !== '' ? { investigator: { provider: draft.investigatorProvider, model: draft.investigatorModel } } : {}),
+        },
       },
       {
         onSuccess: () => {
           setEdited(null)
-          setTestResult(null)
+          setTestResults({})
           setConflict(null)
           toast.show('Saved.', 'ok')
         },
@@ -153,10 +237,13 @@ export function AgentSettings() {
               if (!result.data) return
               const stored = baselineOf(result.data)
               const modelTouched = mine.provider !== baseline.provider || mine.model !== baseline.model
+              const investigatorTouched = mine.investigatorProvider !== baseline.investigatorProvider || mine.investigatorModel !== baseline.investigatorModel
               setEdited({
                 budget: mine.budget !== baseline.budget ? mine.budget : stored.budget,
                 provider: modelTouched ? mine.provider : stored.provider,
                 model: modelTouched ? mine.model : stored.model,
+                investigatorProvider: investigatorTouched ? mine.investigatorProvider : stored.investigatorProvider,
+                investigatorModel: investigatorTouched ? mine.investigatorModel : stored.investigatorModel,
                 unredacted: mergeUnredacted(baseline.unredacted, mine.unredacted, stored.unredacted),
               })
             })
@@ -168,13 +255,17 @@ export function AgentSettings() {
     )
   }
 
-  const runTest = () => {
-    setTestResult(null)
-    const tested = { provider: draft.provider, model: draft.model }
+  const runTest = (role: Role) => {
+    setTestResults((current) => ({ ...current, [role]: undefined }))
+    setTestingRole(role)
+    const tested = role === 'chat' ? { provider: draft.provider, model: draft.model } : { provider: draft.investigatorProvider, model: draft.investigatorModel }
     test.mutate(tested, {
-      onSuccess: (result) => setTestResult({ ...result, ...tested }),
+      onSuccess: (result) => setTestResults((current) => ({ ...current, [role]: { ...result, ...tested } })),
       onError: (error) =>
-        setTestResult({ ok: false, kind: 'error', message: error instanceof ApiError ? error.message : 'The test could not run. Try again.', ...tested }),
+        setTestResults((current) => ({
+          ...current,
+          [role]: { ok: false, kind: 'error', message: error instanceof ApiError ? error.message : 'The test could not run. Try again.', ...tested },
+        })),
     })
   }
 
@@ -182,9 +273,6 @@ export function AgentSettings() {
     if (on) setLiftingFor(provider)
     else patch({ unredacted: draft.unredacted.filter((entry) => entry !== provider) })
   }
-
-  // A result that arrives after another model was chosen is not about the current choice.
-  const shownResult = testResult && testResult.provider === draft.provider && testResult.model === draft.model ? testResult : null
 
   const saveButton = (
     <button type="button" className={`${styles.btn} ${styles.primary}`} disabled={!canSave} onClick={submit}>
@@ -239,42 +327,34 @@ export function AgentSettings() {
       </Panel>
 
       {providers.length > 0 && (
-        <Panel title="Model for chat">
-          {staleModel && stillStale && <Banner kind="warn">This model is no longer offered by the operator. Choose another.</Banner>}
-          <div className={styles.windowRow}>
-            <label htmlFor="agent-provider">Provider</label>
-            <select id="agent-provider" className={styles.select} value={draft.provider} onChange={(event) => patch({ provider: event.target.value, model: '' })}>
-              <option value="">Choose a provider</option>
-              {providers.map((entry) => (
-                <option key={entry.provider} value={entry.provider}>
-                  {providerName(entry.provider)}
-                </option>
-              ))}
-            </select>
-            <label htmlFor="agent-model">Model</label>
-            <select id="agent-model" className={styles.select} value={draft.model} disabled={draft.provider === ''} onChange={(event) => patch({ model: event.target.value })}>
-              <option value="">Choose a model</option>
-              {draft.model !== '' && !models.some((model) => model.id === draft.model) && <option value={draft.model}>{draft.model}</option>}
-              {models.map((model) => (
-                <option key={model.id} value={model.id}>
-                  {model.id}
-                </option>
-              ))}
-            </select>
-            <button type="button" className={styles.btn} disabled={!chosenModel || test.isPending} onClick={runTest}>
-              Test model
-            </button>
-          </div>
-          <p className={styles.hint}>A test makes one small paid call.</p>
-          {chosenModel && (
-            <p className={styles.hint}>
-              {`Input ${dollarsPerMillion(chosenModel.input_per_mtok_micro_usd)} per million tokens, output ${dollarsPerMillion(chosenModel.output_per_mtok_micro_usd)} per million tokens.`}
-            </p>
-          )}
-          <p role="status" className={shownResult && !shownResult.ok ? styles.error : styles.hint}>
-            {shownResult ? (shownResult.ok ? shownResult.message || 'The model answered.' : shownResult.message) : ''}
-          </p>
-        </Panel>
+        <>
+          <ModelPanel
+            title="Model for chat"
+            name=""
+            providers={providers}
+            provider={draft.provider}
+            model={draft.model}
+            stale={staleModel && stillStale}
+            onProvider={(provider) => patch({ provider, model: '' })}
+            onModel={(model) => patch({ model })}
+            result={testResults.chat ?? null}
+            testing={test.isPending && testingRole === 'chat'}
+            onTest={() => runTest('chat')}
+          />
+          <ModelPanel
+            title="Model for investigations"
+            name="investigation"
+            providers={providers}
+            provider={draft.investigatorProvider}
+            model={draft.investigatorModel}
+            stale={staleInvestigator && investigatorStillStale}
+            onProvider={(investigatorProvider) => patch({ investigatorProvider, investigatorModel: '' })}
+            onModel={(investigatorModel) => patch({ investigatorModel })}
+            result={testResults.investigator ?? null}
+            testing={test.isPending && testingRole === 'investigator'}
+            onTest={() => runTest('investigator')}
+          />
+        </>
       )}
 
       <Panel title="Monthly allowance">
@@ -312,6 +392,10 @@ export function AgentSettings() {
           <p className={styles.hint}>Values that look like secrets are always hidden.</p>
         </Panel>
       )}
+
+      <IdentitySection identity={data.identity} />
+
+      <InvestigationsTable limits={data.investigator} />
 
       <UsageTable usage={usage.data} loading={usage.isPending} error={usage.isError} />
 

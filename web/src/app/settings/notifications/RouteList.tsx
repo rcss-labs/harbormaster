@@ -39,6 +39,7 @@ export function RouteList({ routes, selected, newName, onSelect }: RouteListProp
             </span>
             <span className={styles.pills}>
               <Pill kind={route.enabled ? 'ok' : 'mute'}>{route.enabled ? 'On' : 'Off'}</Pill>
+              {route.investigate && <Pill kind="info">AI</Pill>}
               {route.fallback && <Pill kind="info">Catch-all</Pill>}
               {route.matches_nothing && <Pill kind="warn">Matches nothing</Pill>}
               {route.failing && <Pill kind="bad">Failing</Pill>}

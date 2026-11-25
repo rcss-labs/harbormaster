@@ -97,6 +97,8 @@ export function NotificationsPage() {
     delete body.signing_secret
     delete body.bot_token
     delete body.version
+    // The preview needs the switch as drafted, changed or not.
+    body.investigate = draft.investigate
     if (saved) body.route_id = saved.id
     return body
   }, [draft, saved])

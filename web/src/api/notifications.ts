@@ -61,6 +61,8 @@ export interface NotificationRoute {
   scope: NotificationSelector[]
   /** Only when no other enabled route matches the alert. */
   fallback: boolean
+  /** Background investigation: a diagnosis follows the alert on this route. */
+  investigate: boolean
   /** The route has scope entries and every one is missing. */
   matches_nothing: boolean
   /** Its last three deliveries all failed. */
@@ -123,6 +125,8 @@ export interface NotificationPreview {
   notification_count: number
   /** Alerts still inside the settle time that would otherwise match or count. */
   pending: number
+  /** How many of the route's services the agent identity cannot see; null unless the draft has `investigate` on. */
+  agent: { services_total: number; services_unseen: number } | null
 }
 
 export type DeliveryStatus = 'pending' | 'held' | 'delivered' | 'failed' | 'cancelled'
@@ -131,7 +135,7 @@ export interface NotificationDelivery {
   id: number
   at: string
   finished_at: string | null
-  event: 'opened' | 'repeat' | 'update' | 'resolved' | 'test'
+  event: 'opened' | 'repeat' | 'update' | 'resolved' | 'test' | 'diagnosis'
   /** The alert title, or "Test message". */
   alert: string
   service: string
@@ -228,6 +232,8 @@ export interface NotificationRouteInput {
   notify_resolved: boolean
   scope: NotificationSelectorInput[]
   fallback: boolean
+  /** Left out, an update keeps the stored value. */
+  investigate?: boolean
   /** Required on update. */
   version?: number
 }

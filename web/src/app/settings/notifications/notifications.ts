@@ -232,6 +232,7 @@ export interface RouteDraft {
   notifyResolved: boolean
   scope: ScopeEntry[]
   fallback: boolean
+  investigate: boolean
 }
 
 /** "New route N", the first number no existing route uses; Slack, critical only, every alert type, off. */
@@ -261,6 +262,7 @@ export function newRouteDraft(existingNames: string[], timezone: string): RouteD
     notifyResolved: true,
     scope: [],
     fallback: false,
+    investigate: false,
   }
 }
 
@@ -287,6 +289,7 @@ export function draftFromRoute(route: NotificationRoute): RouteDraft {
     notifyResolved: route.notify_resolved,
     scope: route.scope.map((entry) => ({ key: scopeKey(entry), threshold: isGroupKind(entry.kind) ? (entry.threshold ?? 1) : 0 })),
     fallback: route.fallback,
+    investigate: route.investigate,
   }
 }
 
@@ -366,6 +369,8 @@ export function bodyFromDraft(draft: RouteDraft, saved?: NotificationRoute): Not
     if (draft.clearSigning) body.signing_secret = ''
     else if (draft.signingSecret) body.signing_secret = draft.signingSecret
   }
+  // Left out unless changed, so a save never sends the switch the server would refuse while the agent is off.
+  if (draft.investigate !== (saved?.investigate ?? false)) body.investigate = draft.investigate
   if (saved) body.version = saved.version
   return body
 }
@@ -474,7 +479,13 @@ export function pendingSentence(count: number, seconds: number): string {
 
 // ---- delivery log ----
 
-export function statusPill(delivery: Pick<NotificationDelivery, 'status'>): { kind: 'ok' | 'bad' | 'warn' | 'mute'; label: string } {
+/** A diagnosis waits for its due time as a pending row; until then it reads as held. */
+export function isHeldPending(delivery: Pick<NotificationDelivery, 'status' | 'held_until'>, now = Date.now()): boolean {
+  return delivery.status === 'pending' && delivery.held_until !== null && new Date(delivery.held_until).getTime() > now
+}
+
+export function statusPill(delivery: Pick<NotificationDelivery, 'status' | 'held_until'>): { kind: 'ok' | 'bad' | 'warn' | 'mute'; label: string } {
+  if (isHeldPending(delivery)) return { kind: 'warn', label: 'Held' }
   const pills: Record<DeliveryStatus, { kind: 'ok' | 'bad' | 'warn' | 'mute'; label: string }> = {
     delivered: { kind: 'ok', label: 'Delivered' },
     failed: { kind: 'bad', label: 'Failed' },
@@ -489,6 +500,10 @@ const pad2 = (n: number) => String(n).padStart(2, '0')
 
 /** The note under the result: the release time of a held row in the browser's zone, else what the API says. */
 export function deliveryNote(delivery: Pick<NotificationDelivery, 'status' | 'held_until' | 'note'>): string {
+  if (isHeldPending(delivery)) {
+    const at = new Date(delivery.held_until as string)
+    return `Held until ${pad2(at.getHours())}:${pad2(at.getMinutes())}`
+  }
   if (delivery.status === 'held' && delivery.held_until) {
     const at = new Date(delivery.held_until)
     return `Held by quiet hours until ${pad2(at.getHours())}:${pad2(at.getMinutes())}`
@@ -507,6 +522,7 @@ export function eventLabel(event: NotificationDelivery['event']): string {
     update: 'Updated',
     resolved: 'Resolved',
     test: 'Test',
+    diagnosis: 'Diagnosis',
   }
   return labels[event]
 }

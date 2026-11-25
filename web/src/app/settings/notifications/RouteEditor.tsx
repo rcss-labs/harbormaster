@@ -1,5 +1,6 @@
 import type { NotificationKind, NotificationPreview, NotificationRoute, NotificationTargets } from '../../../api/notifications'
 import type { OffHoursTags } from '../../../api/offhours'
+import { useAuth } from '../../auth/AuthProvider'
 import { Banner } from '../../../components/Banner'
 import { Panel } from '../../../components/Panel'
 import { MessagePreview } from './MessagePreview'
@@ -58,6 +59,8 @@ export function RouteEditor(props: RouteEditorProps) {
   const canTest = !isNew && !dirty && saved !== undefined
   const zones = supportedZones()
   const zoneOptions = zones.includes(draft.quietTimezone) ? zones : [draft.quietTimezone, ...zones]
+  const agentEnabled = useAuth().me?.agent_enabled ?? false
+  const unseen = props.preview?.agent?.services_unseen ?? 0
   const needsSecretKey = draft.destination !== 'email' && !secretsAvailable
 
   return (
@@ -248,6 +251,21 @@ export function RouteEditor(props: RouteEditorProps) {
             <input type="checkbox" checked={draft.notifyResolved} onChange={(event) => patch({ notifyResolved: event.target.checked })} />
             Notify when resolved
           </label>
+          {agentEnabled && (
+            <div className={`${styles.field} ${styles.wide}`}>
+              <label className={styles.check}>
+                <input type="checkbox" checked={draft.investigate} onChange={(event) => patch({ investigate: event.target.checked })} />
+                Investigate with AI
+              </label>
+              {draft.investigate && unseen > 0 && props.preview?.agent && (
+                <p className={styles.help}>{`The agent cannot see ${unseen} of this route's ${props.preview.agent.services_total} services. Change its access on Settings, AI agent.`}</p>
+              )}
+              {draft.investigate && draft.destination === 'pagerduty' && (
+                <p className={styles.help}>PagerDuty gets no diagnosis message. The incident&apos;s link opens the investigation.</p>
+              )}
+              {draft.investigate && draft.destination === 'webhook' && <p className={styles.help}>Your receiver will get a new event value, diagnosis.</p>}
+            </div>
+          )}
           <label className={`${styles.check} ${styles.wide}`}>
             <input type="checkbox" checked={draft.enabled} onChange={(event) => patch({ enabled: event.target.checked })} />
             Route is on
