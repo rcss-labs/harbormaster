@@ -13,6 +13,25 @@ export const TYPE_LINES: Record<string, string> = {
   security: 'Reads open security findings and image scan results.',
   reliability: 'Reads incidents, failing deployments and restarts.',
   capacity: 'Reads CPU and memory use against what is provisioned.',
+  custom: 'You write what it looks at.',
+}
+
+export const CUSTOM_TYPE = 'custom'
+const DEFAULT_MAX_INSTRUCTION_CHARS = 2000
+
+/** The text as the server cleans it before it counts: line breaks become line feeds and white space at both ends goes. */
+const cleanedInstructions = (text: string) => text.replace(/\r\n?/g, '\n').trim()
+
+/** Characters as the server counts them: code points, not UTF-16 units. */
+export const instructionLength = (text: string): number => Array.from(cleanedInstructions(text)).length
+
+/** The problem code of a draft's instructions, or '' when they pass the checks the page can make or the type is not custom. */
+export function draftInstructionProblem(draft: ReviewDraft, info: AgentReviewsInfo): string {
+  if (draft.type !== CUSTOM_TYPE) return ''
+  const max = info.max_instruction_chars || DEFAULT_MAX_INSTRUCTION_CHARS
+  const length = instructionLength(draft.instructions)
+  if (length === 0) return 'instructions_required'
+  return length > max ? 'instructions_too_long' : ''
 }
 
 export interface ReviewDraft {
@@ -30,6 +49,8 @@ export interface ReviewDraft {
   /** Scope keys of the notification scope picker. */
   scope: string[]
   routeIds: number[]
+  /** Used only while the type is custom. */
+  instructions: string
 }
 
 /** "New review N", the first number no review uses; weekly on Monday at 08:00, off, nothing in scope. */
@@ -37,7 +58,7 @@ export function newReviewDraft(existingNames: string[], timezone: string, type: 
   const taken = new Set(existingNames.map((name) => name.trim().toLowerCase()))
   let n = 1
   while (taken.has(`new review ${n}`)) n++
-  return { name: `New review ${n}`, type, enabled: false, cadence: 'weekly', time: '08:00', weekday: 1, monthDay: '', timezone, scope: [], routeIds: [] }
+  return { name: `New review ${n}`, type, enabled: false, cadence: 'weekly', time: '08:00', weekday: 1, monthDay: '', timezone, scope: [], routeIds: [], instructions: '' }
 }
 
 export function draftFromReview(review: ReviewDTO): ReviewDraft {
@@ -54,6 +75,7 @@ export function draftFromReview(review: ReviewDTO): ReviewDraft {
     scope: review.scope.map(scopeKey),
     // A route that became PagerDuty is not offered any more; the server keeps it when only the switch is turned off.
     routeIds: review.routes.filter((route) => route.destination !== 'pagerduty').map((route) => route.id),
+    instructions: review.instructions ?? '',
   }
 }
 
@@ -94,6 +116,8 @@ export function bodyFromDraft(draft: ReviewDraft, version?: number): ReviewInput
     scope: draft.scope.map(scopeInput).filter((entry): entry is ReviewScopeEntry => entry !== null),
     route_ids: draft.routeIds,
   }
+  // The text goes as typed (the server cleans it) and only with the custom type.
+  if (draft.type === CUSTOM_TYPE) body.instructions = draft.instructions
   if (version !== undefined) body.version = version
   return body
 }
@@ -150,5 +174,6 @@ export function mergeDraft(baseline: ReviewDraft, mine: ReviewDraft, stored: Rev
     timezone: pick('timezone'),
     scope: pick('scope'),
     routeIds: pick('routeIds'),
+    instructions: pick('instructions'),
   }
 }

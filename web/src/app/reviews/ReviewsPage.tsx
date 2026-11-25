@@ -35,7 +35,7 @@ export function ReviewsPage() {
                 {run.name}
               </Link>
               <span className={styles.cell}>{reviewTypeLabel(run.type)}</span>
-              <span className={styles.muted}>{run.period_label}</span>
+              <span className={styles.muted}>{run.test ? `${run.period_label} (test run)` : run.period_label}</span>
               <span className={styles.firstLine}>{firstLine(run.summary)}</span>
               <span className={styles.state}>
                 <Pill kind={reviewPillKind(run.state)}>{reviewStateText(run.state, run.reason)}</Pill>

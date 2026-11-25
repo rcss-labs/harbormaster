@@ -248,6 +248,9 @@ export interface AgentReviewsInfo {
   supported_types: string[]
   /** What one run reserves at the reviewer model, in dollars; null without a model or while the agent is unreachable. */
   worst_case_run_usd: string | null
+  /** True while the operator allows custom reviews; the type list holds `custom` only then. */
+  custom_enabled: boolean
+  max_instruction_chars: number
 }
 export interface AgentIdentityPermission {
   tag_id: number
@@ -397,6 +400,8 @@ export interface ReviewDTO {
   next_run_at: string | null
   last_run: ReviewLastRun | null
   worst_case_month_usd: string | null
+  /** Empty for a built-in type. */
+  instructions: string
 }
 /** A scope entry of a review request: a tag, a cluster or an account, with no threshold. */
 export type ReviewScopeEntry = { kind: 'account'; account_id: string; region?: string } | { kind: 'cluster'; cluster_id: string } | { kind: 'harbormaster'; tag_id: number }
@@ -407,6 +412,8 @@ export interface ReviewInput {
   schedule: ReviewSchedule
   scope: ReviewScopeEntry[]
   route_ids: number[]
+  /** Sent for the custom type only. */
+  instructions?: string
   /** On update only. */
   version?: number
 }
@@ -415,6 +422,8 @@ export interface ReviewPreviewDTO {
   services_unseen: number
   next_run_at: string | null
   worst_case_month_usd: string | null
+  /** Empty, or one of the instruction problem codes. */
+  instructions_problem: string
 }
 export interface ReviewRunRow {
   id: number
@@ -438,6 +447,10 @@ export interface ReviewRunRow {
   attempts: number
   /** Both attempts together; empty when unknown. */
   cost_usd: string
+  /** A test run: stored, never sent. */
+  test: boolean
+  /** The run's copy of the instructions; empty when it has none. */
+  instructions: string
 }
 export interface ReviewRunsPage {
   items: ReviewRunRow[]
@@ -484,7 +497,8 @@ export function useReviewPreview() {
 export function useRunReviewNow() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (id: number) => api.post<{ run_id: number }>(`/api/agent/reviews/${id}/run`),
+    // A test run says `deliver: false`; a run now sends no body at all.
+    mutationFn: ({ id, test = false }: { id: number; test?: boolean }) => api.post<{ run_id: number }>(`/api/agent/reviews/${id}/run`, test ? { deliver: false } : undefined),
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: REVIEWS_KEY })
       void queryClient.invalidateQueries({ queryKey: REVIEW_RUNS_KEY })

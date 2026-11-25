@@ -6,7 +6,7 @@ import type { ReviewDTO, ReviewInput } from '../../../api/agent'
 import { CORE_SERVICES_CLUSTER } from '../../../test/notificationsFixtures'
 import { server } from '../../../test/msw'
 import { renderApp } from '../../../test/renderApp'
-import { PREVIEW_SMALL, REVIEW_SETTINGS, REVIEW_WEEKLY_COST, useReviewMocks } from '../../../test/reviewSettingsFixtures'
+import { PREVIEW_SMALL, REVIEW_CUSTOM, REVIEW_SETTINGS, REVIEW_SETTINGS_CUSTOM, REVIEW_WEEKLY_COST, useReviewMocks } from '../../../test/reviewSettingsFixtures'
 
 beforeEach(() => {
   localStorage.clear()
@@ -281,5 +281,167 @@ describe('ReviewEditor', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Discard changes' }))
     expect(name).toHaveValue('Weekly cost')
     expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument()
+  })
+})
+
+describe('ReviewEditor custom instructions', () => {
+  const instructionsField = () => screen.findByRole('textbox', { name: 'Instructions' }, SLOW)
+  const typeInstructions = (text: string) => fireEvent.change(screen.getByRole('textbox', { name: 'Instructions' }), { target: { value: text } })
+  const refuse = (code: string) =>
+    http.post('/api/agent/reviews', () => HttpResponse.json({ error: { code, field: code === 'type_fixed' ? 'type' : 'instructions', message: 'Server words.' } }, { status: 422 }))
+
+  it('offers Custom only when the server lists it', async () => {
+    useReviewMocks()
+    const first = renderApp('/settings/agent')
+    await openNew()
+    expect(screen.queryByRole('radio', { name: /Custom/ })).not.toBeInTheDocument()
+    first.unmount()
+
+    useReviewMocks({ settings: REVIEW_SETTINGS_CUSTOM })
+    renderApp('/settings/agent')
+    await openNew()
+    expect(await screen.findByRole('radio', { name: /Custom/ }, SLOW)).toBeEnabled()
+    expect(screen.getByText('You write what it looks at.')).toBeInTheDocument()
+  })
+
+  it('keeps Custom disabled when the agent does not support it', async () => {
+    useReviewMocks({ settings: { ...REVIEW_SETTINGS_CUSTOM, reviews: { ...REVIEW_SETTINGS_CUSTOM.reviews, supported_types: ['cost'] } } })
+    renderApp('/settings/agent')
+    await openNew()
+    expect(await screen.findByRole('radio', { name: /Custom/ }, SLOW)).toBeDisabled()
+    expect(screen.getAllByText('The agent service does not offer this type yet.').length).toBeGreaterThan(0)
+  })
+
+  it('shows the instructions field for Custom only', async () => {
+    useReviewMocks({ settings: REVIEW_SETTINGS_CUSTOM })
+    renderApp('/settings/agent')
+    await openNew()
+    expect(screen.queryByRole('textbox', { name: 'Instructions' })).not.toBeInTheDocument()
+    await userEvent.click(await screen.findByRole('radio', { name: /Custom/ }, SLOW))
+    expect(await instructionsField()).toHaveValue('')
+    expect(screen.getByText('0 of 2000 characters')).toBeInTheDocument()
+    expect(screen.getByText('Say what the review should look at and how to lay out the summary. The agent keeps its own rules: it only reads, it has no log tools, and it answers as a summary with evidence.')).toBeInTheDocument()
+    expect(screen.getByText('Instructions are sent to the model provider and admins can read them. Do not paste secrets.')).toBeInTheDocument()
+    expect(screen.getByText("The summary goes to the review's routes and to people who can see everything the agent sees.")).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('radio', { name: /^Cost/ }))
+    expect(screen.queryByRole('textbox', { name: 'Instructions' })).not.toBeInTheDocument()
+  })
+
+  it('counts characters and blocks save above the limit', async () => {
+    useReviewMocks({ settings: REVIEW_SETTINGS_CUSTOM })
+    renderApp('/settings/agent')
+    await openNew()
+    await chooseRoute(CORE_ROUTE)
+    await userEvent.click(await screen.findByRole('radio', { name: /Custom/ }, SLOW))
+    await instructionsField()
+    // An emoji is one character, however many UTF-16 units it takes.
+    typeInstructions('😀'.repeat(2000))
+    expect(screen.getByText('2000 of 2000 characters')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save review' })).toBeEnabled()
+    typeInstructions('a'.repeat(2001))
+    expect(screen.getByText('2001 of 2000 characters')).toBeInTheDocument()
+    expect(screen.getByText('Use at most 2000 characters.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save review' })).toBeDisabled()
+    typeInstructions('   ')
+    expect(screen.getByText('Write the instructions.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save review' })).toBeDisabled()
+  })
+
+  it('shows the problem from the preview', async () => {
+    const previews: ReviewInput[] = []
+    useReviewMocks({ settings: REVIEW_SETTINGS_CUSTOM, preview: { ...PREVIEW_SMALL, instructions_problem: 'instructions_hidden' }, previews })
+    renderApp('/settings/agent')
+    await openNew()
+    await chooseRoute(CORE_ROUTE)
+    await userEvent.click(await screen.findByRole('radio', { name: /Custom/ }, SLOW))
+    await instructionsField()
+    typeInstructions('Look at spend.')
+    expect(await screen.findByText('Remove the invisible or control characters. Pasting as plain text usually fixes this.', undefined, SLOW)).toBeInTheDocument()
+    expect(previews.at(-1)).toMatchObject({ type: 'custom', instructions: 'Look at spend.' })
+  })
+
+  it.each([
+    ['instructions_secret', /Part of this looks like a secret/],
+    ['instructions_required', /Write the instructions\./],
+    ['instructions_surprise', /The instructions were not accepted\./],
+  ])('shows the problem from a refused save: %s', async (code, text) => {
+    useReviewMocks({ settings: REVIEW_SETTINGS_CUSTOM })
+    server.use(refuse(code))
+    renderApp('/settings/agent')
+    await openNew()
+    await chooseRoute(CORE_ROUTE)
+    await userEvent.click(await screen.findByRole('radio', { name: /Custom/ }, SLOW))
+    await instructionsField()
+    typeInstructions('Look at spend.')
+    await save()
+    expect(await screen.findByText(text, undefined, SLOW)).toBeInTheDocument()
+    // The server's own words are not shown for a problem the table covers.
+    expect(screen.queryByText('Server words.')).not.toBeInTheDocument()
+    typeInstructions('Look at spend by team.')
+    expect(screen.queryByText(text)).not.toBeInTheDocument()
+  })
+
+  it('sends the text as typed, and no instructions for a built-in type', async () => {
+    const posts: ReviewInput[] = []
+    useReviewMocks({ settings: REVIEW_SETTINGS_CUSTOM })
+    server.use(
+      http.post('/api/agent/reviews', async ({ request }) => {
+        posts.push((await request.json()) as ReviewInput)
+        return HttpResponse.json({ ...REVIEW_CUSTOM, id: 9 }, { status: 201 })
+      }),
+    )
+    renderApp('/settings/agent')
+    await openNew()
+    await chooseRoute(CORE_ROUTE)
+    await userEvent.click(await screen.findByRole('radio', { name: /Custom/ }, SLOW))
+    await instructionsField()
+    const text = '  Look at spend by team.\n\nKeep it short.  '
+    typeInstructions(text)
+    await save()
+    await waitFor(() => expect(posts).toHaveLength(1))
+    expect(posts[0]).toMatchObject({ type: 'custom', instructions: text })
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Add review' }))
+    await screen.findByLabelText('Review name')
+    await chooseRoute(CORE_ROUTE)
+    await userEvent.click(screen.getByRole('radio', { name: /Custom/ }))
+    typeInstructions('Typed, then abandoned.')
+    await userEvent.click(screen.getByRole('radio', { name: /^Cost/ }))
+    await save()
+    await waitFor(() => expect(posts).toHaveLength(2))
+    expect(posts[1].type).toBe('cost')
+    expect(Object.keys(posts[1])).not.toContain('instructions')
+  })
+
+  it('a saved custom review keeps its type', async () => {
+    const puts: ReviewInput[] = []
+    useReviewMocks({ settings: REVIEW_SETTINGS_CUSTOM, reviews: [REVIEW_WEEKLY_COST, REVIEW_CUSTOM] })
+    server.use(
+      http.put('/api/agent/reviews/:id', async ({ request }) => {
+        puts.push((await request.json()) as ReviewInput)
+        return HttpResponse.json({ error: { code: 'type_fixed', field: 'type', message: 'Server words.' } }, { status: 422 })
+      }),
+    )
+    renderApp('/settings/agent')
+    await openEdit('Team spend')
+    expect(await instructionsField()).toHaveValue('Look at spend by team.\nKeep it short.')
+    expect(screen.getByRole('radio', { name: /Custom/ })).toBeChecked()
+    for (const radio of screen.getAllByRole('radio')) expect(radio).toBeDisabled()
+    expect(screen.queryByRole('radio', { name: /^Cost/ })).not.toBeInTheDocument()
+    typeInstructions('Look at spend by service.')
+    expect(screen.getByRole('button', { name: 'Save review' })).toBeEnabled()
+    await save()
+    await waitFor(() => expect(puts).toHaveLength(1))
+    expect(puts[0]).toMatchObject({ type: 'custom', instructions: 'Look at spend by service.', version: 1 })
+    expect(await screen.findByText('The type of a saved review cannot change to or from Custom. Create a new review.')).toBeInTheDocument()
+  })
+
+  it('a saved built-in review is not offered Custom', async () => {
+    useReviewMocks({ settings: REVIEW_SETTINGS_CUSTOM, reviews: [REVIEW_WEEKLY_COST, REVIEW_CUSTOM] })
+    renderApp('/settings/agent')
+    await openEdit('Weekly cost')
+    expect(screen.getByRole('radio', { name: /^Cost/ })).toBeChecked()
+    expect(screen.queryByRole('radio', { name: /Custom/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: 'Instructions' })).not.toBeInTheDocument()
   })
 })

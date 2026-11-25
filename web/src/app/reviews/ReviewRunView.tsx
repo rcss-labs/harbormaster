@@ -23,6 +23,7 @@ export function ReviewRunView({ run }: { run: ReviewRunDetailDTO }) {
           <span>{run.scope_label}</span>
           <span className={styles.muted}>{servicesInScope(run.services_total)}</span>
         </p>
+        {run.test && <p className={styles.meta}>Test run. It was not sent.</p>}
         <p className={styles.state}>
           <Pill kind={reviewPillKind(run.state)}>{reviewStateText(run.state, run.reason)}</Pill>
           <span className={styles.muted}>

@@ -13,6 +13,7 @@ describe('reviewStateText', () => {
     ['skipped', 'rate_limited', 'Not run: too many reviews in the last day.'],
     ['skipped', 'missed', 'Not run: it could not start in time.'],
     ['skipped', 'disabled', 'Not run: the review was turned off.'],
+    ['skipped', 'instructions', 'Not run: the instructions no longer pass the checks. Open the review and save them again.'],
     ['skipped', 'something_new', 'Not run.'],
     ['skipped', '', 'Not run.'],
     ['archived', '', 'Not run.'],
@@ -21,7 +22,11 @@ describe('reviewStateText', () => {
     expect(reviewStateText(state, reason)).toBe(text)
   })
 
-  it('names the four review types and leaves an unknown one generic', () => {
-    expect(['cost', 'security', 'reliability', 'capacity', 'custom'].map(reviewTypeLabel)).toEqual(['Cost', 'Security findings', 'Reliability', 'Capacity', 'Review'])
+  it('names the five review types and leaves an unknown one generic', () => {
+    expect(['cost', 'security', 'reliability', 'capacity', 'custom'].map(reviewTypeLabel)).toEqual(['Cost', 'Security findings', 'Reliability', 'Capacity', 'Custom'])
+  })
+
+  it('leaves an unknown type generic', () => {
+    expect(reviewTypeLabel('forecast')).toBe('Review')
   })
 })

@@ -12,6 +12,7 @@ const SKIPPED_TEXT: Record<string, string> = {
   rate_limited: 'Not run: too many reviews in the last day.',
   missed: 'Not run: it could not start in time.',
   disabled: 'Not run: the review was turned off.',
+  instructions: 'Not run: the instructions no longer pass the checks. Open the review and save them again.',
 }
 
 const FALLBACK = 'Not run.'
@@ -21,6 +22,7 @@ const TYPE_LABEL: Record<string, string> = {
   security: 'Security findings',
   reliability: 'Reliability',
   capacity: 'Capacity',
+  custom: 'Custom',
 }
 
 /** The one sentence for a run's state; any state or reason this app does not know reads as not run. */

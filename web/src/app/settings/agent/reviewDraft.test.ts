@@ -10,6 +10,8 @@ const INFO: AgentReviewsInfo = {
   types: [{ id: 'cost', label: 'Cost' }],
   supported_types: ['cost'],
   worst_case_run_usd: null,
+  custom_enabled: false,
+  max_instruction_chars: 2000,
 }
 
 function review(fields: Partial<ReviewDTO> = {}): ReviewDTO {
@@ -28,6 +30,7 @@ function review(fields: Partial<ReviewDTO> = {}): ReviewDTO {
     next_run_at: null,
     last_run: null,
     worst_case_month_usd: null,
+    instructions: '',
     ...fields,
   }
 }

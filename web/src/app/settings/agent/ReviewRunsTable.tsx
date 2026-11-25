@@ -44,7 +44,13 @@ export function ReviewRunsTable({ reviewId, name }: { reviewId: number; name: st
                   </td>
                   <td>
                     <Link to={`/reviews/runs/${row.id}`}>{row.period_label || `Result ${row.id}`}</Link>
-                    {row.manual && <span className={styles.hint}>{' run now'}</span>}
+                    {row.test ? <Pill kind="mute">Test</Pill> : row.manual && <span className={styles.hint}>{' run now'}</span>}
+                    {row.instructions !== '' && (
+                      <details>
+                        <summary>Instructions used</summary>
+                        <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', margin: 0 }}>{row.instructions}</pre>
+                      </details>
+                    )}
                   </td>
                   <td>{new Date(row.requested_at).toLocaleString()}</td>
                   <td className={tableClass.num}>{costText(row)}</td>

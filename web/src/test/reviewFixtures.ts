@@ -20,6 +20,7 @@ export const REVIEW_RUN_DONE: ReviewRunDetailDTO = {
   finished_at: '2026-11-23T08:04:00Z',
   summary: 'Spend rose 12% on three services.\nA second line that should not appear in the list.',
   summary_replaced: false,
+  test: false,
   evidence: [
     { ordinal: 1, tool: 'get_cost_breakdown', action: 'view', service_id: SERVICE_PAYMENTS.id, service: 'payments', note: 'Fargate hours doubled.', excerpt: 'payments: 2 -> 4 tasks' },
   ],

@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import type { ReviewInput } from '../../../api/agent'
 import { server } from '../../../test/msw'
 import { renderApp } from '../../../test/renderApp'
-import { REVIEW_MONTHLY_SECURITY, REVIEW_SETTINGS, REVIEW_WEEKLY_COST, useReviewMocks } from '../../../test/reviewSettingsFixtures'
+import { REVIEW_CUSTOM, REVIEW_MONTHLY_SECURITY, REVIEW_SETTINGS, REVIEW_SETTINGS_CUSTOM, REVIEW_WEEKLY_COST, useReviewMocks } from '../../../test/reviewSettingsFixtures'
 
 beforeEach(() => {
   localStorage.clear()
@@ -159,5 +159,84 @@ describe('ReviewsSection', () => {
     await rowOf('Weekly cost')
     expect(screen.getByRole('button', { name: 'Add review' })).toBeDisabled()
     expect(screen.getByText('You can have up to 2 reviews. Delete one to add another.')).toBeInTheDocument()
+  })
+
+  it('run now sends no body', async () => {
+    const bodies: string[] = []
+    useReviewMocks()
+    server.use(
+      http.post('/api/agent/reviews/:id/run', async ({ request }) => {
+        bodies.push(await request.text())
+        return HttpResponse.json({ run_id: 77 }, { status: 202 })
+      }),
+    )
+    renderApp('/settings/agent')
+    const row = await rowOf('Weekly cost')
+    await userEvent.click(row.getByRole('button', { name: /^Run now/ }))
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Run review' }))
+    await waitFor(() => expect(bodies).toEqual(['']))
+  })
+
+  it('test run confirms then starts with deliver false', async () => {
+    const bodies: string[] = []
+    useReviewMocks()
+    server.use(
+      http.post('/api/agent/reviews/:id/run', async ({ request }) => {
+        bodies.push(await request.text())
+        return bodies.length === 1
+          ? HttpResponse.json({ run_id: 78 }, { status: 202 })
+          : HttpResponse.json({ error: { code: 'review_busy', message: 'A run is waiting.' } }, { status: 409 })
+      }),
+    )
+    renderApp('/settings/agent')
+    const row = await rowOf('Weekly cost')
+    await userEvent.click(row.getByRole('button', { name: /^Test run/ }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('Run this review once without sending it? It uses the AI allowance. The result appears under Past results.')).toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    expect(bodies).toEqual([])
+
+    await userEvent.click(row.getByRole('button', { name: /^Test run/ }))
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Start test run' }))
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(JSON.parse(bodies[0])).toEqual({ deliver: false })
+    expect(await screen.findByText('The test run has started. Its result appears under Past results.')).toBeInTheDocument()
+
+    await userEvent.click(row.getByRole('button', { name: /^Test run/ }))
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Start test run' }))
+    expect(await screen.findByText('This review is already waiting or running.')).toBeInTheDocument()
+  })
+
+  it('custom row is read-only while the switch is off', async () => {
+    const deleted: number[] = []
+    useReviewMocks({ settings: REVIEW_SETTINGS, reviews: [REVIEW_WEEKLY_COST, REVIEW_CUSTOM] })
+    server.use(
+      http.delete('/api/agent/reviews/:id', ({ params }) => {
+        deleted.push(Number(params.id))
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    renderApp('/settings/agent')
+    const row = await rowOf('Team spend')
+    expect(row.getByText('Custom reviews are turned off by configuration.')).toBeInTheDocument()
+    expect(row.getByRole('button', { name: /^Delete/ })).toBeInTheDocument()
+    for (const action of ['Run now', 'Test run', 'Edit']) expect(row.queryByRole('button', { name: new RegExp(`^${action}`) })).not.toBeInTheDocument()
+    expect(row.queryByRole('switch')).not.toBeInTheDocument()
+    // A built-in row is unchanged.
+    const weekly = await rowOf('Weekly cost')
+    expect(weekly.queryByText('Custom reviews are turned off by configuration.')).not.toBeInTheDocument()
+    expect(weekly.getByRole('button', { name: /^Test run/ })).toBeInTheDocument()
+    await userEvent.click(row.getByRole('button', { name: /^Delete/ }))
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Delete review' }))
+    await waitFor(() => expect(deleted).toEqual([3]))
+  })
+
+  it('keeps a custom row fully usable while the switch is on', async () => {
+    useReviewMocks({ settings: REVIEW_SETTINGS_CUSTOM, reviews: [REVIEW_CUSTOM] })
+    renderApp('/settings/agent')
+    const row = await rowOf('Team spend')
+    expect(row.getByText('Custom')).toBeInTheDocument()
+    expect(row.queryByText('Custom reviews are turned off by configuration.')).not.toBeInTheDocument()
+    for (const action of ['Run now', 'Test run', 'Edit', 'Delete']) expect(row.getByRole('button', { name: new RegExp(`^${action}`) })).toBeInTheDocument()
   })
 })

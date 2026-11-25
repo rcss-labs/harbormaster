@@ -23,6 +23,28 @@ describe('ReviewRunView', () => {
     expect(screen.getByText('payments: 2 -> 4 tasks').tagName).toBe('PRE')
   })
 
+  it('labels the custom type', async () => {
+    mockReviews([{ ...REVIEW_RUN_DONE, type: 'custom' }])
+    renderApp(`/reviews/runs/${REVIEW_RUN_DONE.id}`)
+
+    expect(await screen.findByText('Custom')).toBeInTheDocument()
+    expect(screen.queryByText('Test run. It was not sent.')).not.toBeInTheDocument()
+  })
+
+  it('says a test run was not sent', async () => {
+    mockReviews([{ ...REVIEW_RUN_DONE, type: 'custom', manual: true, test: true }])
+    renderApp(`/reviews/runs/${REVIEW_RUN_DONE.id}`)
+
+    expect(await screen.findByText('Test run. It was not sent.')).toBeInTheDocument()
+  })
+
+  it('explains the instructions reason', async () => {
+    mockReviews([{ ...REVIEW_RUN_DONE, type: 'custom', state: 'skipped', reason: 'instructions', summary: '', evidence: [] }])
+    renderApp(`/reviews/runs/${REVIEW_RUN_DONE.id}`)
+
+    expect(await screen.findByText('Not run: the instructions no longer pass the checks. Open the review and save them again.')).toBeInTheDocument()
+  })
+
   it('says one service in scope in the singular', async () => {
     mockReviews([{ ...REVIEW_RUN_DONE, services_total: 1 }])
     renderApp(`/reviews/runs/${REVIEW_RUN_DONE.id}`)

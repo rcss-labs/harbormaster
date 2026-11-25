@@ -58,4 +58,33 @@ describe('ReviewRunsTable', () => {
     await userEvent.click(within(row).getByRole('button', { name: /^Edit/ }))
     expect(await screen.findByText('No results yet.', undefined, SLOW)).toBeInTheDocument()
   })
+
+  const openPastResults = async () => {
+    renderApp('/settings/agent')
+    const panel = within(await screen.findByRole('region', { name: 'Reviews' }, SLOW))
+    const row = (await panel.findByText('Weekly cost', undefined, SLOW)).closest('tr') as HTMLElement
+    await userEvent.click(within(row).getByRole('button', { name: /^Edit/ }))
+    return within(await screen.findByRole('region', { name: 'Past results of Weekly cost' }, SLOW))
+  }
+
+  it('marks test runs', async () => {
+    useReviewMocks({ runs: { items: [reviewRun(51, { period_label: 'Test on 25 Nov 2026, 10:00 UTC', manual: true, test: true }), reviewRun(50, { period_label: 'Week 47, 2026' })], next_cursor: '' } })
+    const table = await openPastResults()
+    const test = (await table.findByRole('link', { name: /Test on 25 Nov 2026/ }, SLOW)).closest('tr') as HTMLElement
+    expect(within(test).getByText('Test')).toBeInTheDocument()
+    expect(within(test).queryByText('run now')).not.toBeInTheDocument()
+    const normal = table.getByRole('link', { name: /Week 47, 2026/ }).closest('tr') as HTMLElement
+    expect(within(normal).queryByText('Test')).not.toBeInTheDocument()
+  })
+
+  it('shows the instructions used as text', async () => {
+    const markup = 'Look at <b>spend</b> and [this](https://example.invalid) <img src=x onerror=alert(1)>'
+    useReviewMocks({ runs: { items: [reviewRun(52, { review_id: 1, instructions: markup }), reviewRun(53, { period_label: 'Week 46, 2026' })], next_cursor: '' } })
+    const table = await openPastResults()
+    expect(await table.findByText('Instructions used', undefined, SLOW)).toBeInTheDocument()
+    expect(table.getAllByText('Instructions used')).toHaveLength(1)
+    const shown = table.getByText(markup)
+    expect(shown.tagName).toBe('PRE')
+    expect(shown.querySelector('b, a, img')).toBeNull()
+  })
 })
