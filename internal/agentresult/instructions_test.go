@@ -58,8 +58,8 @@ func TestCheckInstructions_Table(t *testing.T) {
 		{"white space only", " \n\t ", InstructionsRequired},
 		{"lone NUL", "a\x00b", InstructionsNotText},
 		{"invalid utf-8", "a\xffb", InstructionsNotText},
-		{"zero-width space", "a​b", InstructionsHidden},
-		{"bidi override", "a‮b", InstructionsHidden},
+		{"zero-width space", "a\u200bb", InstructionsHidden},
+		{"bidi override", "a\u202eb", InstructionsHidden},
 		{"tag character", "a\U000E0041b", InstructionsHidden},
 		{"variation selector", "a️b", InstructionsHidden},
 		{"escape control", "a\x1bb", InstructionsHidden},
@@ -92,8 +92,8 @@ func TestCheckInstructions_OrderOfProblems(t *testing.T) {
 	}{
 		{"bytes before not_text", strings.Repeat("a", 8001) + "\x00", InstructionsTooLong},
 		{"not_text before too_long by characters", strings.Repeat("a", 2001) + "\x00", InstructionsNotText},
-		{"too_long before hidden", strings.Repeat("a", 2001) + "​", InstructionsTooLong},
-		{"hidden before secret", "​ " + fakeKey, InstructionsHidden},
+		{"too_long before hidden", strings.Repeat("a", 2001) + "\u200b", InstructionsTooLong},
+		{"hidden before secret", "\u200b " + fakeKey, InstructionsHidden},
 		{"not_text before required is moot, NUL is not empty", "\x00", InstructionsNotText},
 	}
 	for _, c := range cases {
@@ -263,7 +263,7 @@ func adversarialText(n int) string {
 func TestCheckInstructions_LinearOn200KB(t *testing.T) {
 	inputs := []string{
 		strings.Repeat("a", 200<<10),
-		strings.Repeat("​", 200<<10),
+		strings.Repeat("\u200b", 200<<10),
 		strings.Repeat("AKIA", 50<<10),
 		adversarialText(200 << 10),
 	}
