@@ -30,8 +30,8 @@ func TestMigrate_AppliesAllFilesOnce(t *testing.T) {
 	if err := s.Pool.QueryRow(ctx, `select count(*) from schema_migrations`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
-	if n != 27 {
-		t.Fatalf("schema_migrations rows = %d, want 27", n)
+	if n != 29 {
+		t.Fatalf("schema_migrations rows = %d, want 29", n)
 	}
 	var versions []int
 	rows, err := s.Pool.Query(ctx, `select version from schema_migrations order by version`)
