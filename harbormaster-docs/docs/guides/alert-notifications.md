@@ -123,11 +123,11 @@ Every review message carries "Written by AI. Check it before acting." ahead of t
 | Webhook | A JSON object with `"event": "review"`, described below. |
 | PagerDuty | Nothing is sent. A review cannot be sent to a PagerDuty route. |
 
-The type labels are Cost, Security findings, Reliability and Capacity. The review name is written by an admin, so it is cleaned to one line and cut.
+The type labels are Cost, Security findings, Reliability, Capacity and Custom, so a custom review is headed `Custom review: <review name>`. A test run is never sent. The instructions of a custom review are not part of the message. The review name is written by an admin, so it is cleaned to one line and cut.
 
 ### Review webhook event
 
-A review has the common fields of a webhook message, with `scope` set to `review` and `severity` to `info`. The alert fields (`text`, `service`, `cluster`, `account_id` and `region`) are empty. `title` is the headline above. `url` links to the result. Six more fields come with it: `summary`, `ai_generated` (always `true`), `review_run_id`, `review_name`, `review_type` (`cost`, `security`, `reliability` or `capacity`) and `period`. `event` is `review`, not in the `alert.*` family, so a receiver that rejects unknown event names needs a change before a review sends to it.
+A review has the common fields of a webhook message, with `scope` set to `review` and `severity` to `info`. The alert fields (`text`, `service`, `cluster`, `account_id` and `region`) are empty. `title` is the headline above. `url` links to the result. Six more fields come with it: `summary`, `ai_generated` (always `true`), `review_run_id`, `review_name`, `review_type` (`cost`, `security`, `reliability`, `capacity` or `custom`) and `period`. `event` is `review`, not in the `alert.*` family, so a receiver that rejects unknown event names needs a change before a review sends to it.
 
 ```json
 {

@@ -172,7 +172,8 @@ States: `requested` (waiting for its turn, or for a retry), `running`, `done`, `
 | `not_configured` | skipped | No reviewer model is set. Also see below for a model or role the agent does not offer | Choose a model in **Settings > AI agent** |
 | `rate_limited` | skipped | `HM_AGENT_REVIEWS_PER_DAY` runs already started in the last 24 hours. The period gets no review | Raise it, or reduce the number of reviews. The cap can overshoot by one when two coordinator tasks overlap |
 | `missed` | skipped | The run could not start within `HM_AGENT_REVIEW_MAX_LATE` of its scheduled time: Harbormaster or the coordinator was down, the agent was busy or did not offer the role, or the queue was long | Find out why (see below). The next period runs as usual |
-| `disabled` | skipped | The review was switched off or deleted before the run started, or before its retry. A manual run of a switched-off review is not skipped for this; a manual run of a deleted review is | Switch the review on if that was a mistake |
+| `disabled` | skipped | The review was switched off or deleted before the run started, or before its retry. A manual run of a switched-off review is not skipped for this; a manual run of a deleted review is. A custom review, a manual or test run of one included, is also skipped as `disabled` while `HM_AGENT_CUSTOM_REVIEWS` is off | Switch the review on if that was a mistake, or set `HM_AGENT_CUSTOM_REVIEWS=true` |
+| `instructions` | skipped | A custom review's instructions no longer pass the checks (for example, the rules became stricter in an upgrade). Nothing was sent to the model and nothing was paid | Open the review, read the refusal under the instructions, fix the text and save |
 | `agent_unavailable` | failed | The agent could not be reached on both attempts, or a run that had started waited past the late limit for an agent that did not offer the role | Section 3. Check the coordinator's security group is admitted by the agent's load balancer |
 | `limit_reached` | failed | A run ended without a summary because it reached its step, token or time limit | Narrow the scope or split the review. Raise the agent's per-run limits only if this is common, and it costs more |
 | `no_result` | failed | The model ended without submitting a summary even after one reminder | Try another model if it repeats |
@@ -203,13 +204,43 @@ Any one of these works. Alert messages and investigations are never affected.
 3. Clear the reviewer model in **Settings > AI agent**. Reviews end as `not_configured`.
 4. Unset `HM_AGENT_URL` (section 7). This also turns off the chat and the investigations.
 
+To turn off only custom reviews, set `HM_AGENT_CUSTOM_REVIEWS=false` (section 18). Do this last, after you disable the ones that should not run again: with the setting off, a custom review cannot be switched off, only deleted, and one that is on becomes due again when the setting returns.
+
 ## 16. Reviews: upgrade and rollback
 
 - **Upgrade order.** Harbormaster and the agent service can be upgraded in either order. Until both are new, a due review waits up to `HM_AGENT_REVIEW_MAX_LATE` and is then recorded as `missed`. Chat and investigations are not affected.
 - **Migrations 0221 and 0222** are additive. 0222 takes a short exclusive lock on the delivery log, with a lock timeout of 2 seconds. If a long transaction holds the table, the task exits at start and is started again, and the migration retries from the start at the next start. See [Upgrading](../../install/upgrading.md#the-release-that-adds-scheduled-reviews).
-- **Rollback.** Turn reviews off first: `HM_AGENT_REVIEWS_PER_DAY=0`, or disable each review. An older Harbormaster ignores the review tables and never sends a leftover review row. Its delivery log may count a failed review row toward "route failing" until the row expires, and a manual retry of such a row fails there. No migration is undone. The reviews and their results stay in the database, unread, until the new release runs again.
+- **Rollback.** Turn reviews off first: `HM_AGENT_REVIEWS_PER_DAY=0`, or disable each review. If custom reviews exist, see section 18 first. An older Harbormaster ignores the review tables and never sends a leftover review row. Its delivery log may count a failed review row toward "route failing" until the row expires, and a manual retry of such a row fails there. No migration is undone. The reviews and their results stay in the database, unread, until the new release runs again.
 
-## 17. Time zones
+## 17. Custom reviews
+
+A custom review is a review of type `custom` whose instructions an admin wrote. See [Custom reviews](../../guides/ai-agent-reviews.md#custom-reviews) for what admins can do with it and [the security model](../../security/security-model.md#custom-reviews) for what holds when a model follows the text badly.
+
+- **Why `instructions` is a reason.** A run is skipped as `instructions` when the text the run is to use no longer passes the checks of the release that is running. This happens after an upgrade that makes a check stricter, and costs nothing. The review keeps trying each period until an admin saves a text that passes.
+- **The switch.** `HM_AGENT_CUSTOM_REVIEWS` is an `extra_env` entry, like the other agent settings. Set it to `true` on every Harbormaster service.
+- **Upgrade order.** Harbormaster and the agent can be upgraded in either order. A custom review waits up to `HM_AGENT_REVIEW_MAX_LATE` until both sides are new, and is then recorded as `missed`. Create custom reviews after the deploy has finished, so that no older task meets one.
+- **Reading a run.** The audit entry `agent_review_create`, `agent_review_update` or `agent_review_delete` holds the text and its SHA-256. An `agent_run` entry holds the hash only, so you can tell which edit a run used. Admins also see the copy a run used beside its result.
+
+## 18. Custom reviews: switch and rollback
+
+**The switch off.** With `HM_AGENT_CUSTOM_REVIEWS=false` or unset, a custom review stays in the list and can be deleted. It cannot be edited or switched off. A run of it that is waiting ends as `disabled`. A custom review that was on is still on in the database, so it becomes due again when the setting returns to `true`. To keep one for later, disable it first, then set the setting to `false`.
+
+**Rollback to the release before custom reviews.** Disable or delete every custom review first, then roll back. No migration is undone: migration 0223 is additive in effect, and the older release works on the new schema because the new columns have defaults.
+
+| What meets a custom review | What happens |
+| --- | --- |
+| The older web and API | It lists the review with a note that its type is unknown. It cannot save it (an update is refused) and can delete it. |
+| The older job, a custom review that is due | A run row may be recorded. With an older agent, the agent does not offer the type: the run waits without an attempt and is `missed` at `HM_AGENT_REVIEW_MAX_LATE`. With a current agent, the task has no instructions and the agent refuses it with 400 before any model call, the reservation is settled at zero and the run fails. |
+| The older read API | A custom result answers `404` to everyone, admins included. It is visible again after you roll forward. |
+| The older dispatcher, a custom result's message | It is not sent: the message has no label for the type and every sender refuses it. The row fails and may count toward "route failing" until it expires. |
+| The older dispatcher, a test run | Never planned: the run was marked planned when it was made. |
+| The older agent, a task from the current release | `400` for the unknown member, so nothing is paid. |
+| A test run under the older code | It shows no covered tags, so only admins read it. |
+| The current agent, a built-in task from the older release | The same bytes as before. |
+
+Check it worked: after a rollback with custom reviews disabled or deleted, no `custom` run appears in **Settings > AI agent > Reviews**, and the delivery log shows no failing review rows.
+
+## 19. Time zones
 
 - A review's schedule is read in its own IANA zone (for example `Europe/Berlin`), not in the server's. No part of the schedule uses the host's zone.
 - The zone's rules come from the time zone data in the container image, or from the copy built into Harbormaster when the image has none. A change in a country's rules (a new daylight saving date) reaches reviews when you run an image or release that has it. Until then reviews follow the old rule.

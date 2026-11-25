@@ -67,6 +67,7 @@ Skip this section if you do not run the agent (`HM_AGENT_URL` unset).
 - [ ] **Reviewer model.** Choose a provider whose terms you accept for unattended runs over your estate's names, sizes, costs and image findings. Keep redaction on for it. Prefer Amazon Bedrock for sensitive estates.
 - [ ] **Reviews: destinations.** A review message puts a model's text into each route's destination, every time it runs. Choose routes whose destinations treat text as text. Check that your webhook receiver accepts the `review` event.
 - [ ] **Reviews: allowance and counts.** Reviews spend from the chat's allowance, and are skipped when it would not leave room for a chat run and an investigation. Keep the number of reviews and their cadence in line with the allowance (the editor shows the worst case for a month), and set `HM_AGENT_REVIEWS_PER_DAY=0` to turn reviews off.
+- [ ] **Custom reviews.** Leave `HM_AGENT_CUSTOM_REVIEWS` unset unless you want admins to write review instructions. A custom review's text goes to your model provider on every run, is stored in the database, and is kept in the audit log for `HM_RETENTION_AUDIT_LOG`. Tell admins not to paste secrets: the check for them is best effort. Only global admins read or write the text, so keep that group small.
 - [ ] **Alarms.** Set `alarm_sns_topic_arns` on the agent module.
 
 ## Related pages
