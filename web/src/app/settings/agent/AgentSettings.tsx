@@ -116,9 +116,13 @@ export function AgentSettings() {
   const budget = Number(data.monthly_budget_usd)
   // What one question reserves is known for the saved model only; a changed allowance is judged here, an unchanged one by the server.
   const reservation = chat !== undefined && chat.max_question_usd !== '' && draft.provider === chat.provider && draft.model === chat.model ? chat.max_question_usd : ''
-  const typedBudget = budgetValid ? Number(draft.budget.trim()) : Number.NaN
+  // Whole cents, so an allowance that leaves exactly one question's reservation is not called too small by floating-point error.
+  const cents = (dollars: string) => Math.round(Number(dollars) * 100)
   const belowQuestion =
-    reservation !== '' && (draft.budget !== baseline.budget && budgetValid ? typedBudget - settled - reserved < Number(reservation) : chat?.allowance_below_question === true)
+    reservation !== '' &&
+    (draft.budget !== baseline.budget && budgetValid
+      ? cents(draft.budget.trim()) - cents(data.spend.settled_usd) - cents(data.spend.reserved_usd) < cents(reservation)
+      : chat?.allowance_below_question === true)
   const usedPct = budget > 0 ? ((settled + reserved) / budget) * 100 : 0
 
   // Providers shown in the redaction section: the catalogue plus any stored one the operator no longer offers.

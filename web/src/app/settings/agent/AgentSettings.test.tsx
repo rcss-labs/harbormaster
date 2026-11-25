@@ -93,6 +93,17 @@ describe('AgentSettings', () => {
     await waitFor(() => expect(screen.queryByText(/every question will be refused/)).not.toBeInTheDocument())
   })
 
+  it('does not warn when a typed allowance leaves exactly what one question reserves', async () => {
+    // 1.15 - 0.55 is 0.5999999999999999 in floating point; in cents it is exactly the 0.60 one question reserves.
+    useAgentMocks({ ...SETTINGS, spend: { month: '2026-11', settled_usd: '0.00', reserved_usd: '0.55' } })
+    renderApp('/settings/agent')
+    const allowance = await screen.findByLabelText('Monthly allowance in US dollars')
+    await userEvent.clear(allowance)
+    await userEvent.type(allowance, '1.15')
+    expect(screen.getByLabelText('Monthly allowance in US dollars')).toHaveValue('1.15')
+    expect(screen.queryByText(/every question will be refused/)).not.toBeInTheDocument()
+  })
+
   it('does not state a reservation while the model is not known', async () => {
     const chat = { provider: 'anthropic', model: 'model-a', available: true, max_question_usd: '', allowance_below_question: false }
     useAgentMocks({ ...SETTINGS, role_models: { chat } })
