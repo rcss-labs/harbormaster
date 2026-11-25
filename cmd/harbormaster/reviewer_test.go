@@ -47,3 +47,18 @@ func TestServe_ReviewJobNeedsTheAgentAndACap(t *testing.T) {
 	}
 	wireReviews(nil, r) // a task without a dispatcher
 }
+
+// The dispatcher sends custom results only when the operator switch is on, the same switch the job reads.
+func TestServe_DispatcherGetsTheCustomReviewsSwitch(t *testing.T) {
+	st := storetest.Open(t)
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cfg := config.Config{AgentURL: "https://agent.internal:8484", AgentReviewsPerDay: 7, AgentReviewMaxLate: 90 * time.Minute, AgentInvestigationMaxWait: 5 * time.Minute}
+	for _, on := range []bool{false, true} {
+		cfg.AgentCustomReviews = on
+		d := &notify.Dispatcher{}
+		wireReviews(d, newReviewer(cfg, st, nil, nil, log))
+		if d.CustomReviews != on || !d.Reviews {
+			t.Errorf("switch %v: dispatcher custom %v, reviews %v", on, d.CustomReviews, d.Reviews)
+		}
+	}
+}

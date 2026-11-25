@@ -118,7 +118,7 @@ Bedrock needs no API key. List `bedrock` in `model_providers`, set `bedrock_regi
 - `GET /api/agent/status` answers `404` while `HM_AGENT_URL` is unset.
 - The audit log shows `agent_settings_update` for your save and `agent_run` for each question.
 - With investigations on, an alert on a service the identity can see shows **Investigating** and then **Diagnosis ready** in **Needs attention**, and `agent_run` rows with the agent identity as actor appear.
-- With custom reviews on, **Custom** is offered as a review type. **Test run** on any review stores a result, marked as a test run, under **Reviews** and in the review's past results. Only admins see it, and no route gets it.
+- With custom reviews on, **Custom** is offered as a review type. **Test run** on any review stores a result, marked as a test run, under **Reviews** and in the review's past results. Only admins see it, and no route gets it. With custom reviews off, no custom result is sent to a route.
 - With reviews on, **Run now** on a review in **Settings > AI agent > Reviews** produces a result under **Reviews**, a message on each of its routes, and an `agent_run` row with the role `reviewer`.
 
 ## Try it locally

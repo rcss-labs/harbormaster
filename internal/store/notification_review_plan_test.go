@@ -82,7 +82,7 @@ func (f *reviewPlanFixture) done(reviewID int64, name string) int64 {
 
 func (f *reviewPlanFixture) plan() int {
 	f.t.Helper()
-	n, err := f.s.PlanReviewDeliveries(context.Background(), reviewPlanNow, never, 100)
+	n, err := f.s.PlanReviewDeliveries(context.Background(), reviewPlanNow, never, true, 100)
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestPlanReview_ExactlyOnceAcrossCyclesAndHolders(t *testing.T) {
 	var wg sync.WaitGroup
 	for range 6 {
 		wg.Go(func() {
-			n, err := f.s.PlanReviewDeliveries(context.Background(), reviewPlanNow, never, 100)
+			n, err := f.s.PlanReviewDeliveries(context.Background(), reviewPlanNow, never, true, 100)
 			if err != nil {
 				t.Error(err)
 			}
@@ -184,7 +184,7 @@ func TestPlanReview_ARunHeldByAnotherPlannerIsLeftToIt(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if n, err := f.s.PlanReviewDeliveries(ctx, reviewPlanNow, never, 100); err != nil || n != 1 || !f.hasRow(free, a) || f.hasRow(held, a) {
+	if n, err := f.s.PlanReviewDeliveries(ctx, reviewPlanNow, never, true, 100); err != nil || n != 1 || !f.hasRow(free, a) || f.hasRow(held, a) {
 		t.Fatalf("planned %d, %v, want only the run nobody holds", n, err)
 	}
 	if err := tx.Rollback(context.Background()); err != nil {
@@ -216,7 +216,7 @@ func TestPlanReview_QuietHoursSetTheDueTime(t *testing.T) {
 		asked[r.Name] = severity
 		return until, r.Name == "night"
 	}
-	n, err := f.s.PlanReviewDeliveries(context.Background(), reviewPlanNow, held, 100)
+	n, err := f.s.PlanReviewDeliveries(context.Background(), reviewPlanNow, held, true, 100)
 	if err != nil || n != 2 || !reflect.DeepEqual(asked, map[string]string{"night": "info", "day": "info"}) {
 		t.Fatalf("planned %d, %v, asked about %v, want 2 rows and severity info for both routes", n, err, asked)
 	}
@@ -306,6 +306,44 @@ func TestPlanReview_AReviewThatIsOffSendsOnlyManualRuns(t *testing.T) {
 	}
 }
 
+// With the operator switch for custom reviews off, a finished custom run is marked and gets no rows, a manual one too;
+// a built-in run is planned. Turning the switch on again does not plan the marked run (as for a review turned on again).
+func TestPlan_CustomRunsWhileTheSwitchIsOffGetNoRows(t *testing.T) {
+	f := newReviewPlanFixture(t)
+	a := f.route("a")
+	review := f.review("Custom", a)
+	scheduled, manual, builtIn := f.done(review, "Custom"), f.done(review, "Custom"), f.done(review, "Cost")
+	f.exec(`update agent_review_runs set review_type = 'custom' where id in ($1, $2)`, scheduled, manual)
+	f.exec(`update agent_review_runs set manual = true where id = $1`, manual)
+	planWith := func(custom bool) int {
+		t.Helper()
+		n, err := f.s.PlanReviewDeliveries(context.Background(), reviewPlanNow, never, custom, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if n := planWith(false); n != 1 || f.hasRow(scheduled, a) || f.hasRow(manual, a) || !f.hasRow(builtIn, a) {
+		t.Fatalf("planned %d (rows %d), want only the built-in run", n, f.rows())
+	}
+	if f.plannedAt(scheduled) == nil || f.plannedAt(manual) == nil {
+		t.Fatal("a custom run was not marked: it would be sent when the switch is turned on again")
+	}
+	if n := planWith(true); n != 0 || f.rows() != 1 {
+		t.Fatalf("planned %d (rows %d) once the switch was on again, want 0", n, f.rows())
+	}
+}
+
+func TestPlan_CustomRunsAreSentWhileTheSwitchIsOn(t *testing.T) {
+	f := newReviewPlanFixture(t)
+	a := f.route("a")
+	run := f.done(f.review("Custom", a), "Custom")
+	f.exec(`update agent_review_runs set review_type = 'custom' where id = $1`, run)
+	if n, err := f.s.PlanReviewDeliveries(context.Background(), reviewPlanNow, never, true, 100); err != nil || n != 1 || !f.hasRow(run, a) {
+		t.Fatalf("planned %d, %v (rows %d), want the custom run planned", n, err, f.rows())
+	}
+}
+
 // One poisoned run leaves nothing behind (its rows and its mark are one transaction) and does not stop the others.
 func TestPlanReview_OneFailingRunDoesNotStopTheRest(t *testing.T) {
 	f := newReviewPlanFixture(t)
@@ -314,7 +352,7 @@ func TestPlanReview_OneFailingRunDoesNotStopTheRest(t *testing.T) {
 	good := f.done(f.review("good", a), "good")
 	f.exec(`create function refuse_poison() returns trigger language plpgsql as $$ begin raise exception 'refused'; end $$`)
 	f.exec(`create trigger refuse_poison before insert on notification_deliveries for each row when (new.route_name = 'poison') execute function refuse_poison()`)
-	n, err := f.s.PlanReviewDeliveries(context.Background(), reviewPlanNow, never, 100)
+	n, err := f.s.PlanReviewDeliveries(context.Background(), reviewPlanNow, never, true, 100)
 	if err == nil || !strings.Contains(err.Error(), "refused") || n != 1 || !f.hasRow(good, a) {
 		t.Fatalf("planned %d, err %v, want the good run planned and the bad run's error", n, err)
 	}
@@ -335,12 +373,12 @@ func TestPlanReview_LimitBoundsOneCall(t *testing.T) {
 		f.done(review, "Monthly spend")
 	}
 	for i, want := range []int{1, 1, 1, 0} {
-		if n, err := f.s.PlanReviewDeliveries(context.Background(), reviewPlanNow, never, 1); err != nil || n != want {
+		if n, err := f.s.PlanReviewDeliveries(context.Background(), reviewPlanNow, never, true, 1); err != nil || n != want {
 			t.Fatalf("call %d with limit 1 planned %d, %v, want %d", i+1, n, err, want)
 		}
 	}
 	f.done(review, "Monthly spend")
-	if n, err := f.s.PlanReviewDeliveries(context.Background(), reviewPlanNow, never, 0); err != nil || n != 0 {
+	if n, err := f.s.PlanReviewDeliveries(context.Background(), reviewPlanNow, never, true, 0); err != nil || n != 0 {
 		t.Fatalf("limit 0 planned %d, %v, want 0", n, err)
 	}
 }
@@ -360,7 +398,7 @@ func TestPlanReview_UsesOneConnection(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	one := &store.Store{Pool: pool}
-	if n, err := one.PlanReviewDeliveries(ctx, reviewPlanNow, never, 100); err != nil || n != 2 {
+	if n, err := one.PlanReviewDeliveries(ctx, reviewPlanNow, never, true, 100); err != nil || n != 2 {
 		t.Fatalf("planned %d, %v on a pool of one, want 2", n, err)
 	}
 }
@@ -388,7 +426,7 @@ func TestPlanReview_ABlockedTransactionEndsWithItsContext(t *testing.T) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		n, err := f.s.PlanReviewDeliveries(ctx, reviewPlanNow, never, 100)
+		n, err := f.s.PlanReviewDeliveries(ctx, reviewPlanNow, never, true, 100)
 		done <- result{n, err}
 	}()
 	select {

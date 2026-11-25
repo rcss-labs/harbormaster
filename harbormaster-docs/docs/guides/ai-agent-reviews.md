@@ -63,7 +63,7 @@ While `HM_AGENT_REVIEWS_PER_DAY` is `0`, the section says "Reviews are turned of
 
 A custom review is a review whose subject an admin writes in words. It is the fifth type, `custom` (label Custom). It has the same schedule, scope, routes, tools, identity, limits and checks as every other review. Only the type's instructions differ: the admin writes them, and the agent is told to follow them.
 
-Custom reviews are off until the operator sets `HM_AGENT_CUSTOM_REVIEWS=true` on every Harbormaster service (see [Configuration](../reference/configuration.md#ai-agent)). While it is off, **Custom** is not offered, a custom review cannot be created or changed, and none is recorded or run.
+Custom reviews are off until the operator sets `HM_AGENT_CUSTOM_REVIEWS=true` on every Harbormaster service (see [Configuration](../reference/configuration.md#ai-agent)). While it is off, **Custom** is not offered, a custom review cannot be created or changed, and none is recorded or run. No result of a custom review is sent either, a manual run included; results stay readable. For the switch and a rollback, see the [runbook](../operations/runbooks/ai-agent.md#18-custom-reviews-switch-and-rollback).
 
 To add one, open **Settings > AI agent > Reviews**, select **Add review**, choose **Custom** and write the instructions. The type of a review cannot be changed to or from `custom` after it is created. To change it, make a new review.
 
@@ -110,9 +110,9 @@ Before it is checked, stored, hashed and sent, the text is cleaned in one way: a
 
 A custom summary has no fixed parts. It is the model's own words.
 
-- **A summary that repeats the instructions is replaced.** If it repeats 80 or more characters in a row of the request (ignoring case and punctuation), it is replaced by the fixed sentence "The review finished. Open it in Harbormaster to read the findings." A note that does so is emptied. A stretch that lies wholly inside one long word, such as a service name, is not counted. The agent checks this, and Harbormaster checks it again before it stores the result.
-- **The other copy check still applies.** A summary that repeats 32 or more characters of text the run read is replaced, as for every review. Names are exempt as described [below](#what-the-summary-check-does-and-does-not-catch). One that names a tag or an account label of 32 characters or more, taken from a tool answer, is replaced too, because only the names of services and clusters that the agent read in an id are exempt. A custom review that asks for a report for each tag or account is likelier to hit this than the built-in types.
-- **Check the outcome with a test run** before a route gets the result.
+- **A summary that repeats the instructions is replaced.** If it repeats 80 or more characters in a row of the request (ignoring case and punctuation), it is replaced by the fixed sentence "The review finished. Open it in Harbormaster to read the findings." A note that does so is replaced by "See the excerpt." A stretch that lies wholly inside one long word, such as a service name, is not counted. The agent checks this, and Harbormaster checks it again before it stores the result.
+- **The other copy check still applies, by class.** A summary that repeats 32 or more characters of unlisted text the run read (a log message, an environment variable value, a command), or 80 or more characters of a listed value, is replaced, as for every review; see Copying [below](#what-the-summary-check-does-and-does-not-catch). A tag and an account label are listed values, so a summary that names one is replaced only at 80 characters or more, not 32. Names of services and clusters are exempt as described there. A custom review that asks for a report for each tag or account is still likelier to hit this than the built-in types.
+- **Check the outcome with a test run** before a route gets the result. A test run appears under **Reviews** and in the review's past results, for admins only.
 
 ### Test runs
 
@@ -160,7 +160,7 @@ One run is one conversation with the model, under the limits of every agent run 
 
 ## What you see
 
-- **Reviews.** The sidebar entry **Reviews** appears while reviews are on. It lists the results you may read, newest first, with name, type, period, the first line of the summary and the state.
+- **Reviews.** The sidebar entry **Reviews** appears while reviews are on. It lists the results you may read, newest first, with name, type, period, the first line of the summary and the state. A test result is listed for admins only, marked as a test run.
 - **A result.** `/reviews/runs/<id>` shows the review's name, type, period, scope and the number of services in scope, the state and times, the summary and the evidence. The summary is plain text: no links, formatting or images. It carries the caption "Written by AI from what its identity may read. Check it before acting."
 - **Settings > AI agent > Reviews.** Admins see each review with its next run and last result, and can switch it on or off, run it now, edit it or delete it. Opening a review shows its past results.
 - **The delivery log.** On **Settings > Notifications**, the delivery log lists each review message as **Review**, with a link to the result.

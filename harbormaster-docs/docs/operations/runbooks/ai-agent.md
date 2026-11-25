@@ -222,13 +222,13 @@ To turn off only custom reviews, set `HM_AGENT_CUSTOM_REVIEWS=false` (section 18
 A custom review is a review of type `custom` whose instructions an admin wrote. See [Custom reviews](../../guides/ai-agent-reviews.md#custom-reviews) for what admins can do with it and [the security model](../../security/security-model.md#custom-reviews) for what holds when a model follows the text badly.
 
 - **Why `instructions` is a reason.** A run is skipped as `instructions` when the text the run is to use no longer passes the checks of the release that is running. This happens after an upgrade that makes a check stricter, and costs nothing. The review keeps trying each period until an admin saves a text that passes.
-- **The switch.** `HM_AGENT_CUSTOM_REVIEWS` is an `extra_env` entry, like the other agent settings. Set it to `true` on every Harbormaster service.
+- **The switch.** `HM_AGENT_CUSTOM_REVIEWS` is an `extra_env` entry, like the other agent settings. Set it to `true` on every Harbormaster service. While it is off no custom result is sent: see [section 18](#18-custom-reviews-switch-and-rollback).
 - **Upgrade order.** Harbormaster and the agent can be upgraded in either order. A custom review waits up to `HM_AGENT_REVIEW_MAX_LATE` until both sides are new, and is then recorded as `missed`. Create custom reviews after the deploy has finished, so that no older task meets one.
 - **Reading a run.** The audit entry `agent_review_create`, `agent_review_update` or `agent_review_delete` holds the text and its SHA-256. An `agent_run` entry holds the hash only, so you can tell which edit a run used. Admins also see the copy a run used beside its result.
 
 ## 18. Custom reviews: switch and rollback
 
-**The switch off.** With `HM_AGENT_CUSTOM_REVIEWS=false` or unset, a custom review stays in the list and can be deleted. It cannot be edited or switched off. A run of it that is waiting ends as `disabled`. A custom review that was on is still on in the database, so it becomes due again when the setting returns to `true`. To keep one for later, disable it first, then set the setting to `false`.
+**The switch off.** With `HM_AGENT_CUSTOM_REVIEWS=false` or unset, a custom review stays in the list and can be deleted. A finished custom run is neither planned nor sent: the delivery planner marks it with no messages (a manual run too), and a message already planned is cancelled with the note "Custom reviews are off." when it comes to be sent. Results stay readable. Turning the setting on again does not send them: a marked run is not planned again, and a planned message that was cancelled stays cancelled; one not yet sent goes out if its result is less than 48 hours old. It cannot be edited or switched off. A run of it that is waiting ends as `disabled`. A custom review that was on is still on in the database, so it becomes due again when the setting returns to `true`. To keep one for later, disable it first, then set the setting to `false`.
 
 **Rollback to the release before custom reviews.** Disable or delete every custom review first, then roll back. No migration is undone: migration 0223 is additive in effect, and the older release works on the new schema because the new columns have defaults.
 
@@ -241,7 +241,7 @@ A custom review is a review of type `custom` whose instructions an admin wrote. 
 | The older dispatcher, a test run | Never planned: the run was marked planned when it was made. |
 | The older agent, a task from the current release | The new job waits for an agent that offers the type and never sends the task, so nothing is paid. |
 | A test run under the older code | It shows no covered tags, so only admins read it. |
-| An older coordinator, a test run it starts during a rolling deploy or a rollback | A database check makes the run fail before any call to the agent, as failed with an error. Nothing is paid. |
+| An older coordinator, a test run it starts during a rolling deploy or a rollback | A database check refuses the older coordinator's start of the run. It retries once after 5 minutes, then the run fails with an error, before any call to the agent. Nothing is paid. |
 | The current agent, a built-in task from the older release | The same bytes as before. |
 
 Check it worked: after a rollback with custom reviews disabled or deleted, no `custom` run appears in **Settings > AI agent > Reviews**, and the delivery log shows no failing review rows.

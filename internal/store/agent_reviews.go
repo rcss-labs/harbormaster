@@ -82,11 +82,8 @@ func invalidReview(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", ErrReviewInvalid, fmt.Sprintf(format, args...))
 }
 
-// validateReview checks a definition before any SQL runs. It does not load the time zone: the API validates the
-// name and the schema stores the text.
-func validateReview(r Review) error { return validateReviewRules(r, true) }
-
-// validateReviewRules is validateReview; routesRequired false skips the count of routes (1 to 5) only.
+// validateReviewRules checks a definition before any SQL runs. It does not load the time zone: the API validates the
+// name and the schema stores the text. routesRequired false skips the count of routes (1 to 5) only.
 func validateReviewRules(r Review, routesRequired bool) error {
 	if n := utf8.RuneCountInString(r.Name); n < 1 || n > maxReviewNameRunes || !utf8.ValidString(r.Name) || strings.ContainsRune(r.Name, 0) {
 		return invalidReview("the name must be 1 to %d characters", maxReviewNameRunes)

@@ -80,8 +80,8 @@ func TestMigrate_0223KeepsBuiltInRowsAndAdmitsCustom(t *testing.T) {
 func TestMigrate_0223RefusesCustomWithoutTextAndTextWithoutCustom(t *testing.T) {
 	s, ctx := storetest.Open(t), context.Background()
 	insertReview := `insert into agent_reviews (name, type, cadence, at_minute, timezone, instructions) values ($1, $2, 'daily', 1, 'UTC', $3)`
-	insertRun := `insert into agent_review_runs (review_name, review_type, period_key, period_label, scheduled_for, manual, test, instructions)
-		values ('n', 'cost', $1, 'l', now(), $2, $3, $4)`
+	insertRun := `insert into agent_review_runs (review_name, review_type, period_key, period_label, scheduled_for, manual, test, instructions, delivery_planned_at)
+		values ('n', 'cost', $1, 'l', now(), $2, $3, $4, now())`
 	for name, c := range map[string]struct {
 		sql  string
 		args []any
@@ -706,5 +706,34 @@ func TestTestRun_RawSQLRefusesTagsOnATestRow(t *testing.T) {
 	}
 	if _, err := s.Pool.Exec(ctx, `update agent_review_runs set covered_tags = '{7}' where id = $1`, normal.ID); err != nil {
 		t.Fatalf("tags on a normal row: %v", err)
+	}
+}
+
+// P4-R7: a test run is stored, never sent. The mark that keeps the planner from picking it up is part of the row.
+func TestTestRun_RawSQLRefusesATestRowThePlannerCouldPick(t *testing.T) {
+	s, ctx := storetest.Open(t), context.Background()
+	route := reviewRoute(t, s, "r")
+	a, b := oldReview(t, s, "a", route.ID), oldReview(t, s, "b", route.ID)
+	test, err := s.RequestManualReviewRun(ctx, a.ID, "Test one", true, revNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	normal, err := s.RequestManualReviewRun(ctx, b.ID, "Run one", false, revNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pgErr *pgconn.PgError
+	if _, err := s.Pool.Exec(ctx, `update agent_review_runs set delivery_planned_at = null where id = $1`, test.ID); !errors.As(err, &pgErr) || pgErr.Code != "23514" {
+		t.Fatalf("a test row with no planned mark = %v, want a check violation (23514)", err)
+	}
+	if _, err := s.Pool.Exec(ctx, `insert into agent_review_runs (review_name, review_type, period_key, period_label, scheduled_for, manual, requested_at, test)
+		values ('r', 'cost', 'x:' || gen_random_uuid()::text, 'l', now(), true, now(), true)`); !errors.As(err, &pgErr) || pgErr.Code != "23514" {
+		t.Fatalf("an inserted test row with no planned mark = %v, want a check violation (23514)", err)
+	}
+	if _, err := s.Pool.Exec(ctx, `update agent_review_runs set delivery_planned_at = null where id = $1`, normal.ID); err != nil {
+		t.Fatalf("a normal row with no planned mark: %v", err)
+	}
+	if _, err := s.Pool.Exec(ctx, `update agent_review_runs set delivery_planned_at = now() where id = $1`, test.ID); err != nil {
+		t.Fatalf("a test row with a planned mark: %v", err)
 	}
 }
