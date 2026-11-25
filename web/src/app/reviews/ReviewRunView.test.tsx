@@ -1,6 +1,8 @@
+import { QueryClient } from '@tanstack/react-query'
 import { screen, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { reviewRunKey } from '../../api/reviews'
 import { REVIEW_RUN_DONE, mockReviews } from '../../test/reviewFixtures'
 import { ME_ADMIN } from '../../test/fixtures'
 import { server } from '../../test/msw'
@@ -75,13 +77,25 @@ describe('ReviewRunView', () => {
       }),
     )
     vi.useFakeTimers({ shouldAdvanceTime: true })
-    renderApp(`/reviews/runs/${REVIEW_RUN_DONE.id}`)
-
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    renderApp(`/reviews/runs/${REVIEW_RUN_DONE.id}`, queryClient)
     expect(await screen.findByText('Running')).toBeInTheDocument()
-    await vi.advanceTimersByTimeAsync(31 * 60_000)
-    await waitFor(() => expect(calls).toBeGreaterThan(1))
+    const opened = Date.now()
+    /** Moves the clock without firing the polls in between (there are 360), then lets `ms` pass and the answers arrive. */
+    const at = async (minutes: number, ms: number) => {
+      vi.setSystemTime(opened + minutes * 60_000)
+      await vi.advanceTimersByTimeAsync(ms)
+      await waitFor(() => expect(queryClient.isFetching({ queryKey: reviewRunKey(REVIEW_RUN_DONE.id) })).toBe(0))
+    }
+
+    // Every count is relative: a slow machine may let a poll of its own happen in between.
+    const early = calls
+    await at(29, 5_100)
+    await at(29, 5_100) // the answer of the poll above planned this one
+    expect(calls).toBeGreaterThanOrEqual(early + 2)
+    await at(30, 5_100) // at most the poll that was already due; its answer plans no other
     const settled = calls
-    await vi.advanceTimersByTimeAsync(60_000)
+    await at(31, 20_000)
     expect(calls).toBe(settled)
   })
 
