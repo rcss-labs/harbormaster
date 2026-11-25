@@ -209,7 +209,8 @@ func (s *Store) RequestManualReviewRun(ctx context.Context, reviewID int64, peri
 // while another review run is running with a live lease, and while an investigation requested after
 // investigationsWaitingSince is waiting (a review never starts ahead of one). A row with no attempt left is failed
 // as interrupted, not returned, and the next due row is tried. Everything runs in one transaction under the lock, after waiting for the rows of running runs, and an expired running
-// row goes before a requested one, so there is never a second live lease.
+// row goes before a requested one, so there is never a second live lease. The pick skips locked rows: every running row is
+// already held here, and a requested row held by a DeleteReview must not be waited for (the two would deadlock).
 func (s *Store) ClaimReviewRun(ctx context.Context, now time.Time, lease time.Duration, investigationsWaitingSince time.Time) (ReviewRun, ReviewClaim, error) {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
@@ -242,7 +243,7 @@ func (s *Store) ClaimReviewRun(ctx context.Context, now time.Time, lease time.Du
 			where id = (select id from agent_review_runs
 			  where (state = 'requested' and (claimed_until is null or claimed_until <= $1))
 			     or (state = 'running' and claimed_until <= $1)
-			  order by (state = 'running') desc, requested_at, id limit 1 for update)
+			  order by (state = 'running') desc, requested_at, id limit 1 for update skip locked)
 			returning `+reviewRunColumns, now, now.Add(lease), maxInvestigationAttempts))
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Rows failed on the way stay failed.

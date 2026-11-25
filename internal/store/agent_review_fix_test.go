@@ -293,13 +293,13 @@ func TestStartReview_BusyRetryDropsOutOfTheCost(t *testing.T) {
 		invExec(t, s, `insert into agent_runs (id, role, provider, model, state, cost_micro_usd, started_at, finished_at) values ($1, 'reviewer', 'p', 'm', 'done', $2, now(), now())`, id, cost)
 	}
 	st := func(id uuid.UUID) store.ReviewStart { return store.ReviewStart{RunID: id, Provider: "p", Model: "m"} }
-	c1 := claimReview(t, s, revNow) // attempt 1: started, found the agent busy, given back free
-	mustNoErr(t, s.StartReviewRun(ctx, c1.Claim(), st(busy), revNow))
-	mustNoErr(t, s.ReleaseReviewRun(ctx, c1.Claim(), time.Time{}, false))
-	c2 := claimReview(t, s, revNow.Add(time.Minute)) // attempt 1 again: the paid one
-	mustNoErr(t, s.StartReviewRun(ctx, c2.Claim(), st(a), revNow.Add(time.Minute)))
-	mustNoErr(t, s.ReleaseReviewRun(ctx, c2.Claim(), time.Time{}, true))
-	c3 := claimReview(t, s, revNow.Add(2*time.Minute)) // attempt 2
+	c1 := claimReview(t, s, revNow) // attempt 1: the paid run
+	mustNoErr(t, s.StartReviewRun(ctx, c1.Claim(), st(a), revNow))
+	mustNoErr(t, s.ReleaseReviewRun(ctx, c1.Claim(), time.Time{}, true))
+	c2 := claimReview(t, s, revNow.Add(time.Minute)) // attempt 2: found the agent busy, given back free
+	mustNoErr(t, s.StartReviewRun(ctx, c2.Claim(), st(busy), revNow.Add(time.Minute)))
+	mustNoErr(t, s.ReleaseReviewRun(ctx, c2.Claim(), time.Time{}, false))
+	c3 := claimReview(t, s, revNow.Add(2*time.Minute)) // attempt 2 again: the second paid run
 	mustNoErr(t, s.StartReviewRun(ctx, c3.Claim(), st(b), revNow.Add(2*time.Minute)))
 	mustNoErr(t, s.StartReviewRun(ctx, c3.Claim(), st(b), revNow.Add(2*time.Minute))) // a repeated start
 	got := reviewRunState(t, s, ids[0])
@@ -407,5 +407,41 @@ func TestStartReview_RepeatedStartNeverStoresItsOwnIdAsPrevious(t *testing.T) {
 	}
 	if got := reviewRunState(t, s, ids[0]); got.RunID == nil || *got.RunID != b || got.PrevRunID != nil {
 		t.Fatalf("run %v, prev %v; want %v and none", got.RunID, got.PrevRunID, b)
+	}
+}
+
+// The claim fails an exhausted row, then goes on to the next due row. A DeleteReview in flight holds that next row
+// (set null of its review_id) and wants the first one: without skip locked the two wait for each other.
+func TestClaimReview_DoesNotDeadlockWithADeleteReviewInFlight(t *testing.T) {
+	s, ctx := storetest.Open(t), context.Background()
+	ids := seedReviewRuns(t, s, revNow.Add(-10*time.Minute), revNow.Add(-5*time.Minute))
+	invExec(t, s, `update agent_review_runs set attempts = 2, claim_seq = 2 where id = $1`, ids[0]) // exhausted, due, claimed first
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	if _, err := tx.Exec(ctx, `update agent_review_runs set review_id = null where id = $1`, ids[1]); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := s.ClaimReviewRun(ctx, revNow, time.Minute, revNow.Add(-15*time.Minute))
+		done <- err
+	}()
+	time.Sleep(500 * time.Millisecond) // the claim has failed the first row and reached the second
+	_, delErr := tx.Exec(ctx, `update agent_review_runs set review_id = null where id = $1`, ids[0])
+	if delErr == nil {
+		delErr = tx.Commit(ctx)
+	}
+	claimErr := <-done
+	if delErr != nil || !errors.Is(claimErr, store.ErrNotFound) {
+		t.Fatalf("delete side: %v; claim side: %v; want no deadlock and ErrNotFound", delErr, claimErr)
+	}
+	if got := reviewRunState(t, s, ids[0]); got.State != "failed" || got.Reason != "interrupted" {
+		t.Fatalf("first row = %+v, want failed as interrupted", got)
+	}
+	if got := reviewRunState(t, s, ids[1]); got.State != "requested" {
+		t.Fatalf("second row = %+v, want it still waiting", got)
 	}
 }
