@@ -122,6 +122,12 @@ func streamError(ctx context.Context, err error, emittedText bool) error {
 // eventError maps an in-stream error event. A retry after text was emitted
 // would duplicate that text, so only an early failure is retryable.
 func eventError(apiErr *sdk.Error, emittedText bool) *provider.Error {
+	perr := classifyEvent(apiErr, emittedText)
+	perr.Status, perr.VendorType = apiErr.StatusCode, provider.SafeVendorType(string(apiErr.Type()))
+	return perr
+}
+
+func classifyEvent(apiErr *sdk.Error, emittedText bool) *provider.Error {
 	body := strings.ToLower(apiErr.RawJSON())
 	switch string(apiErr.Type()) {
 	case "authentication_error", "permission_error":
@@ -138,6 +144,12 @@ func eventError(apiErr *sdk.Error, emittedText bool) *provider.Error {
 }
 
 func httpError(apiErr *sdk.Error) *provider.Error {
+	perr := classifyHTTP(apiErr)
+	perr.Status, perr.VendorType = apiErr.StatusCode, provider.SafeVendorType(string(apiErr.Type()))
+	return perr
+}
+
+func classifyHTTP(apiErr *sdk.Error) *provider.Error {
 	status := apiErr.StatusCode
 	switch {
 	case status == http.StatusUnauthorized || status == http.StatusForbidden:

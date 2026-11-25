@@ -545,7 +545,7 @@ func TestChat_BudgetExhaustedIs402AndReservesNothing(t *testing.T) {
 		t.Fatalf("status %d, want 402", resp.StatusCode)
 	}
 	code, msg := errorCode(t, resp)
-	if code != "budget_exhausted" || msg != "This month's AI allowance is used up. Ask an admin to raise it." {
+	if code != "budget_exhausted" || msg != "The AI allowance is smaller than what one question can cost. Ask an admin to raise it." {
 		t.Errorf("error = %q %q", code, msg)
 	}
 	if n := agentCount(t, env.st, `select count(*) from agent_runs`); n != 0 {
@@ -1102,5 +1102,37 @@ func TestMe_CarriesAgentFlags(t *testing.T) {
 	_ = env.st.SetUserAIChat(t.Context(), omer.ID, false)
 	if e, c := flags(env.omer); !e || c {
 		t.Errorf("unflagged user: %v %v, want true false", e, c)
+	}
+}
+
+// An allowance that is big enough for a question but has been spent down is "used up"; the refusal says so and logs
+// who was refused and how much was left, never what was asked.
+func TestChat_SpentAllowanceIsUsedUpAndTheRefusalIsLogged(t *testing.T) {
+	env := newChatEnv(t)
+	setChatSettings(t, env.st, 1_000_000, "fake", "fake-1", nil)
+	seedRun(t, env.st, "chat", "done", 700_000, env.api.now())
+	id := newConversation(t, env.sam)
+	resp := send(env.sam, id, "QUESTION-TEXT-MARKER")
+	if resp.StatusCode != http.StatusPaymentRequired {
+		t.Fatalf("status %d, want 402", resp.StatusCode)
+	}
+	code, msg := errorCode(t, resp)
+	if code != "budget_exhausted" || msg != "This month's AI allowance is used up. Ask an admin to raise it." {
+		t.Errorf("error = %q %q", code, msg)
+	}
+	out := env.logs.String()
+	line := ""
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, "agent budget exhausted") {
+			line = l
+		}
+	}
+	for _, want := range []string{"level=WARN", "role=chat", "reserved_micro_usd=600000", "left_micro_usd=300000", "user_id="} {
+		if !strings.Contains(line, want) {
+			t.Errorf("log line %q lacks %s", line, want)
+		}
+	}
+	if strings.Contains(out, "QUESTION-TEXT-MARKER") {
+		t.Error("the question reached the log")
 	}
 }

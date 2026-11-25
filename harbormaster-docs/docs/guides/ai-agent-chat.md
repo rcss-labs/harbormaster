@@ -43,7 +43,7 @@ If a question is stopped, for example by a restart of Harbormaster, the answer i
 
 ## The monthly allowance
 
-An admin sets a monthly allowance in US dollars for the whole installation. The month is the UTC calendar month. When it is used up, chat answers "This month's AI allowance is used up. Ask an admin to raise it." until the month ends or an admin raises the allowance. An allowance of 0 stops all questions.
+An admin sets a monthly allowance in US dollars for the whole installation. The month is the UTC calendar month. When it is used up, chat answers "This month's AI allowance is used up. Ask an admin to raise it." until the month ends or an admin raises the allowance. An allowance of 0 stops all questions. An allowance that is smaller than what one question can reserve does the same, although nothing was spent; chat then answers "The AI allowance is smaller than what one question can cost. Ask an admin to raise it." **Settings > AI agent** shows what one question reserves with the chosen model and warns when the allowance is below it.
 
 The allowance is firm. Before a question starts, Harbormaster reserves its worst case cost, so a question that might overspend is refused, and several questions asked at once cannot overspend together. If a question is interrupted, the run may be charged more than it used. The usage table on the settings page shows each day's cost and tokens.
 

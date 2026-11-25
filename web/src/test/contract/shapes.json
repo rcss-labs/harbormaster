@@ -59,7 +59,9 @@
       "chat": {
         "$optional": {
           "$null": {
+            "allowance_below_question": "boolean",
             "available": "boolean",
+            "max_question_usd": "string",
             "model": "string",
             "provider": "string"
           }

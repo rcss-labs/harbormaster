@@ -147,7 +147,7 @@ func (p *googleProvider) Generate(ctx context.Context, req provider.Request, onT
 	case outcomeDeclined:
 		return resp, declined()
 	default:
-		return resp, &provider.Error{Kind: "invalid_request", Message: "The model stopped for an unknown reason."}
+		return resp, &provider.Error{Kind: "invalid_request", Refusal: true, Message: "The model stopped for an unknown reason."}
 	}
 
 	if len(parts) > 0 {
@@ -182,7 +182,7 @@ func mapError(err error, sink *retryAfterSink, emitted bool) error {
 	if !errors.As(err, &apiErr) {
 		return &provider.Error{Kind: "unavailable", Retryable: !emitted, Message: "the request to the model failed"}
 	}
-	perr := &provider.Error{}
+	perr := &provider.Error{Status: apiErr.Code, VendorType: provider.SafeVendorType(apiErr.Status)}
 	switch {
 	case apiErr.Code == 401 || apiErr.Code == 403:
 		perr.Kind, perr.Message = "auth", "the provider rejected the credential"
@@ -221,7 +221,7 @@ func looksLikeContextLength(msg string) bool {
 const argErrorText = "arguments were not a valid JSON object"
 
 func declined() error {
-	return &provider.Error{Kind: "invalid_request", Message: "The model declined to answer."}
+	return &provider.Error{Kind: "invalid_request", Refusal: true, Message: "The model declined to answer."}
 }
 
 type stopOutcome int

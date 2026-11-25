@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { conversationKey, useAgentAvailable, CONVERSATIONS_KEY, createConversation, sendMessage, useConversation, useConversations, useDeleteConversation } from '../../api/agent'
 import { ApiError } from '../../api/client'
-import type { AgentConversationSummaryDTO, AgentMessageDTO } from '../../api/types'
+import type { AgentConversationDTO, AgentConversationSummaryDTO, AgentMessageDTO } from '../../api/types'
 import { Ago } from '../../components/Ago'
 import { ConfirmDialog } from '../../components/ConfirmDialog'
 import { Drawer } from '../../components/Drawer'
@@ -13,6 +13,10 @@ import { usePageContext } from './usePageContext'
 import styles from './agent.module.css'
 
 const UNAVAILABLE = "The agent is unavailable. Try again shortly."
+const STOPPED = 'Stopped before finishing.'
+
+/** How long after a turn ends without its saved answer the conversation is read once more: a server may save a stopped answer late. */
+const LATE_SAVE_RECHECK_MS = 1500
 
 /** User-facing words for an error code; the server's own message is kept only where it carries the detail (the budget). */
 function errorCopy(code: string, message: string): string {
@@ -26,7 +30,7 @@ function errorCopy(code: string, message: string): string {
     case 'agent_unavailable':
       return UNAVAILABLE
     case 'interrupted':
-      return 'Stopped before finishing.'
+      return STOPPED
     case 'timeout':
       return 'The agent took too long and was stopped.'
     default:
@@ -48,12 +52,24 @@ interface ToolRun {
 
 /** The turn in flight: what the user asked and what has streamed back so far. */
 interface LiveTurn {
+  /** Names this turn. A late recheck or refetch clears only the turn it was started for, never one that began since. */
+  id: number
+  /** The conversation the turn belongs to; set when it ends. */
+  conversationId?: number
+  /** How many assistant messages the conversation holds once this turn's answer is saved. */
+  answersNeeded: number
   /** The conversation as it was when the question was sent. While the turn is live this, not a fetch, is what shows. */
   before: AgentMessageDTO[]
   question: string
   text: string
   tools: ToolRun[]
+  /** The stream is over but the saved answer has not been seen yet, so what streamed stays on screen. */
+  ended?: boolean
+  /** The run finished normally: the answer is whole even if the saved copy has not been read back yet. */
+  completed?: boolean
 }
+
+const assistantCount = (messages: AgentMessageDTO[] | undefined) => (messages ?? []).filter((message) => message.role === 'assistant').length
 
 const byNewest = (a: AgentConversationSummaryDTO, b: AgentConversationSummaryDTO) => b.updated_at.localeCompare(a.updated_at)
 
@@ -79,13 +95,17 @@ function OpenAgentDrawer() {
   const [problem, setProblem] = useState<string | null>(null)
   const [toDelete, setToDelete] = useState<AgentConversationSummaryDTO | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  const recheckRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const turnSeq = useRef(0)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const sorted = useMemo(() => [...(conversations.data?.items ?? [])].sort(byNewest), [conversations.data])
   const currentId = chosen !== undefined ? chosen : (sorted[0]?.id ?? null)
   const conversation = useConversation(currentId)
-  const running = live !== null
+  const running = live !== null && !live.ended
+  // A kept partial goes as soon as any read of its conversation, not only the recheck, shows the saved answer.
+  const shownLive = live?.ended && live.conversationId === currentId && assistantCount(conversation.data?.messages) >= live.answersNeeded ? null : live
   const loadError = conversation.isError
     ? conversation.error instanceof ApiError && conversation.error.status === 404
       ? 'This conversation no longer exists.'
@@ -94,7 +114,13 @@ function OpenAgentDrawer() {
       ? LOAD_FAILED
       : null
 
-  useEffect(() => () => abortRef.current?.abort(), [])
+  useEffect(
+    () => () => {
+      abortRef.current?.abort()
+      if (recheckRef.current) clearTimeout(recheckRef.current)
+    },
+    [],
+  )
   useEffect(() => {
     const list = scrollRef.current
     if (list) list.scrollTop = list.scrollHeight
@@ -111,11 +137,19 @@ function OpenAgentDrawer() {
     setDraft('')
     setNotices([])
     setProblem(null)
-    setLive({ before: conversation.data?.messages ?? [], question: text, text: '', tools: [] })
+    if (recheckRef.current) clearTimeout(recheckRef.current)
+    const shown = conversation.data?.messages ?? []
+    // A kept partial whose answer is still not saved will be saved too, and counts before this turn's own.
+    const carried = live?.ended && assistantCount(shown) < live.answersNeeded ? 1 : 0
+    const turnId = ++turnSeq.current
+    const answersNeeded = assistantCount(shown) + carried + 1
+    setLive({ id: turnId, before: shown, answersNeeded, question: text, text: '', tools: [] })
+    const ofThisTurn = (change: (turn: LiveTurn) => LiveTurn) => setLive((turn) => (turn && turn.id === turnId ? change(turn) : turn))
     const controller = new AbortController()
     abortRef.current = controller
     let id = currentId
     let streamed = false
+    let completed = false
     try {
       if (id === null) {
         id = (await createConversation()).id
@@ -128,15 +162,14 @@ function OpenAgentDrawer() {
         {
           onText: (delta) => {
             streamed = true
-            setLive((turn) => turn && { ...turn, text: turn.text + delta })
+            ofThisTurn((turn) => ({ ...turn, text: turn.text + delta }))
           },
           onToolStart: (name) => {
             streamed = true
-            setLive((turn) => turn && { ...turn, tools: [...turn.tools, { name, state: 'running' }] })
+            ofThisTurn((turn) => ({ ...turn, tools: [...turn.tools, { name, state: 'running' }] }))
           },
           onToolEnd: (name, ok) =>
-            setLive((turn) => {
-              if (!turn) return turn
+            ofThisTurn((turn) => {
               const index = turn.tools.findIndex((tool) => tool.name === name && tool.state === 'running')
               if (index === -1) return turn
               const tools = turn.tools.slice()
@@ -147,7 +180,9 @@ function OpenAgentDrawer() {
             const copy = NOTICE_COPY[kind]
             if (copy) setNotices((current) => (current.includes(copy) ? current : [...current, copy]))
           },
-          onDone: () => {},
+          onDone: () => {
+            completed = true
+          },
           onError: (code, message) => setProblem(errorCopy(code, message)),
         },
         controller.signal,
@@ -161,8 +196,25 @@ function OpenAgentDrawer() {
       await Promise.all([queryClient.invalidateQueries({ queryKey: conversationKey(id) }), queryClient.invalidateQueries({ queryKey: CONVERSATIONS_KEY })])
     }
     abortRef.current = null
-    setLive(null)
-  }, [draft, running, currentId, page, queryClient, conversation.data])
+    // The saved answer normally comes with the refetch above. After Stop, or when the refetch failed, it may not be there
+    // yet: keep what streamed on screen, and read the conversation once more shortly.
+    const savedAnswerIsIn = (conversationId: number) =>
+      assistantCount(queryClient.getQueryData<AgentConversationDTO>(conversationKey(conversationId))?.messages) >= answersNeeded
+    const clearThisTurn = () => setLive((turn) => (turn && turn.id === turnId ? null : turn))
+    if (id === null || !streamed || savedAnswerIsIn(id)) {
+      clearThisTurn()
+      return
+    }
+    const conversationId = id
+    ofThisTurn((turn) => ({ ...turn, ended: true, completed, conversationId }))
+    recheckRef.current = setTimeout(() => {
+      void (async () => {
+        await queryClient.refetchQueries({ queryKey: conversationKey(conversationId), exact: true })
+        if (savedAnswerIsIn(conversationId)) clearThisTurn()
+        void queryClient.invalidateQueries({ queryKey: CONVERSATIONS_KEY })
+      })()
+    }, LATE_SAVE_RECHECK_MS)
+  }, [draft, running, live, currentId, page, queryClient, conversation.data])
 
   const stop = () => abortRef.current?.abort()
 
@@ -173,13 +225,19 @@ function OpenAgentDrawer() {
     }
   }
 
+  const leaveLiveTurn = () => {
+    if (recheckRef.current) clearTimeout(recheckRef.current)
+    setLive(null)
+  }
   const startNew = () => {
+    leaveLiveTurn()
     setChosen(null)
     setNotices([])
     setProblem(null)
     setView('chat')
   }
   const open = (id: number) => {
+    leaveLiveTurn()
     setChosen(id)
     setNotices([])
     setProblem(null)
@@ -190,7 +248,10 @@ function OpenAgentDrawer() {
     const { id } = toDelete
     remove.mutate(id, {
       onSuccess: () => {
-        if (currentId === id) setChosen(null)
+        if (currentId === id) {
+          leaveLiveTurn()
+          setChosen(null)
+        }
         setToDelete(null)
       },
       onError: (error) => {
@@ -250,15 +311,21 @@ function OpenAgentDrawer() {
             <>
               {label && <p className={styles.looking}>{`Looking at: ${label}`}</p>}
               <div ref={scrollRef} className={styles.messages} aria-live="polite">
-                {live ? (
+                {shownLive ? (
                   <>
-                    {live.before.map((message) => <Message key={message.id} message={message} />)}
-                    <LiveMessages turn={live} />
+                    {shownLive.before.map((message) => <Message key={message.id} message={message} />)}
+                    <LiveMessages turn={shownLive} />
+                    {shownLive.ended && !shownLive.completed && <p className={styles.notice}>{STOPPED}</p>}
                     {notices.map((notice) => (
                       <p key={notice} className={styles.notice}>
                         {notice}
                       </p>
                     ))}
+                    {shownLive.ended && problem && problem !== STOPPED && (
+                      <p className={styles.problem} role="alert">
+                        {problem}
+                      </p>
+                    )}
                   </>
                 ) : !ready || (currentId !== null && conversation.isPending) ? (
                   <Skeleton lines={3} label="Loading conversation" />

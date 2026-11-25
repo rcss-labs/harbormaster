@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"log/slog"
 	"regexp"
 	"slices"
 	"strings"
@@ -58,6 +59,8 @@ type Loop struct {
 	Provider provider.Provider
 	Tools    ToolRunner
 	Limits   Limits
+	// Log, when set, gets one line for each failed model call.
+	Log *slog.Logger
 
 	// Test seams: nonce makes each of the run's two random codes, newTimer makes the wait
 	// before a retry, now is the clock the time margins use. Nil means
@@ -82,6 +85,9 @@ const (
 // noAnswerText is the answer of a run that ends without one from the model.
 const noAnswerText = "The agent could not finish an answer within the limit."
 
+// noTimeText is the answer of a run whose time ran out before its first call.
+const noTimeText = "The run ran out of time before it could start."
+
 // noCallText is the answer of a run that made no call to the model.
 const noCallText = "The question is too long for this model, or the limit for one question is too small."
 
@@ -105,6 +111,7 @@ type session struct {
 	trimmed  bool
 	final    bool // the next call is the final one
 	notified bool // limit_reached was emitted for the final call
+	timedOut bool // the run ended because its time ran out
 	spoke    bool // the reply in progress, or the last one, has text for the user
 }
 
@@ -146,7 +153,7 @@ func (l *Loop) Run(ctx context.Context, in RunInput, emit func(Event)) error {
 			return err
 		}
 		if runCtx.Err() != nil {
-			r.stop("The run took too long and was stopped.")
+			r.stopTimedOut()
 			return nil
 		}
 		resp, outcome := r.callModel(ctx, runCtx)
@@ -191,7 +198,7 @@ func (l *Loop) Run(ctx context.Context, in RunInput, emit func(Event)) error {
 				return err
 			}
 			if runCtx.Err() != nil {
-				r.stop("The run took too long and was stopped.")
+				r.stopTimedOut()
 				return nil
 			}
 			// The final call shows its results too, so only the time kept for
@@ -220,12 +227,20 @@ func textOnly(history []provider.Message) []provider.Message {
 func (r *session) stop(message string) {
 	r.emit(Event{Type: "notice", Notice: noticeLimitReached, Message: message})
 	switch {
+	case r.steps == 0 && r.timedOut:
+		r.emit(Event{Type: "text", Delta: noTimeText})
 	case r.steps == 0:
 		r.emit(Event{Type: "text", Delta: noCallText})
 	case !r.spoke:
 		r.emit(Event{Type: "text", Delta: noAnswerText})
 	}
 	r.emit(Event{Type: "done"})
+}
+
+// stopTimedOut ends the run at its time limit.
+func (r *session) stopTimedOut() {
+	r.timedOut = true
+	r.stop("The run took too long and was stopped.")
 }
 
 // fail ends the run with an error event; the message is scrubbed as a last guard.
@@ -286,7 +301,7 @@ func (r *session) callModel(ctx, runCtx context.Context) (provider.Response, out
 			return provider.Response{}, outcomeCancelled
 		}
 		if runCtx.Err() != nil {
-			r.stop("The run took too long and was stopped.")
+			r.stopTimedOut()
 			return provider.Response{}, outcomeEnded
 		}
 		var perr *provider.Error
@@ -294,6 +309,7 @@ func (r *session) callModel(ctx, runCtx context.Context) (provider.Response, out
 			r.fail("unavailable", "The model could not be reached.")
 			return provider.Response{}, outcomeEnded
 		}
+		logModelFailure(r.l.Log, r.in.RunID, r.l.Provider.Name(), r.in.Model.ID, perr)
 		wait := min(max(perr.RetryAfter, 0), maxRetryWait)
 		if !perr.Retryable || retried || streamed || r.timeLeft() <= wait || !r.anyCallFits() {
 			r.fail(perr.Kind, providerMessage(perr))
@@ -308,7 +324,7 @@ func (r *session) callModel(ctx, runCtx context.Context) (provider.Response, out
 			if ctx.Err() != nil {
 				return provider.Response{}, outcomeCancelled
 			}
-			r.stop("The run took too long and was stopped.")
+			r.stopTimedOut()
 			return provider.Response{}, outcomeEnded
 		}
 	}
@@ -381,23 +397,6 @@ func (r *session) timer(d time.Duration) *time.Timer {
 		return r.l.newTimer(d)
 	}
 	return time.NewTimer(d)
-}
-
-func providerMessage(e *provider.Error) string {
-	if e.Message != "" {
-		return e.Message
-	}
-	switch e.Kind {
-	case "auth":
-		return "The model provider refused our credentials."
-	case "rate_limited":
-		return "The model provider is limiting requests. Try again shortly."
-	case "context_too_long":
-		return "The conversation is too long for the model."
-	case "invalid_request":
-		return "The model provider refused the request."
-	}
-	return "The model provider is unavailable. Try again shortly."
 }
 
 func (r *session) emitUsage(usage provider.Usage, cost int64, provisional bool) {

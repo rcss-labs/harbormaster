@@ -61,7 +61,7 @@ create table agent_runs (
   -- Set in the transaction that writes the run's audit row, so a run is audited exactly once.
   audited_at timestamptz
 );
--- Spend sums are bounded by started_at (the UTC month).
+-- The month's spend and usage queries read the runs started in one UTC month, by this index.
 create index agent_runs_started_idx on agent_runs (started_at);
 create index agent_runs_user_idx on agent_runs (user_id);
 create index agent_runs_conversation_idx on agent_runs (conversation_id);

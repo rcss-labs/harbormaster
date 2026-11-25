@@ -70,6 +70,9 @@ func (p *openaiProvider) Generate(ctx context.Context, req provider.Request, onT
 				return resp, &provider.Error{Kind: "unavailable", Retryable: !emitted, Message: "the OpenAI response ended without usage"}
 			}
 			resp = finalResponse(event.Response, text.String(), event.Type == "response.incomplete")
+			if event.Type == "response.incomplete" && event.Response.IncompleteDetails.Reason == "content_filter" {
+				return resp, &provider.Error{Kind: "invalid_request", Refusal: true, Message: "The model declined to answer."}
+			}
 			done = true
 		case "response.failed":
 			resp.Usage = usageOf(event.Response)
@@ -135,6 +138,12 @@ func failedError(r responses.Response, emitted bool) error {
 
 // eventError maps an error code reported inside the stream.
 func eventError(code string, emitted bool) error {
+	perr := classifyEvent(code, emitted)
+	perr.VendorType = provider.SafeVendorType(code)
+	return perr
+}
+
+func classifyEvent(code string, emitted bool) *provider.Error {
 	switch code {
 	case "rate_limit_exceeded":
 		return &provider.Error{Kind: "rate_limited", Retryable: !emitted, Message: "OpenAI rate limit reached"}
@@ -147,6 +156,15 @@ func eventError(code string, emitted bool) error {
 }
 
 func mapAPIError(e *sdk.Error, emitted bool) error {
+	perr := classifyAPIError(e, emitted)
+	perr.Status = e.StatusCode
+	if perr.VendorType = provider.SafeVendorType(e.Code); perr.VendorType == "" {
+		perr.VendorType = provider.SafeVendorType(e.Type)
+	}
+	return perr
+}
+
+func classifyAPIError(e *sdk.Error, emitted bool) *provider.Error {
 	switch {
 	case e.StatusCode == http.StatusUnauthorized || e.StatusCode == http.StatusForbidden:
 		return &provider.Error{Kind: "auth", Message: "OpenAI rejected the credentials"}

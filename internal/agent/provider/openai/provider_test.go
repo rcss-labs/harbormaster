@@ -499,3 +499,31 @@ func TestMapAPIError_NotRetryableAfterText(t *testing.T) {
 		}
 	}
 }
+
+// The log line for a failed call needs the HTTP status and the vendor's error code, and nothing the vendor wrote.
+func TestGenerate_ErrorsCarryStatusAndVendorType(t *testing.T) {
+	srv, _ := serve(t, 429, "error_429.json", nil)
+	_, err := newProvider(t, srv.URL).Generate(context.Background(), simpleRequest(), nil)
+	var perr *provider.Error
+	if !errors.As(err, &perr) || perr.Status != 429 || perr.VendorType != "rate_limit_exceeded" {
+		t.Fatalf("got %+v", perr)
+	}
+}
+
+// A response cut off by the content filter is the model's refusal, like the other vendors' refusals.
+func TestGenerate_ContentFilterIsARefusal(t *testing.T) {
+	body := "event: response.incomplete\n" + `data: {"type":"response.incomplete","response":{"id":"resp_1","object":"response","status":"incomplete","incomplete_details":{"reason":"content_filter"},"output":[],"usage":{"input_tokens":20,"output_tokens":3,"total_tokens":23}}}` + "\n\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, body)
+	}))
+	defer srv.Close()
+	resp, err := newProvider(t, srv.URL).Generate(context.Background(), simpleRequest(), nil)
+	var perr *provider.Error
+	if !errors.As(err, &perr) || perr.Kind != "invalid_request" || !perr.Refusal || perr.Message != "The model declined to answer." || perr.Retryable {
+		t.Fatalf("err = %v", err)
+	}
+	if resp.Usage.InputTokens != 20 || resp.Usage.OutputTokens != 3 {
+		t.Errorf("usage must still be reported: %+v", resp.Usage)
+	}
+}

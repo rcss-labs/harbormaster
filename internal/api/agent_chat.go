@@ -26,14 +26,16 @@ const (
 	chatRoleName        = "chat"
 	minRunStaleAfter    = 10 * time.Minute
 	budgetExhaustedMsg  = "This month's AI allowance is used up. Ask an admin to raise it."
+	budgetTooSmallMsg   = "The AI allowance is smaller than what one question can cost. Ask an admin to raise it."
 	agentUnavailableMsg = "The agent is unavailable. Try again shortly."
 )
 
 var (
-	errChatBusy      = &APIError{Status: http.StatusConflict, Code: "chat_busy", Message: "You already have a question in progress. Wait for it to finish."}
-	errNotConfigured = &APIError{Status: http.StatusConflict, Code: "agent_not_configured", Message: "No chat model is set up. Ask an admin to choose one."}
-	errAgentDown     = &APIError{Status: http.StatusServiceUnavailable, Code: "agent_unavailable", Message: agentUnavailableMsg}
-	errBudget        = &APIError{Status: http.StatusPaymentRequired, Code: "budget_exhausted", Message: budgetExhaustedMsg}
+	errChatBusy       = &APIError{Status: http.StatusConflict, Code: "chat_busy", Message: "You already have a question in progress. Wait for it to finish."}
+	errNotConfigured  = &APIError{Status: http.StatusConflict, Code: "agent_not_configured", Message: "No chat model is set up. Ask an admin to choose one."}
+	errAgentDown      = &APIError{Status: http.StatusServiceUnavailable, Code: "agent_unavailable", Message: agentUnavailableMsg}
+	errBudget         = &APIError{Status: http.StatusPaymentRequired, Code: "budget_exhausted", Message: budgetExhaustedMsg}
+	errBudgetTooSmall = &APIError{Status: http.StatusPaymentRequired, Code: "budget_exhausted", Message: budgetTooSmallMsg}
 )
 
 // chatUser answers 404 unless the caller is a global admin or holds the AI chat flag. A user who may not chat

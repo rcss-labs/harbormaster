@@ -42,6 +42,15 @@ With split services, roll the coordinator and poller services first and the web 
 
 <!-- TODO(docs): verify how to sequence these services in a single Terraform apply, since the module ties all three to the same image variable -->
 
+## The release that adds the AI agent
+
+This release adds migrations `0216_agent_run_tokens` (run tokens: a new token kind and two columns on `api_tokens`) and `0217_agent_chat` (a column on `users` and the agent's settings, conversation, message and run tables). Both only add. Nothing changes for users until you set `HM_AGENT_URL`.
+
+1. Deploy the new release first, with `HM_AGENT_URL` unset, and let the rollout finish. The new tasks apply both migrations as they start.
+2. Only then set up the agent and set `HM_AGENT_URL` (module `extra_env`). See [Install the AI agent](ai-agent.md). Setting it before the rollout ends would give old tasks a variable they ignore, and the web tasks that serve chat would not all have the feature yet.
+
+To roll back, unset `HM_AGENT_URL` first, then roll the image back. Old tasks ignore run tokens and the new tables, so they run unchanged. Leave the schema as it is: the agent tables and columns stay, empty or unused, and a run token that was minted just before the rollback stops working after `HM_AGENT_RUN_TOKEN_TTL` (15 minutes by default). A later upgrade finds the migrations already applied. Conversations and the agent's run records stay in the database and are removed by the usual retention (`HM_RETENTION_AGENT_CONVERSATIONS`, 30 days by default) once the new release runs again. Restore from your backup only if you need the schema itself undone.
+
 ## Access role changes
 
 A release can add permissions to the `harbormaster-access` role. Features that need a new permission show a per-account message until you re-apply the access module in that account. Everything else keeps working. Known cases:

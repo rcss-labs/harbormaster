@@ -833,3 +833,13 @@ func TestGenerate_ConcurrentCallsKeepTheirOwnRetryAfter(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// The log line for a failed call needs the HTTP status and the vendor's status name, and nothing the vendor wrote.
+func TestGenerate_ErrorsCarryStatusAndVendorType(t *testing.T) {
+	srv := sseServer(t, nil, 429, nil, []byte(`{"error":{"code":429,"message":"x","status":"RESOURCE_EXHAUSTED"}}`))
+	_, err := newProvider(t, srv).Generate(context.Background(), simpleRequest(), nil)
+	var perr *provider.Error
+	if !errors.As(err, &perr) || perr.Status != 429 || perr.VendorType != "RESOURCE_EXHAUSTED" {
+		t.Fatalf("got %+v", perr)
+	}
+}

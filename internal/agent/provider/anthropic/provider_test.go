@@ -657,3 +657,33 @@ func TestGenerate_InStreamErrorsMapByType(t *testing.T) {
 		}
 	}
 }
+
+// The log line for a failed call needs the HTTP status and the vendor's error type, and nothing the vendor wrote.
+func TestGenerate_ErrorsCarryStatusAndVendorType(t *testing.T) {
+	cases := []struct {
+		name, body, wantType string
+		status               int
+	}{
+		{"rate limit", `{"type":"error","error":{"type":"rate_limit_error","message":"x"}}`, "rate_limit_error", 429},
+		{"overloaded", `{"type":"error","error":{"type":"overloaded_error","message":"x"}}`, "overloaded_error", 529},
+		{"type that is not an identifier", `{"type":"error","error":{"type":"oops, see the account page","message":"x"}}`, "", 400},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer srv.Close()
+			_, err := newProvider(t, srv.URL).Generate(context.Background(), simpleRequest(), nil)
+			var perr *provider.Error
+			if !errors.As(err, &perr) {
+				t.Fatalf("want *provider.Error, got %T %v", err, err)
+			}
+			if perr.Status != tc.status || perr.VendorType != tc.wantType {
+				t.Errorf("status %d type %q, want %d %q", perr.Status, perr.VendorType, tc.status, tc.wantType)
+			}
+		})
+	}
+}

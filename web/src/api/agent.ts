@@ -217,6 +217,10 @@ export interface AgentChatModel {
   model: string
   /** False when the operator no longer offers this model. */
   available: boolean
+  /** What one question reserves with this model, in dollars rounded up; empty while the model is not known. */
+  max_question_usd: string
+  /** The allowance left this month cannot cover that reservation, so every question is refused. */
+  allowance_below_question: boolean
 }
 export interface AgentSettingsDTO {
   /** Echoed back on save; a save made from an older version is refused with 409 `settings_changed`. */

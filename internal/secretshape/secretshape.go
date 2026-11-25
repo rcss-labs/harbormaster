@@ -7,7 +7,8 @@
 // of a list or object spread over several lines under a secret name stay. A
 // value that comes before its name, as in "value":"x","name":"DB_PASSWORD", is
 // found only in valid JSON. Text glued to a redaction without a separator may
-// be hidden by a second pass only.
+// be hidden by a second pass only. A multi-line list under a secret name whose
+// later lines start with a backslash, "]" or "}" can also stay.
 package secretshape
 
 import (

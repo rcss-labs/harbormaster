@@ -79,6 +79,8 @@ The agent is a separate service. Harbormaster calls it for chat runs. The agent 
 
 4. Sign in as a global admin and open **Settings > AI agent**. The status should read **Reachable**. Set a monthly allowance first: it starts at 0, which refuses every question, and the model test too. Then choose a provider and model and use **Test model**.
 
+    Choose the first allowance as several times what one question reserves. A question must fit its whole worst case in the allowance left, and the worst case is the run's token limit at the model's higher price. **Settings > AI agent** shows it under the model: "One question reserves up to $X with this model." For example, with the default 200,000-token limit and a model that charges 3 USD per million tokens at most, one question reserves up to $0.60, so an allowance of $10 covers at least 16 questions at their worst case, and far more in practice. An allowance below the reservation refuses every question, and the page warns about it.
+
 5. Turn on **AI chat** for users in **Settings > Users**. See [AI chat](../guides/ai-agent-chat.md).
 
 ## Bedrock

@@ -388,10 +388,36 @@ func (s *Server) reserveRun(r *http.Request, run store.AgentRun, runTimeout time
 	case err == nil || errors.Is(err, store.ErrNotFound):
 		return err
 	case errors.Is(err, store.ErrBudgetExhausted):
-		return errBudget
+		return s.budgetRefusal(r, run)
 	}
 	s.settleLostReservation(r, run.ID)
 	return err
+}
+
+// budgetRefusal logs a refused reservation and picks the words for it. An allowance that is itself smaller than one
+// question's reservation says so: nothing may have been spent, and "used up" would send an admin looking for spend.
+func (s *Server) budgetRefusal(r *http.Request, run store.AgentRun) error {
+	ctx := context.WithoutCancel(r.Context())
+	var userID int64
+	if run.UserID != nil {
+		userID = *run.UserID
+	}
+	settings, err := s.Store.GetAgentSettings(ctx)
+	if err != nil {
+		s.log().Warn("agent budget exhausted", "role", run.Role, "user_id", userID, "reserved_micro_usd", run.ReservedMicroUSD)
+		return errBudget
+	}
+	settled, reserved, err := s.Store.AgentSpend(ctx, s.now())
+	if err != nil {
+		s.log().Warn("agent budget exhausted", "role", run.Role, "user_id", userID, "reserved_micro_usd", run.ReservedMicroUSD)
+		return errBudget
+	}
+	s.log().Warn("agent budget exhausted", "role", run.Role, "user_id", userID, "reserved_micro_usd", run.ReservedMicroUSD,
+		"left_micro_usd", max(settings.MonthlyBudgetMicroUSD-settled-reserved, 0))
+	if settings.MonthlyBudgetMicroUSD < run.ReservedMicroUSD {
+		return errBudgetTooSmall
+	}
+	return errBudget
 }
 
 // settleLostReservation settles a run whose reservation failed in a way that does not say whether it was made. The
