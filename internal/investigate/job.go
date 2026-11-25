@@ -206,11 +206,11 @@ func (j *job) prepare(ctx context.Context) (p plan, stop *ending) {
 		}
 	}
 
-	subject, err := within(ctx, j.scope)
+	seen, err := within(ctx, j.scope)
 	if err != nil {
 		return p, j.unready(ctx, "work out what the identity can see", err)
 	}
-	if len(subject.ServiceIDs) == 0 {
+	if len(seen.visible) == 0 {
 		return skip(reasonNotVisible)
 	}
 
@@ -240,10 +240,7 @@ func (j *job) prepare(ctx context.Context) (p plan, stop *ending) {
 
 	j.run = store.AgentRun{ID: uuid.New(), Role: roleName, UserID: &j.identity.ID, Provider: ref.Provider, Model: ref.Model, ReservedMicroUSD: reservation}
 	return plan{
-		// Scrubbed and cut to what the agent takes; it frames the text as data.
-		task: agentclient.Task{Kind: "investigate", Subject: subject, Alert: agentclient.TaskAlert{
-			Kind: agentText(j.inv.AlertKind), Title: agentText(j.inv.AlertTitle), Text: agentText(j.inv.AlertText), OpenedAt: j.inv.AlertOpenedAt,
-		}},
+		task:      agentclient.Task{Kind: "investigate", Subject: seen.subject, Alert: taskAlert(j.inv, seen.visible)},
 		timeout:   agentrun.RunTimeout(cat.RunTimeout),
 		redactEnv: !slices.Contains(settings.UnredactedProviders, ref.Provider),
 	}, nil
