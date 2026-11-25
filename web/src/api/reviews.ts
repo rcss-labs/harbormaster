@@ -51,14 +51,15 @@ export const refetchDelay = (moving: boolean, startedAt: number, now: number, ms
 /** The time this hook started, so polling gives up 30 minutes after the view opened. Not read during render. */
 const useStartedAt = () => useState(() => Date.now())[0]
 
-/** Every review request is off unless the current-user DTO says reviews are on. */
-export function useReviewsEnabled(): boolean {
-  return Boolean(useAuth().me?.reviews_enabled)
+/** Every review request is off unless the current-user DTO says the agent is on. Stored results stay readable while no
+ *  review runs, so this is not `reviews_enabled`, which only decides about the navigation entry. */
+export function useReviewResultsEnabled(): boolean {
+  return Boolean(useAuth().me?.agent_enabled)
 }
 
 /** Results the reader may read, newest first, a page at a time; refreshed every 15 s while one is waiting or running. */
 export function useReviewRuns() {
-  const enabled = useReviewsEnabled()
+  const enabled = useReviewResultsEnabled()
   const startedAt = useStartedAt()
   return useInfiniteQuery({
     queryKey: reviewRunsKey,
@@ -74,7 +75,7 @@ export function useReviewRuns() {
 
 /** One run with its evidence; a waiting or running one is polled every 5 s for at most 30 minutes. */
 export function useReviewRun(id: number | null): UseQueryResult<ReviewRunDetailDTO> {
-  const enabled = useReviewsEnabled()
+  const enabled = useReviewResultsEnabled()
   const startedAt = useStartedAt()
   return useQuery({
     queryKey: reviewRunKey(id ?? 0),

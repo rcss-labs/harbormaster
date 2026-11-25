@@ -12,10 +12,13 @@ describe('Reviews navigation', () => {
     expect(link).toHaveAttribute('href', '/reviews')
     unmount()
 
-    mockReviews([], false)
-    renderApp('/')
-    await screen.findByRole('link', { name: /^Security/ })
-    expect(screen.queryByRole('link', { name: 'Reviews' })).not.toBeInTheDocument()
+    for (const agentEnabled of [false, true]) {
+      mockReviews([], false, 50, agentEnabled)
+      const off = renderApp('/')
+      await screen.findByRole('link', { name: /^Security/ })
+      expect(screen.queryByRole('link', { name: 'Reviews' })).not.toBeInTheDocument()
+      off.unmount()
+    }
   })
 
   describe('on a phone', () => {
@@ -32,11 +35,14 @@ describe('Reviews navigation', () => {
       expect(await insights.findByRole('link', { name: /^Reviews/ })).toHaveAttribute('href', '/reviews')
       unmount()
 
-      mockReviews([], false)
-      renderApp('/more')
-      const again = within(await screen.findByRole('region', { name: 'Insights' }))
-      expect(again.getByRole('link', { name: 'Log search' })).toBeInTheDocument()
-      expect(again.queryByRole('link', { name: /^Reviews/ })).not.toBeInTheDocument()
+      for (const agentEnabled of [false, true]) {
+        mockReviews([], false, 50, agentEnabled)
+        const off = renderApp('/more')
+        const again = within(await screen.findByRole('region', { name: 'Insights' }))
+        expect(again.getByRole('link', { name: 'Log search' })).toBeInTheDocument()
+        expect(again.queryByRole('link', { name: /^Reviews/ })).not.toBeInTheDocument()
+        off.unmount()
+      }
     })
   })
 })

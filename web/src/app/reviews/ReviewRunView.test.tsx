@@ -30,6 +30,21 @@ describe('ReviewRunView', () => {
     expect(await screen.findByText('1 service in scope')).toBeInTheDocument()
   })
 
+  it('opens from a link while reviews are off and the agent is on', async () => {
+    mockReviews([REVIEW_RUN_DONE], false, 50, true)
+    renderApp(`/reviews/runs/${REVIEW_RUN_DONE.id}`)
+
+    expect(await screen.findByText('Fargate hours doubled.')).toBeInTheDocument()
+  })
+
+  it('is not found and asks nothing while the agent is off', async () => {
+    const requested = mockReviews([REVIEW_RUN_DONE], false)
+    renderApp(`/reviews/runs/${REVIEW_RUN_DONE.id}`)
+
+    expect(await screen.findByText('Page not found.')).toBeInTheDocument()
+    expect(requested).toEqual([])
+  })
+
   it('polls while running and stops when done', async () => {
     let calls = 0
     server.use(
