@@ -2,15 +2,19 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rcss-labs/harbormaster/internal/authz"
 	"github.com/rcss-labs/harbormaster/internal/hmtools"
+	"github.com/rcss-labs/harbormaster/internal/logs"
 	"github.com/rcss-labs/harbormaster/internal/model"
+	"github.com/rcss-labs/harbormaster/internal/rollup"
 	"github.com/rcss-labs/harbormaster/internal/secretshape"
 )
 
@@ -26,6 +30,55 @@ type evidenceRulesEnv struct {
 func newEvidenceRulesEnv(t *testing.T) *evidenceRulesEnv {
 	t.Helper()
 	env := &evidenceRulesEnv{logSearchEnv: newLogSearchEnv(t, nil)}
+	env.addReaders(t)
+	return env
+}
+
+// newNestedEvidenceEnv is the same estate with every array an analytics tool's rule names filled: ARM64 verdicts
+// for the Spot and ARM64 advisors, services below desired, 60 days of availability, utilisation history and services
+// at their scaling maximum. Without that the arrays are empty and the id members are not proven.
+func newNestedEvidenceEnv(t *testing.T) *evidenceRulesEnv {
+	t.Helper()
+	env := &evidenceRulesEnv{logSearchEnv: &logSearchEnv{}}
+	env.srv, env.api, env.fk, env.st, _ = newServerCustomAPI(t, true, func(s *Server) {
+		withARM64(s)
+		withDailyRetention(s)
+		s.LogSearch = &logs.Searcher{Clients: s.Clients, Now: s.Now, PollEvery: 5 * time.Millisecond, Timeout: 3 * time.Second}
+	})
+	seedMockupTags(t, env.st)
+	forceProviders(env.fk, "FARGATE")
+	pollAll(t, env.st, env.fk)
+	pollCountsAll(t, env.st, env.fk)
+	if _, err := env.st.TrackX86FargateImages(t.Context(), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	arm := armEnv{srv: env.srv, st: env.st}
+	arm.mark(t, "/payments-api:", "ok", "", true, true, "linux/amd64", "linux/arm64")
+	arm.mark(t, "/catalog-api:", "ok", "", true, false)
+
+	below := map[model.ServiceKey]bool{}
+	for i, svc := range visibleServices(t, env.st) {
+		below[svc.Key] = i%2 == 0
+	}
+	seedBelowDesired(t, env.st, below)
+	seedAvailabilityDays(t, env.st, 1, 60)
+	runner := &rollup.Runner{Store: env.st, Clients: env.fk, Now: time.Now, UtilEnabled: true, CountsRetention: 7 * 24 * time.Hour}
+	if _, err := runner.RunDue(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.st.Pool.Exec(t.Context(), `insert into scaling (account_id, region, cluster_name, service_name, has_target, min_capacity,
+		  max_capacity, policies, scheduled_actions, activities, polled_at)
+		 select account_id, region, cluster_name, service_name, true, 1, desired, '[]', '[]', '[]', now() from services where coalesce(desired, 0) > 0
+		 on conflict (account_id, region, cluster_name, service_name) do update set has_target = true, max_capacity = excluded.max_capacity`); err != nil {
+		t.Fatal(err)
+	}
+	env.addReaders(t)
+	return env
+}
+
+// addReaders creates the Prod View-only, Prod View and Logs, and Dev-only readers and finds a task and a revision.
+func (env *evidenceRulesEnv) addReaders(t *testing.T) {
+	t.Helper()
 	hash := mustHash(t)
 	tags, err := env.st.ListTags(t.Context())
 	if err != nil {
@@ -69,7 +122,6 @@ func newEvidenceRulesEnv(t *testing.T) *evidenceRulesEnv {
 		"service_id": paymentsID(), "task_id": tasks.Items[0].ShortID, "revision": tasks.Items[0].Revision,
 		"q": "payments", "query": "",
 	}
-	return env
 }
 
 // callTool sends the tool's own route, built by hmtools from args, as client, and returns the status and body.
@@ -144,60 +196,67 @@ func TestEvidenceRules_ActionMatchesTheRouteGate(t *testing.T) {
 			t.Errorf("%s: a reader with View and Logs got %d: %.200s", tool.Name, status, body)
 		}
 	}
-	if checked != 20 {
-		t.Errorf("checked %d tools with an evidence rule, want 20", checked)
+	if checked != 23 {
+		t.Errorf("checked %d tools with an evidence rule, want 23", checked)
 	}
 }
 
 // Each per-item rule must name an array and an id member that the handler really produces, and the id must be a
 // service id Harbormaster can parse.
 func TestEvidenceRules_PerItemShapesMatchTheHandlers(t *testing.T) {
-	env := newEvidenceRulesEnv(t)
-	checked := 0
+	env := newNestedEvidenceEnv(t)
+	perItem, nested, arrays := 0, 0, 0
 	for _, tool := range hmtools.Tools() {
 		rule, _ := hmtools.EvidenceRuleFor(tool.Name)
-		if rule.Kind != hmtools.EvidencePerItem {
+		if rule.Kind != hmtools.EvidencePerItem && rule.Kind != hmtools.EvidencePerItemNested {
 			continue
 		}
-		checked++
 		status, body := callTool(t, env.admin, tool, env.args)
 		if status != http.StatusOK {
 			t.Errorf("%s: status %d: %.200s", tool.Name, status, body)
 			continue
 		}
-		var top map[string]json.RawMessage
-		if err := json.Unmarshal(body, &top); err != nil {
-			t.Errorf("%s: answer is not an object: %v", tool.Name, err)
-			continue
-		}
-		var elements []map[string]json.RawMessage
-		if err := json.Unmarshal(top[rule.Items], &elements); err != nil {
-			t.Errorf("%s: member %q is not an array of objects: %v", tool.Name, rule.Items, err)
-			continue
+		wanted := []hmtools.ItemArray{{Path: []string{rule.Items}, IDField: rule.IDField}}
+		if rule.Kind == hmtools.EvidencePerItemNested {
+			nested++
+			wanted = rule.Arrays
+		} else {
+			perItem++
 		}
 		withService := 0
-		for i, element := range elements {
-			raw, present := element[rule.IDField]
-			if !present {
-				t.Errorf("%s: element %d has no %q member", tool.Name, i, rule.IDField)
+		for _, array := range wanted {
+			arrays++
+			elements, err := elementsAt(body, array.Path)
+			if err != nil {
+				t.Errorf("%s: %v", tool.Name, err)
 				continue
 			}
-			var id string
-			if err := json.Unmarshal(raw, &id); err != nil {
-				t.Errorf("%s: element %d %q is not a string: %s", tool.Name, i, rule.IDField, raw)
-				continue
+			if rule.Kind == hmtools.EvidencePerItemNested && len(elements) == 0 {
+				t.Errorf("%s: %v is empty in the seeded estate, so its id member is not proven", tool.Name, array.Path)
 			}
-			if id == "" {
-				continue // an account-level alert has no service; the rule drops it
+			for i, element := range elements {
+				raw, present := element[array.IDField]
+				if !present {
+					t.Errorf("%s: %v element %d has no %q member", tool.Name, array.Path, i, array.IDField)
+					continue
+				}
+				var id string
+				if err := json.Unmarshal(raw, &id); err != nil {
+					t.Errorf("%s: %v element %d %q is not a string: %s", tool.Name, array.Path, i, array.IDField, raw)
+					continue
+				}
+				if id == "" {
+					continue // an account-level alert has no service; the rule drops it
+				}
+				if _, err := model.ParseServiceID(id); err != nil {
+					t.Errorf("%s: %v element %d id %q: %v", tool.Name, array.Path, i, id, err)
+					continue
+				}
+				withService++
 			}
-			if _, err := model.ParseServiceID(id); err != nil {
-				t.Errorf("%s: element %d id %q: %v", tool.Name, i, id, err)
-				continue
-			}
-			withService++
 		}
 		if withService == 0 {
-			t.Errorf("%s: no element carried a service id (%d elements), so the shape is not proven", tool.Name, len(elements))
+			t.Errorf("%s: no element carried a service id, so the shape is not proven", tool.Name)
 		}
 		units := hmtools.Units(tool.Name, env.args, string(body))
 		if len(units) != withService {
@@ -209,9 +268,32 @@ func TestEvidenceRules_PerItemShapesMatchTheHandlers(t *testing.T) {
 			}
 		}
 	}
-	if checked != 4 {
-		t.Errorf("checked %d per-item tools, want 4", checked)
+	if perItem != 4 || nested != 3 || arrays != 11 {
+		t.Errorf("checked %d per-item tools, %d nested tools and %d arrays, want 4, 3 and 11", perItem, nested, arrays)
 	}
+}
+
+// elementsAt follows path through the members of an answer and returns the objects of the array it ends at. A step
+// that is missing, null or not an object, or an end that is not an array of objects, is an error: the rule names a
+// path the handler does not produce.
+func elementsAt(body []byte, path []string) ([]map[string]json.RawMessage, error) {
+	current := json.RawMessage(body)
+	for _, step := range path {
+		var object map[string]json.RawMessage
+		if err := json.Unmarshal(current, &object); err != nil || object == nil {
+			return nil, fmt.Errorf("path %v: the value before %q is not an object", path, step)
+		}
+		next, present := object[step]
+		if !present {
+			return nil, fmt.Errorf("path %v: no member %q", path, step)
+		}
+		current = next
+	}
+	var elements []map[string]json.RawMessage
+	if err := json.Unmarshal(current, &elements); err != nil || elements == nil {
+		return nil, fmt.Errorf("path %v does not end at an array of objects: %.80s", path, current)
+	}
+	return elements, nil
 }
 
 func unitIDs(units []hmtools.Unit) []string {
@@ -295,11 +377,11 @@ func TestEvidenceRules_AReaderOnlyGetsEvidenceForTheirOwnServices(t *testing.T) 
 // that, or no evidence could ever be cited. This stays red until the scrubber keeps Harbormaster's own service ids
 // (branch agent/ids); it is its own test so the failure is read for what it is.
 func TestEvidenceRules_UnitsKeepTheirIDsThroughTheScrubber(t *testing.T) {
-	env := newEvidenceRulesEnv(t)
+	env := newNestedEvidenceEnv(t)
 	checked := 0
 	for _, tool := range hmtools.Tools() {
 		rule, _ := hmtools.EvidenceRuleFor(tool.Name)
-		if rule.Kind != hmtools.EvidencePerItem {
+		if rule.Kind != hmtools.EvidencePerItem && rule.Kind != hmtools.EvidencePerItemNested {
 			continue
 		}
 		checked++
@@ -321,7 +403,70 @@ func TestEvidenceRules_UnitsKeepTheirIDsThroughTheScrubber(t *testing.T) {
 			t.Errorf("%s: after scrubbing %d units with ids %.300q, want the handler's %d ids %.300q", tool.Name, len(got), got, len(want), want)
 		}
 	}
-	if checked != 4 {
-		t.Errorf("checked %d per-item tools, want 4", checked)
+	if checked != 7 {
+		t.Errorf("checked %d per-item and nested tools, want 7", checked)
+	}
+}
+
+// Analytics rows are filtered by the handler to the caller's services; the units made from them must name those
+// services and no others, and a reader with fewer tags must get fewer of them.
+func TestEvidenceRules_NestedRowsOnlyNameServicesTheCallerCanView(t *testing.T) {
+	env := newNestedEvidenceEnv(t)
+	idsOf := func(client *apiClient, tool hmtools.Tool) []string {
+		status, body := callTool(t, client, tool, env.args)
+		if status != http.StatusOK {
+			t.Fatalf("%s: status %d: %.200s", tool.Name, status, body)
+		}
+		return unitIDs(hmtools.Units(tool.Name, env.args, string(body)))
+	}
+	listServices := func(client *apiClient) map[string]bool {
+		var list struct {
+			Items []struct {
+				ID string `json:"id"`
+			} `json:"items"`
+		}
+		decode(t, client.get("/api/services"), &list)
+		visible := map[string]bool{}
+		for _, item := range list.Items {
+			visible[item.ID] = true
+		}
+		return visible
+	}
+	adminVisible, prodVisible, devVisible := listServices(env.admin), listServices(env.viewOnly), listServices(env.noGrant)
+	if len(prodVisible) == 0 || len(devVisible) == 0 || len(prodVisible) >= len(adminVisible) || len(devVisible) >= len(adminVisible) {
+		t.Fatalf("visible services: admin %d, Prod reader %d, Dev reader %d; want two strict, non-empty subsets", len(adminVisible), len(prodVisible), len(devVisible))
+	}
+	checked := 0
+	for _, tool := range hmtools.Tools() {
+		if rule, _ := hmtools.EvidenceRuleFor(tool.Name); rule.Kind != hmtools.EvidencePerItemNested {
+			continue
+		}
+		checked++
+		adminIDs := idsOf(env.admin, tool)
+		for _, id := range adminIDs {
+			if !adminVisible[id] {
+				t.Errorf("%s: admin unit names %s, which the admin's service list lacks", tool.Name, id)
+			}
+		}
+		for name, reader := range map[string]struct {
+			client  *apiClient
+			visible map[string]bool
+		}{"Prod reader": {env.viewOnly, prodVisible}, "Dev reader": {env.noGrant, devVisible}} {
+			got := idsOf(reader.client, tool)
+			for _, id := range got {
+				if !reader.visible[id] {
+					t.Errorf("%s: the %s got a unit for %s, which they cannot view", tool.Name, name, id)
+				}
+			}
+			if len(got) >= len(adminIDs) {
+				t.Errorf("%s: the %s got %d units, admin %d: no narrowing", tool.Name, name, len(got), len(adminIDs))
+			}
+		}
+		if len(idsOf(env.viewOnly, tool)) == 0 {
+			t.Errorf("%s: the Prod reader got no units, so the filter is not proven", tool.Name)
+		}
+	}
+	if checked != 3 {
+		t.Errorf("checked %d nested tools, want 3", checked)
 	}
 }

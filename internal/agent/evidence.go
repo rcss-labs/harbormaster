@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"encoding/json"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -129,6 +130,9 @@ func numberUnits(tool string, args map[string]any, text string, next int) (strin
 // "" when there is none. Units come in document order, so one walk finds it.
 func restOf(tool, text string, units []hmtools.Unit) string {
 	rule, _ := hmtools.EvidenceRuleFor(tool)
+	if rule.Kind == hmtools.EvidencePerItemNested {
+		return nestedRest(rule.Arrays, bytes.TrimSpace([]byte(text)), units)
+	}
 	covered := func(piece string) bool {
 		if len(units) == 0 || units[0].Text != piece {
 			return false
@@ -195,6 +199,98 @@ func restOf(tool, text string, units []hmtools.Unit) string {
 		return ""
 	}
 	return "{" + strings.Join(rest, ",") + "}"
+}
+
+// nestedRest is the answer with the elements the units cover taken out of the named arrays, as compact JSON, or ""
+// when nothing else is left. It follows the same walk as hmtools.Units, so the units are used up in the order the
+// elements appear. An array or an object that the removal emptied is left out; one that was empty to begin with, an
+// array that is not the named one and an object with a repeated member name (which gave no units) stay as they are.
+func nestedRest(arrays []hmtools.ItemArray, body []byte, units []hmtools.Unit) string {
+	covered := func(piece string) bool {
+		if len(units) == 0 || units[0].Text != piece {
+			return false
+		}
+		units = units[1:]
+		return true
+	}
+	var strip func(raw json.RawMessage, path []string) (rest string, left bool)
+	strip = func(raw json.RawMessage, path []string) (string, bool) {
+		members, ok := distinctMembers(raw)
+		if !ok {
+			return compactJSON(raw), true
+		}
+		var kept []string
+		removed := false
+		for _, m := range members {
+			here := append(path[:len(path):len(path)], m.name)
+			value, keep := compactJSON(m.value), true
+			for _, array := range arrays {
+				if slices.Equal(array.Path, here) {
+					var elements []json.RawMessage
+					if !bytes.HasPrefix(bytes.TrimSpace(m.value), []byte("[")) || json.Unmarshal(m.value, &elements) != nil {
+						continue
+					}
+					var uncovered []string
+					for _, element := range elements {
+						if compact := compactJSON(element); !covered(compact) {
+							uncovered = append(uncovered, compact)
+						}
+					}
+					if len(uncovered) == 0 && len(elements) > 0 {
+						keep = false
+					}
+					value = "[" + strings.Join(uncovered, ",") + "]"
+				} else if len(array.Path) > len(here) && slices.Equal(array.Path[:len(here)], here) && bytes.HasPrefix(bytes.TrimSpace(m.value), []byte("{")) {
+					value, keep = strip(m.value, here)
+				}
+			}
+			if !keep {
+				removed = true
+				continue
+			}
+			key, _ := json.Marshal(m.name)
+			kept = append(kept, string(key)+":"+value)
+		}
+		if len(kept) == 0 && removed {
+			return "", false
+		}
+		return "{" + strings.Join(kept, ",") + "}", true
+	}
+	if len(body) == 0 || body[0] != '{' {
+		return ""
+	}
+	rest, _ := strip(body, nil)
+	return rest
+}
+
+type namedValue struct {
+	name  string
+	value json.RawMessage
+}
+
+// distinctMembers reads a JSON object into its members in document order. It is false for anything that is not an
+// object, and for an object that repeats a member name.
+func distinctMembers(raw []byte) ([]namedValue, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
+		return nil, false
+	}
+	seen := map[string]struct{}{}
+	var members []namedValue
+	for decoder.More() {
+		token, err := decoder.Token()
+		name, isName := token.(string)
+		var value json.RawMessage
+		if err != nil || !isName || decoder.Decode(&value) != nil {
+			return nil, false
+		}
+		if _, repeated := seen[name]; repeated {
+			return nil, false
+		}
+		seen[name] = struct{}{}
+		members = append(members, namedValue{name, value})
+	}
+	return members, true
 }
 
 func compactJSON(raw []byte) string {

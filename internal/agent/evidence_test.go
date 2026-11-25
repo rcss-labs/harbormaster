@@ -341,3 +341,64 @@ func TestInvestigator_UncitableToolsAreShownUnchanged(t *testing.T) {
 		t.Errorf("result = %+v", res)
 	}
 }
+
+var nestedCostBody = `{"tab":"cost","by_cluster":[{"key":"c1","service_id":"` + checkoutID + `"}],` +
+	`"rightsizing":{"state":"ok","services":[{"service_id":"` + paymentsID + `","monthly":1},{"monthly":2},{"service_id":"` + checkoutID + `","monthly":3}]},` +
+	`"spot":{"services":[{"service_id":"` + checkoutID + `","status":"candidate"}]},` +
+	`"arm64":{"already_arm64":4,"services":[]}}`
+
+func TestInvestigator_NestedAnswerIsShownOnceAsUnitsAndRest(t *testing.T) {
+	p := fake.New(calls(provider.ToolCall{ID: "c1", Name: "get_cost_analytics", Arguments: map[string]any{}}), calls(submitCall(plainSummary)))
+	investigate(t, newLoop(p, replies(map[string]string{"get_cost_analytics": nestedCostBody})), p, investigatorInput())
+	want := envelope("get_cost_analytics", `[e1] {"service_id":"`+paymentsID+`","monthly":1}`+"\n"+
+		`[e2] {"service_id":"`+checkoutID+`","monthly":3}`+"\n"+
+		`[e3] {"service_id":"`+checkoutID+`","status":"candidate"}`+"\n"+
+		`[not citable] {"tab":"cost","by_cluster":[{"key":"c1","service_id":"`+checkoutID+`"}],`+
+		`"rightsizing":{"state":"ok","services":[{"monthly":2}]},"arm64":{"already_arm64":4,"services":[]}}`)
+	if got := resultText(t, requestAt(t, p, 1), "c1"); got != want {
+		t.Errorf("result:\n%s\nwant\n%s", got, want)
+	}
+	// Nothing is shown twice: every cited row appears once, and the rows no unit covers only in the rest.
+	shown := resultText(t, requestAt(t, p, 1), "c1")
+	for _, row := range []string{`"monthly":1}`, `"monthly":3}`, `"status":"candidate"}`} {
+		if strings.Count(shown, row) != 1 {
+			t.Errorf("%s is shown %d times, want once", row, strings.Count(shown, row))
+		}
+	}
+}
+
+func TestNumberUnits_NestedRestKeepsWhatNoUnitCovers(t *testing.T) {
+	// A unit that is dropped (no usable id) stays in the rest, and so does every member outside the arrays,
+	// including an array that was empty to begin with.
+	body := `{"least_available":{"rows":[{"service_id":"","availability":0.5},{"service_id":"` + paymentsID + `"}],"total":2},` +
+		`"getting_worse":{"available":false,"data":null},"kpis":{"availability":null}}`
+	shown, units := numberUnits("get_reliability_analytics", nil, body, 1)
+	want := `[e1] {"service_id":"` + paymentsID + `"}` + "\n" +
+		`[not citable] {"least_available":{"rows":[{"service_id":"","availability":0.5}],"total":2},"getting_worse":{"available":false,"data":null},"kpis":{"availability":null}}`
+	if shown != want || len(units) != 1 {
+		t.Errorf("shown:\n%s\nwant\n%s", shown, want)
+	}
+	// A null array is not an empty one: the rest shows it as it came.
+	shown, _ = numberUnits("get_capacity_analytics", nil, `{"at_scaling_max":null,"over_reserved":{"available":true,"data":{"rows":[{"service_id":"`+paymentsID+`"}]}}}`, 1)
+	if want := `[e1] {"service_id":"` + paymentsID + `"}` + "\n" + `[not citable] {"at_scaling_max":null,"over_reserved":{"available":true}}`; shown != want {
+		t.Errorf("shown %q, want %q", shown, want)
+	}
+	// With every row cited and nothing else, nothing is left to show.
+	shown, _ = numberUnits("get_capacity_analytics", nil, `{"at_scaling_max":[{"service_id":"`+paymentsID+`"}]}`, 1)
+	if want := `[e1] {"service_id":"` + paymentsID + `"}`; shown != want {
+		t.Errorf("shown %q, want %q", shown, want)
+	}
+}
+
+func TestInvestigator_NestedUnitsCarryTheRowsOwnService(t *testing.T) {
+	p := fake.New(calls(provider.ToolCall{ID: "c1", Name: "get_cost_analytics", Arguments: map[string]any{}}), calls(submitCall(plainSummary, cite("e3"), cite("e1"))))
+	res := requireResult(t, investigate(t, newLoop(p, replies(map[string]string{"get_cost_analytics": nestedCostBody})), p, investigatorInput()))
+	if len(res.Evidence) != 2 || res.EvidenceDropped != 0 {
+		t.Fatalf("evidence %+v, dropped %d; shown\n%s", res.Evidence, res.EvidenceDropped, resultText(t, requestAt(t, p, 1), "c1"))
+	}
+	for i, want := range []struct{ service, text string }{{checkoutID, `"status":"candidate"`}, {paymentsID, `"monthly":1`}} {
+		if e := res.Evidence[i]; e.ServiceID != want.service || e.Tool != "get_cost_analytics" || e.Action != "view" || !strings.Contains(e.Excerpt, want.text) {
+			t.Errorf("item %d = %+v, want service %s and %s", i, e, want.service, want.text)
+		}
+	}
+}

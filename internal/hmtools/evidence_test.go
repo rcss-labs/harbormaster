@@ -3,6 +3,7 @@ package hmtools
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -35,12 +36,12 @@ func TestEveryToolHasAnExplicitEvidenceRule(t *testing.T) {
 		switch rule.Kind {
 		case EvidenceNone:
 			counts["none"]++
-			if rule.Action != "" || rule.Items != "" || rule.IDField != "" {
+			if rule.Action != "" || rule.Items != "" || rule.IDField != "" || rule.Arrays != nil {
 				t.Errorf("%s: a none rule carries %+v", tool.Name, rule)
 			}
 		case EvidenceServiceArg:
 			counts["arg-"+rule.Action]++
-			if rule.Items != "" || rule.IDField != "" {
+			if rule.Items != "" || rule.IDField != "" || rule.Arrays != nil {
 				t.Errorf("%s: a service-arg rule carries %+v", tool.Name, rule)
 			}
 			if !hasParam(tool, "service_id") {
@@ -48,14 +49,19 @@ func TestEveryToolHasAnExplicitEvidenceRule(t *testing.T) {
 			}
 		case EvidencePerItem:
 			counts["item-"+rule.Action]++
-			if rule.Items == "" || rule.IDField == "" {
-				t.Errorf("%s: a per-item rule needs Items and IDField, got %+v", tool.Name, rule)
+			if rule.Items == "" || rule.IDField == "" || rule.Arrays != nil {
+				t.Errorf("%s: a per-item rule needs Items and IDField and no Arrays, got %+v", tool.Name, rule)
+			}
+		case EvidencePerItemNested:
+			counts["nested-"+rule.Action]++
+			if rule.Items != "" || rule.IDField != "" || len(rule.Arrays) == 0 {
+				t.Errorf("%s: a nested rule needs Arrays and no Items or IDField, got %+v", tool.Name, rule)
 			}
 		default:
 			t.Errorf("%s: unknown kind %d", tool.Name, rule.Kind)
 		}
 	}
-	want := map[string]int{"arg-view": 15, "arg-logs": 1, "item-view": 3, "item-logs": 1, "none": 19}
+	want := map[string]int{"arg-view": 15, "arg-logs": 1, "item-view": 3, "item-logs": 1, "nested-view": 3, "none": 16}
 	for key, n := range want {
 		if counts[key] != n {
 			t.Errorf("%s: %d tools, want %d (all counts %v)", key, counts[key], n, counts)
@@ -69,11 +75,39 @@ func TestEveryToolHasAnExplicitEvidenceRule(t *testing.T) {
 		"search_config":    {Kind: EvidencePerItem, Action: "view", Items: "items", IDField: "id"},
 		"get_service":      {Kind: EvidenceServiceArg, Action: "view"},
 	} {
-		if got, _ := EvidenceRuleFor(name); got != rule {
+		if got, _ := EvidenceRuleFor(name); !reflect.DeepEqual(got, rule) {
 			t.Errorf("%s: rule %+v, want %+v", name, got, rule)
 		}
 	}
-	if rule, ok := EvidenceRuleFor("no_such_tool"); ok || rule != (EvidenceRule{}) {
+	nested := map[string]EvidenceRule{
+		"get_cost_analytics": {Kind: EvidencePerItemNested, Action: "view", Arrays: []ItemArray{
+			{Path: []string{"rightsizing", "services"}, IDField: "service_id"},
+			{Path: []string{"spot", "services"}, IDField: "service_id"},
+			{Path: []string{"arm64", "services"}, IDField: "service_id"},
+		}},
+		"get_reliability_analytics": {Kind: EvidencePerItemNested, Action: "view", Arrays: []ItemArray{
+			{Path: []string{"least_available", "rows"}, IDField: "service_id"},
+			{Path: []string{"getting_worse", "data", "rows"}, IDField: "service_id"},
+		}},
+		"get_capacity_analytics": {Kind: EvidencePerItemNested, Action: "view", Arrays: []ItemArray{
+			{Path: []string{"at_scaling_max"}, IDField: "service_id"},
+			{Path: []string{"over_reserved", "data", "rows"}, IDField: "service_id"},
+		}},
+	}
+	for name, rule := range nested {
+		if got, _ := EvidenceRuleFor(name); !reflect.DeepEqual(got, rule) {
+			t.Errorf("%s: rule %+v, want %+v", name, got, rule)
+		}
+		if action, ok := EvidenceAction(name); !ok || action != "view" {
+			t.Errorf("%s: action %q, %v; want view", name, action, ok)
+		}
+	}
+	for _, name := range []string{"get_delivery_analytics", "get_operations_analytics", "list_security", "get_image_security"} {
+		if got, _ := EvidenceRuleFor(name); got.Kind != EvidenceNone {
+			t.Errorf("%s must stay not citable (an image belongs to many services): %+v", name, got)
+		}
+	}
+	if rule, ok := EvidenceRuleFor("no_such_tool"); ok || !reflect.DeepEqual(rule, EvidenceRule{}) {
 		t.Errorf("unknown tool got a rule: %+v", rule)
 	}
 }
@@ -446,5 +480,182 @@ func TestUnits_PerItemElementWithWhitespaceIsCompacted(t *testing.T) {
 	want := `{"id":"s1","tags":[1,2],"n":"a b"}`
 	if len(units) != 1 || units[0].ServiceID != "s1" || units[0].Text != want {
 		t.Errorf("units %+v, want text %s", units, want)
+	}
+}
+
+// nestedBody is a cost answer shaped like the handler's: three advisor arrays and totals that also carry ids.
+const nestedBody = `{"tab":"cost","by_cluster":[{"key":"c1","service_id":"never"}],
+ "rightsizing":{"state":"ok","services":[{"service_id":"s1","monthly":1},{"service_id":"s2","monthly":2}]},
+ "spot":{"min_tasks":2,"services":[{"service_id":"s3","status":"candidate"}]},
+ "arm64":{"already_arm64":4,"services":[{"service_id":"s1","status":"ready"}]}}`
+
+func TestUnits_NestedAttributesEachRowToItsOwnService(t *testing.T) {
+	want := []Unit{
+		{ServiceID: "s1", Action: "view", Text: `{"service_id":"s1","monthly":1}`},
+		{ServiceID: "s2", Action: "view", Text: `{"service_id":"s2","monthly":2}`},
+		{ServiceID: "s3", Action: "view", Text: `{"service_id":"s3","status":"candidate"}`},
+		{ServiceID: "s1", Action: "view", Text: `{"service_id":"s1","status":"ready"}`},
+	}
+	if got := Units("get_cost_analytics", nil, nestedBody); !reflect.DeepEqual(got, want) {
+		t.Errorf("cost units %+v, want %+v", got, want)
+	}
+	// Document order, not the order the rule lists the arrays in.
+	reordered := `{"arm64":{"services":[{"service_id":"a"}]},"rightsizing":{"services":[{"service_id":"r"}]}}`
+	if got := unitTexts(Units("get_cost_analytics", nil, reordered)); fmt.Sprint(got) != `[{"service_id":"a"} {"service_id":"r"}]` {
+		t.Errorf("order %q", got)
+	}
+	reliability := `{"least_available":{"rows":[{"service_id":"s1"}],"total":1},
+	 "getting_worse":{"available":true,"data":{"rows":[{"service_id":"s2"},{"service_id":"s3"}],"total":2}}}`
+	got := Units("get_reliability_analytics", nil, reliability)
+	if len(got) != 3 || got[0].ServiceID != "s1" || got[1].ServiceID != "s2" || got[2].ServiceID != "s3" {
+		t.Errorf("reliability units %+v", got)
+	}
+	capacity := `{"at_scaling_max":[{"service_id":"s1"}],"over_reserved":{"data":{"rows":[{"service_id":"s2"}]}}}`
+	got = Units("get_capacity_analytics", nil, capacity)
+	if len(got) != 2 || got[0].ServiceID != "s1" || got[1].ServiceID != "s2" || got[0].Action != "view" {
+		t.Errorf("capacity units %+v", got)
+	}
+}
+
+func TestUnits_NestedIgnoresEverythingOutsideTheNamedArrays(t *testing.T) {
+	body := `{"by_cluster":[{"key":"c1","service_id":"s9"}],"by_tag":[{"service_id":"s8"}],
+	 "kpis":{"service_id":"s7"},"service_id":"s6",
+	 "rightsizing":{"service_id":"s5","services":[{"service_id":"s1"}],"other":[{"service_id":"s4"}]},
+	 "spot":[{"service_id":"s3"}],"arm64":{"services":{"service_id":"s2"}}}`
+	got := Units("get_cost_analytics", nil, body)
+	if len(got) != 1 || got[0].ServiceID != "s1" {
+		t.Errorf("units %+v, want only the rightsizing row", got)
+	}
+	if got := Units("get_capacity_analytics", nil, `{"at_scaling_max":[{"service_id":"s1"}],"subnets_low":[{"service_id":"s2"}],"clusters":{"rows":[{"service_id":"s3"}]}}`); len(got) != 1 {
+		t.Errorf("capacity units %+v", got)
+	}
+}
+
+func TestUnits_NestedMissingOrNullPathGivesNothing(t *testing.T) {
+	for name, body := range map[string]string{
+		"data null":      `{"least_available":{"rows":[{"service_id":"s1"}]},"getting_worse":{"available":false,"data":null}}`,
+		"data missing":   `{"least_available":{"rows":[{"service_id":"s1"}]},"getting_worse":{}}`,
+		"panel null":     `{"least_available":{"rows":[{"service_id":"s1"}]},"getting_worse":null}`,
+		"panel a string": `{"least_available":{"rows":[{"service_id":"s1"}]},"getting_worse":"x"}`,
+		"data an array":  `{"least_available":{"rows":[{"service_id":"s1"}]},"getting_worse":{"data":[{"rows":[{"service_id":"s2"}]}]}}`,
+		"rows an object": `{"least_available":{"rows":[{"service_id":"s1"}]},"getting_worse":{"data":{"rows":{"service_id":"s2"}}}}`,
+		"rows null":      `{"least_available":{"rows":[{"service_id":"s1"}]},"getting_worse":{"data":{"rows":null}}}`,
+	} {
+		got := Units("get_reliability_analytics", nil, body)
+		if len(got) != 1 || got[0].ServiceID != "s1" {
+			t.Errorf("%s: units %+v, want the other array's one row", name, got)
+		}
+	}
+	for name, body := range map[string]string{
+		"array body": `[{"service_id":"s1"}]`, "scalar": `5`, "null": `null`, "empty object": `{}`,
+		"first array null": `{"least_available":null}`, "first array a string": `{"least_available":{"rows":"x"}}`,
+	} {
+		if got := Units("get_reliability_analytics", nil, body); len(got) != 0 {
+			t.Errorf("%s: %+v", name, got)
+		}
+	}
+}
+
+func TestUnits_NestedDropsRowsWithoutAUsableID(t *testing.T) {
+	body := fmt.Sprintf(`{"at_scaling_max":[
+		{"desired":1},{"service_id":""},{"service_id":7},{"service_id":null},{"service_id":["s1"]},"not an object",
+		{"service_id":%q},{"service_id":"[redacted]"},{"service_id":" lead"},{"service_id":"trail "},{"service_id":"a\nb"},
+		{"service_id":"dup","service_id":"dup2"},{"Service_ID":"s1"},
+		{"service_id":"keep"}],
+	 "over_reserved":{"data":{"rows":[{"service_id":"s1","service_id":"s2"},{"service_id":"keep2"},{"service_id":"keep2"}]}}}`,
+		strings.Repeat("a", 513))
+	got := Units("get_capacity_analytics", nil, body)
+	if len(got) != 3 || got[0].ServiceID != "keep" || got[1].ServiceID != "keep2" || got[2].ServiceID != "keep2" {
+		t.Errorf("units %+v, want keep, keep2, keep2", got)
+	}
+	if got := Units("get_capacity_analytics", nil, fmt.Sprintf(`{"at_scaling_max":[{"service_id":%q}]}`, strings.Repeat("a", 512))); len(got) != 1 {
+		t.Errorf("a 512-byte id was dropped")
+	}
+	// A repeated member on the way to an array fails closed for everything below it.
+	for name, dup := range map[string]string{
+		"top level": `{"rightsizing":{"services":[{"service_id":"s1"}]},"rightsizing":{"services":[{"service_id":"s2"}]}}`,
+		"a step":    `{"rightsizing":{"services":[{"service_id":"s1"}],"services":[{"service_id":"s2"}]}}`,
+		"unrelated": `{"kpis":{},"kpis":{},"rightsizing":{"services":[{"service_id":"s1"}]}}`,
+	} {
+		if got := Units("get_cost_analytics", nil, dup); len(got) != 0 {
+			t.Errorf("repeated member (%s): %+v", name, got)
+		}
+	}
+}
+
+func TestUnits_NestedCapsAcrossArrays(t *testing.T) {
+	row := func(prefix string, n int) string {
+		rows := make([]string, n)
+		for i := range rows {
+			rows[i] = fmt.Sprintf(`{"service_id":"%s%d"}`, prefix, i)
+		}
+		return "[" + strings.Join(rows, ",") + "]"
+	}
+	body := `{"rightsizing":{"services":` + row("r", 1500) + `},"spot":{"services":` + row("s", 1500) + `},"arm64":{"services":` + row("a", 1500) + `}}`
+	got := Units("get_cost_analytics", nil, body)
+	if len(got) != 2000 || got[1499].ServiceID != "r1499" || got[1999].ServiceID != "s499" {
+		t.Errorf("%d units, want 2000 across arrays, ending at s499", len(got))
+	}
+	// Big rows: the 2 MiB read limit still applies to the whole answer.
+	over := `{"at_scaling_max":[{"service_id":"s1","pad":"` + strings.Repeat("x", 2<<20) + `"}]}`
+	if got := Units("get_capacity_analytics", nil, over); len(got) != 0 {
+		t.Errorf("an answer over 2 MiB gave %d units", len(got))
+	}
+}
+
+func TestUnits_NestedLinearOnLargeBodies(t *testing.T) {
+	rows := make([]string, 25_000)
+	for i := range rows {
+		rows[i] = fmt.Sprintf(`{"service_id":"s%d","m":"line %d"}`, i%7, i)
+	}
+	array := "[" + strings.Join(rows, ",") + "]"
+	members := make([]string, 100_000)
+	for i := range members {
+		members[i] = fmt.Sprintf(`"k%d":1`, i)
+	}
+	for name, body := range map[string]string{
+		"rows in all arrays": `{"rightsizing":{"services":` + array + `},"spot":{"services":` + array + `}}`,
+		"deep nesting":       `{"rightsizing":` + strings.Repeat(`{"a":`, 2000) + `1` + strings.Repeat(`}`, 2000) + `}`,
+		"deep arrays":        strings.Repeat("[", 5000) + strings.Repeat("]", 5000),
+		"many members":       `{"rightsizing":{"services":[{"service_id":"s1"}],` + strings.Join(members, ",") + `}}`,
+		"many path objects":  `{"rightsizing":{"services":[` + strings.Repeat(`{"service_id":"x"},`, 90000) + `{"service_id":"y"}]}}`,
+	} {
+		if len(body) > 2<<20 {
+			t.Fatalf("%s: body is %d bytes", name, len(body))
+		}
+		start := time.Now()
+		Units("get_cost_analytics", nil, body)
+		if elapsed := time.Since(start); elapsed > 2*time.Second {
+			t.Errorf("%s took %v", name, elapsed)
+		}
+	}
+}
+
+// The phase 2 rules and their units, byte for byte: nested rules must not move them.
+func TestUnits_ExistingPerItemRulesAreUnchanged(t *testing.T) {
+	for tool, want := range map[string]EvidenceRule{
+		"list_services": {Kind: EvidencePerItem, Action: "view", Items: "items", IDField: "id"},
+		"list_alerts":   {Kind: EvidencePerItem, Action: "view", Items: "items", IDField: "service_id"},
+		"search_config": {Kind: EvidencePerItem, Action: "view", Items: "items", IDField: "id"},
+		"search_logs":   {Kind: EvidencePerItem, Action: "logs", Items: "rows", IDField: "service_id"},
+	} {
+		if got, _ := EvidenceRuleFor(tool); !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: rule %+v, want %+v", tool, got, want)
+		}
+	}
+	for _, c := range []struct {
+		tool, body string
+		want       []Unit
+	}{
+		{"list_services", `{"items":[{"id":"s1","name":"a"},{"name":"x"},{"id":"s2"}],"total":3}`,
+			[]Unit{{"s1", "view", `{"id":"s1","name":"a"}`}, {"s2", "view", `{"id":"s2"}`}}},
+		{"search_config", `{"items":[{"id":"s1","k":1}],"other":[{"id":"x"}]}`, []Unit{{"s1", "view", `{"id":"s1","k":1}`}}},
+		{"list_alerts", `{"items":[{"service_id":"","t":"a"},{"service_id":"s1"}]}`, []Unit{{"s1", "view", `{"service_id":"s1"}`}}},
+		{"search_logs", `{"rows":[{"service_id":"s9","message":"boom"}],"capped":false}`, []Unit{{"s9", "logs", `{"service_id":"s9","message":"boom"}`}}},
+		{"list_services", `{"items":[{"id":"s1"}],"items":[{"id":"s2"}]}`, nil},
+	} {
+		if got := Units(c.tool, nil, c.body); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s %s: units %+v, want %+v", c.tool, c.body, got, c.want)
+		}
 	}
 }
