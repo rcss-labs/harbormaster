@@ -41,6 +41,7 @@ func (d *Dispatcher) InvestigationErrors() int64 { return d.investigationErrors.
 
 func (d *Dispatcher) warnInvestigation(what string, err any) {
 	count := d.investigationErrors.Add(1)
+	d.registry().CountInvestigationStepError()
 	d.log().Warn("notify: investigation step", "step", what, "err", err, "count", count)
 }
 
@@ -54,6 +55,7 @@ func (d *Dispatcher) afterSend(ctx context.Context, now time.Time, names map[str
 	defer func() {
 		if r := recover(); r != nil {
 			count := d.investigationErrors.Add(1)
+			d.registry().CountInvestigationStepError()
 			d.log().Error("notify: investigation step panicked", "panic", r, "count", count)
 		}
 	}()
@@ -180,6 +182,7 @@ func (d *Dispatcher) sendDiagnoses(ctx context.Context, rows []store.Notificatio
 			defer func() {
 				if r := recover(); r != nil {
 					count := d.investigationErrors.Add(1)
+					d.registry().CountInvestigationStepError()
 					d.log().Error("notify: diagnosis worker panicked", "delivery", row.ID, "panic", r, "count", count)
 					d.failPanickedDiagnosis(ctx, row)
 				}

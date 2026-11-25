@@ -1323,6 +1323,22 @@ func TestDispatcher_InvestigationErrorsAreCountedAndWarned(t *testing.T) {
 	}
 }
 
+func TestDispatcher_InvestigationErrorsReachTelemetry(t *testing.T) {
+	e := newInvEnv(t)
+	e.d.Telemetry = telemetry.New()
+	e.switched("one")
+	e.exec(`alter table agent_investigations rename to agent_investigations_gone`)
+	e.setAlerts(alert(svcX, "service_failing", model.AlertDanger))
+	e.cycle()
+	var out bytes.Buffer
+	if err := e.d.Telemetry.WritePrometheus(&out); err != nil {
+		t.Fatal(err)
+	}
+	if want := "harbormaster_investigation_step_errors_total 2\n"; !strings.Contains(out.String(), want) {
+		t.Errorf("metrics lack %q after %d errors:\n%s", want, e.d.InvestigationErrors(), out.String())
+	}
+}
+
 func TestDispatcher_APanicInAfterSendIsCounted(t *testing.T) {
 	e := newInvEnv(t)
 	e.switched("one")
