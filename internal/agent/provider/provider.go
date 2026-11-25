@@ -5,6 +5,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"regexp"
 	"time"
 )
 
@@ -90,6 +91,26 @@ type Error struct {
 	Retryable  bool
 	RetryAfter time.Duration
 	Message    string
+	// Status is the HTTP status the vendor answered with, 0 when there was none.
+	Status int
+	// VendorType is the vendor's enumerated error identifier (an error type or
+	// code), empty when it has none or it is not a plain identifier. Never a
+	// message or body.
+	VendorType string
+	// Refusal marks a failure that is the model's own refusal or an unexplained
+	// stop: Message is then a sentence for the user and is shown as is.
+	Refusal bool
+}
+
+var vendorTypePattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,64}$`)
+
+// SafeVendorType returns s when it is a plain identifier fit for a log line,
+// else "". A vendor's error type is enumerated; anything else may carry text.
+func SafeVendorType(s string) string {
+	if vendorTypePattern.MatchString(s) {
+		return s
+	}
+	return ""
 }
 
 func (e *Error) Error() string {

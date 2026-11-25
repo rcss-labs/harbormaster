@@ -938,3 +938,14 @@ func TestGenerate_ClampsMaxOutputTokens(t *testing.T) {
 		t.Fatalf("maxTokens = %d", body.InferenceConfig.MaxTokens)
 	}
 }
+
+// The log line for a failed call needs the HTTP status and the vendor's error type, and nothing the vendor wrote.
+func TestGenerate_ErrorsCarryStatusAndVendorType(t *testing.T) {
+	srv := errorServer(429, "ThrottlingException", "slow down", nil)
+	defer srv.Close()
+	_, err := newTestProvider(t, srv.URL).Generate(context.Background(), simpleRequest(), nil)
+	var perr *provider.Error
+	if !errors.As(err, &perr) || perr.Status != 429 || perr.VendorType != "ThrottlingException" {
+		t.Fatalf("got %+v", perr)
+	}
+}

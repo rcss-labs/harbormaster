@@ -10,6 +10,7 @@ import (
 
 	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
+	"github.com/aws/smithy-go"
 
 	"github.com/rcss-labs/harbormaster/internal/agent/provider"
 )
@@ -18,6 +19,19 @@ import (
 // it never carries the vendor's message or body. A cancelled or expired
 // context is returned as is.
 func mapError(ctx context.Context, err error) error {
+	mapped := classifyError(ctx, err)
+	var perr *provider.Error
+	if errors.As(mapped, &perr) && perr != nil {
+		perr.Status, _ = responseDetails(err)
+		var apiErr smithy.APIError
+		if errors.As(err, &apiErr) {
+			perr.VendorType = provider.SafeVendorType(apiErr.ErrorCode())
+		}
+	}
+	return mapped
+}
+
+func classifyError(ctx context.Context, err error) error {
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return ctxErr
 	}

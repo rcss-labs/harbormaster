@@ -130,9 +130,9 @@ func stopReason(reason sdk.StopReason) (string, error) {
 	case sdk.StopReasonMaxTokens, sdk.StopReasonModelContextWindowExceeded, sdk.StopReasonPauseTurn:
 		return "max_tokens", nil
 	case sdk.StopReasonRefusal:
-		return "", &provider.Error{Kind: "invalid_request", Message: "The model declined to answer."}
+		return "", &provider.Error{Kind: "invalid_request", Refusal: true, Message: "The model declined to answer."}
 	}
-	return "", &provider.Error{Kind: "invalid_request", Message: "The model stopped for an unknown reason."}
+	return "", &provider.Error{Kind: "invalid_request", Refusal: true, Message: "The model stopped for an unknown reason."}
 }
 
 // opaqueBlock is one content block of an assistant turn, kept in stream order

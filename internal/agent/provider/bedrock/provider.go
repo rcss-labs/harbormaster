@@ -174,7 +174,7 @@ func (p *Provider) Generate(ctx context.Context, req provider.Request, onText fu
 		resp.StopReason = "max_tokens"
 	case types.StopReasonGuardrailIntervened, types.StopReasonContentFiltered, "refusal":
 		e := newError("invalid_request", false, 0)
-		e.Message = "The model declined to answer."
+		e.Message, e.Refusal = "The model declined to answer.", true
 		return resp, e
 	case types.StopReasonMalformedModelOutput, types.StopReasonMalformedToolUse:
 		e := newError("unavailable", resp.Text == "", 0)
@@ -182,7 +182,7 @@ func (p *Provider) Generate(ctx context.Context, req provider.Request, onText fu
 		return resp, e
 	default:
 		e := newError("invalid_request", false, 0)
-		e.Message = "The model stopped for an unknown reason."
+		e.Message, e.Refusal = "The model stopped for an unknown reason.", true
 		return resp, e
 	}
 	return resp, nil
