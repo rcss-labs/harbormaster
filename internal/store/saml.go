@@ -165,13 +165,13 @@ func (s *Store) UpsertSAMLConfig(ctx context.Context, row SAMLConfigRow) (SAMLCo
 		// is scoped to the old entity ID and so can never match a sign-in under the new one.
 		tag, err := tx.Exec(ctx, `update users set pending_link_name_id = null, pending_link_set_at = null,
 			pending_link_expires_at = null, pending_link_set_by_user_id = null
-			where pending_link_name_id is not null`)
+			where pending_link_name_id is not null and kind = 'human'`)
 		if err != nil {
 			return change, fmt.Errorf("clear pending links: %w", err)
 		}
 		change.IdentitiesDetached = tag.RowsAffected()
 		tag, err = tx.Exec(ctx, `update users set idp_entity_id = null, external_id = null, external_id_format = null
-			where external_id is not null and password_hash is not null`)
+			where external_id is not null and password_hash is not null and kind = 'human'`)
 		if err != nil {
 			return change, fmt.Errorf("detach identities: %w", err)
 		}

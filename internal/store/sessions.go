@@ -25,15 +25,20 @@ type Session struct {
 	NotAfter *time.Time
 }
 
-// CreateSession stores a new session.
+// CreateSession stores a new session. Only a human user can hold one: the row is selected from the user's, so the agent
+// identity, an unknown kind or an absent user store nothing and return ErrNotFound.
 func (s *Store) CreateSession(ctx context.Context, sess Session) error {
-	_, err := s.Pool.Exec(ctx,
+	tag, err := s.Pool.Exec(ctx,
 		`insert into sessions (id_hash, user_id, csrf_token, created_at, last_seen_at, expires_at, ip, user_agent, auth_source, not_after)
-		 values ($1, $2, $3, $4, $5, $6, nullif($7, ''), nullif($8, ''), coalesce(nullif($9, ''), 'password'), $10)`,
+		 select $1, id, $3, $4, $5, $6, nullif($7, ''), nullif($8, ''), coalesce(nullif($9, ''), 'password'), $10
+		 from users where id = $2 and kind = 'human'`,
 		sess.IDHash, sess.UserID, sess.CSRFToken, sess.CreatedAt, sess.LastSeenAt, sess.ExpiresAt,
 		sess.IP, sess.UserAgent, sess.AuthSource, sess.NotAfter)
 	if err != nil {
 		return fmt.Errorf("create session: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
 	}
 	return nil
 }

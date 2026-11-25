@@ -38,6 +38,8 @@ type User struct {
 	PendingLinkSetByUserID *int64
 	// AIChat lets the user open the agent chat (admin-granted; the feature itself is off unless HM_AGENT_URL is set).
 	AIChat bool
+	// Kind is UserKindHuman or UserKindAgent.
+	Kind string
 }
 
 // HasPassword reports whether the user can sign in with a password. PasswordHash is empty when
@@ -54,14 +56,14 @@ func (u User) PendingLinkActive(now time.Time) bool {
 
 const userColumns = `id, username, coalesce(password_hash, ''), is_admin, must_change_password, created_at, last_sign_in_at, locked_until,
 	break_glass, coalesce(idp_entity_id, ''), coalesce(external_id, ''), coalesce(external_id_format, ''), email, display_name,
-	coalesce(pending_link_name_id, ''), pending_link_expires_at, pending_link_set_at, pending_link_set_by_user_id, ai_chat`
+	coalesce(pending_link_name_id, ''), pending_link_expires_at, pending_link_set_at, pending_link_set_by_user_id, ai_chat, kind`
 
 func scanUser(row pgx.Row) (User, error) {
 	var u User
 	err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Admin, &u.MustChangePassword,
 		&u.CreatedAt, &u.LastSignInAt, &u.LockedUntil,
 		&u.BreakGlass, &u.IdPEntityID, &u.ExternalID, &u.ExternalIDFormat, &u.Email, &u.DisplayName,
-		&u.PendingLinkNameID, &u.PendingLinkExpiresAt, &u.PendingLinkSetAt, &u.PendingLinkSetByUserID, &u.AIChat)
+		&u.PendingLinkNameID, &u.PendingLinkExpiresAt, &u.PendingLinkSetAt, &u.PendingLinkSetByUserID, &u.AIChat, &u.Kind)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
@@ -73,12 +75,12 @@ func isUniqueViolation(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == uniqueViolationCode
 }
 
-// CreateUser inserts a user, keeping the username as given. Duplicates that
-// differ only in case return ErrConflict.
+// CreateUser inserts a human user, keeping the username as given. Duplicates that differ only in case, and the
+// username of the agent identity, return ErrConflict.
 func (s *Store) CreateUser(ctx context.Context, username, passwordHash string, admin, mustChange bool) (User, error) {
 	row := s.Pool.QueryRow(ctx,
-		`insert into users (username, password_hash, is_admin, must_change_password)
-		 values ($1, $2, $3, $4) returning `+userColumns,
+		`insert into users (username, password_hash, is_admin, must_change_password, kind)
+		 values ($1, $2, $3, $4, 'human') returning `+userColumns,
 		username, passwordHash, admin, mustChange)
 	u, err := scanUser(row)
 	if isUniqueViolation(err) {
@@ -90,20 +92,22 @@ func (s *Store) CreateUser(ctx context.Context, username, passwordHash string, a
 	return u, nil
 }
 
-// GetUser returns the user with the given ID, or ErrNotFound.
+// GetUser returns the user with the given ID of any kind, or ErrNotFound. It is the one general lookup: callers that act
+// on a person go through a human-only path or check IsAgent.
 func (s *Store) GetUser(ctx context.Context, id int64) (User, error) {
 	return scanUser(s.Pool.QueryRow(ctx, `select `+userColumns+` from users where id = $1`, id))
 }
 
-// GetUserByUsername matches usernames case-insensitively, or returns ErrNotFound.
+// GetUserByUsername matches human usernames case-insensitively, or returns ErrNotFound. The agent identity is never
+// found by name, so no sign-in or command line path can resolve it.
 func (s *Store) GetUserByUsername(ctx context.Context, username string) (User, error) {
 	return scanUser(s.Pool.QueryRow(ctx,
-		`select `+userColumns+` from users where lower(username) = lower($1)`, username))
+		`select `+userColumns+` from users where lower(username) = lower($1) and kind = 'human'`, username))
 }
 
-// ListUsers returns all users in creation order.
+// ListUsers returns all human users in creation order.
 func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
-	rows, err := s.Pool.Query(ctx, `select `+userColumns+` from users order by id`)
+	rows, err := s.Pool.Query(ctx, `select `+userColumns+` from users where kind = 'human' order by id`)
 	if err != nil {
 		return nil, fmt.Errorf("list users: %w", err)
 	}
@@ -122,10 +126,10 @@ func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 	return users, nil
 }
 
-// CountUsers returns the number of users.
+// CountUsers returns the number of human users: a database holding only the agent identity still needs first-run setup.
 func (s *Store) CountUsers(ctx context.Context) (int, error) {
 	var n int
-	err := s.Pool.QueryRow(ctx, `select count(*) from users`).Scan(&n)
+	err := s.Pool.QueryRow(ctx, `select count(*) from users where kind = 'human'`).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("count users: %w", err)
 	}
@@ -135,7 +139,7 @@ func (s *Store) CountUsers(ctx context.Context) (int, error) {
 // SetPassword replaces a user's password hash and must-change flag. Returns ErrNotFound if absent.
 func (s *Store) SetPassword(ctx context.Context, id int64, hash string, mustChange bool) error {
 	return s.execExpectOne(ctx,
-		`update users set password_hash = $2, must_change_password = $3 where id = $1`,
+		`update users set password_hash = $2, must_change_password = $3 where id = $1 and kind = 'human'`,
 		id, hash, mustChange)
 }
 
@@ -149,7 +153,7 @@ func (s *Store) SetPasswordEndingCredentials(ctx context.Context, id int64, hash
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	tag, err := tx.Exec(ctx,
-		`update users set password_hash = $2, must_change_password = $3 where id = $1`, id, hash, mustChange)
+		`update users set password_hash = $2, must_change_password = $3 where id = $1 and kind = 'human'`, id, hash, mustChange)
 	if err != nil {
 		return fmt.Errorf("set password: %w", err)
 	}
@@ -167,12 +171,12 @@ func (s *Store) SetPasswordEndingCredentials(ctx context.Context, id int64, hash
 
 // TouchSignIn records the time of a successful sign-in. Returns ErrNotFound if absent.
 func (s *Store) TouchSignIn(ctx context.Context, id int64, at time.Time) error {
-	return s.execExpectOne(ctx, `update users set last_sign_in_at = $2 where id = $1`, id, at)
+	return s.execExpectOne(ctx, `update users set last_sign_in_at = $2 where id = $1 and kind = 'human'`, id, at)
 }
 
 // LockUser locks sign-in for the user until the given time. Returns ErrNotFound if absent.
 func (s *Store) LockUser(ctx context.Context, id int64, until time.Time) error {
-	return s.execExpectOne(ctx, `update users set locked_until = $2 where id = $1`, id, until)
+	return s.execExpectOne(ctx, `update users set locked_until = $2 where id = $1 and kind = 'human'`, id, until)
 }
 
 // execExpectOne runs a single-row write and maps "no rows affected" to ErrNotFound.
@@ -243,8 +247,8 @@ type NewSAMLUser struct {
 func (s *Store) CreateSAMLUser(ctx context.Context, n NewSAMLUser) (User, error) {
 	u, err := scanUser(s.Pool.QueryRow(ctx,
 		`insert into users (username, password_hash, is_admin, must_change_password,
-		                    idp_entity_id, external_id, external_id_format, email, display_name)
-		 values ($1, null, false, false, $2, $3, $4, $5, $6) returning `+userColumns,
+		                    idp_entity_id, external_id, external_id_format, email, display_name, kind)
+		 values ($1, null, false, false, $2, $3, $4, $5, $6, 'human') returning `+userColumns,
 		n.Username, n.IdPEntityID, n.ExternalID, n.ExternalIDFormat, n.Email, n.DisplayName))
 	if isUniqueViolation(err) {
 		return User{}, ErrConflict
@@ -258,7 +262,7 @@ func (s *Store) CreateSAMLUser(ctx context.Context, n NewSAMLUser) (User, error)
 // GetUserByExternalID returns the user linked to (idpEntityID, externalID), or ErrNotFound.
 func (s *Store) GetUserByExternalID(ctx context.Context, idpEntityID, externalID string) (User, error) {
 	return scanUser(s.Pool.QueryRow(ctx,
-		`select `+userColumns+` from users where idp_entity_id = $1 and external_id = $2`,
+		`select `+userColumns+` from users where idp_entity_id = $1 and external_id = $2 and kind = 'human'`,
 		idpEntityID, externalID))
 }
 
@@ -268,20 +272,20 @@ func (s *Store) GetUserByExternalID(ctx context.Context, idpEntityID, externalID
 func (s *Store) GetUserByPendingLink(ctx context.Context, _ /* idpEntityID */, nameID string, now time.Time) (User, error) {
 	return scanUser(s.Pool.QueryRow(ctx,
 		`select `+userColumns+` from users
-		 where pending_link_name_id = $1 and pending_link_expires_at > $2`, nameID, now))
+		 where pending_link_name_id = $1 and pending_link_expires_at > $2 and kind = 'human'`, nameID, now))
 }
 
 // UpdateSAMLProfile changes only the non-nil fields. Returns ErrNotFound if the user is absent.
 func (s *Store) UpdateSAMLProfile(ctx context.Context, id int64, email, displayName *string) error {
 	return s.execExpectOne(ctx,
-		`update users set email = coalesce($2, email), display_name = coalesce($3, display_name) where id = $1`,
+		`update users set email = coalesce($2, email), display_name = coalesce($3, display_name) where id = $1 and kind = 'human'`,
 		id, email, displayName)
 }
 
 // CountBreakGlassAdmins returns the number of global admins flagged break-glass.
 func (s *Store) CountBreakGlassAdmins(ctx context.Context) (int, error) {
 	var n int
-	if err := s.Pool.QueryRow(ctx, `select count(*) from users where is_admin and break_glass`).Scan(&n); err != nil {
+	if err := s.Pool.QueryRow(ctx, `select count(*) from users where is_admin and break_glass and kind = 'human'`).Scan(&n); err != nil {
 		return 0, fmt.Errorf("count break-glass admins: %w", err)
 	}
 	return n, nil
@@ -292,7 +296,7 @@ func (s *Store) CountBreakGlassAdmins(ctx context.Context) (int, error) {
 func (s *Store) CountPasswordUsersNotBreakGlass(ctx context.Context) (int, error) {
 	var n int
 	if err := s.Pool.QueryRow(ctx,
-		`select count(*) from users where password_hash is not null and not break_glass`).Scan(&n); err != nil {
+		`select count(*) from users where password_hash is not null and not break_glass and kind = 'human'`).Scan(&n); err != nil {
 		return 0, fmt.Errorf("count password users: %w", err)
 	}
 	return n, nil
@@ -318,7 +322,7 @@ func (s *Store) BindSSOIdentity(ctx context.Context, b BindSSO) (User, error) {
 		return User{}, err
 	}
 	var linked bool
-	if err := tx.QueryRow(ctx, `select external_id is not null from users where id = $1 for update`, b.UserID).Scan(&linked); err != nil {
+	if err := tx.QueryRow(ctx, `select external_id is not null from users where id = $1 and kind = 'human' for update`, b.UserID).Scan(&linked); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return User{}, ErrNotFound
 		}
@@ -330,7 +334,7 @@ func (s *Store) BindSSOIdentity(ctx context.Context, b BindSSO) (User, error) {
 	// Another user's active pre-link owns this NameID; checked here so it cannot race SetPendingLink.
 	var pendingElsewhere bool
 	if err := tx.QueryRow(ctx,
-		`select exists (select 1 from users where id <> $1 and pending_link_name_id = $2 and pending_link_expires_at > now())`,
+		`select exists (select 1 from users where id <> $1 and pending_link_name_id = $2 and pending_link_expires_at > now() and kind = 'human')`,
 		b.UserID, b.ExternalID).Scan(&pendingElsewhere); err != nil {
 		return User{}, fmt.Errorf("check pending link: %w", err)
 	}
@@ -342,7 +346,7 @@ func (s *Store) BindSSOIdentity(ctx context.Context, b BindSSO) (User, error) {
 		        email = coalesce($5, email), display_name = coalesce($6, display_name),
 		        pending_link_name_id = null, pending_link_set_at = null,
 		        pending_link_expires_at = null, pending_link_set_by_user_id = null
-		 where id = $1 returning `+userColumns,
+		 where id = $1 and kind = 'human' returning `+userColumns,
 		b.UserID, b.IdPEntityID, b.ExternalID, b.ExternalIDFormat, b.Email, b.DisplayName))
 	if isUniqueViolation(err) {
 		return User{}, ErrSSOIdentityTaken
@@ -371,7 +375,7 @@ func (s *Store) SetPendingLink(ctx context.Context, id int64, nameID string, set
 		return err
 	}
 	var linked bool
-	if err := tx.QueryRow(ctx, `select external_id is not null from users where id = $1 for update`, id).Scan(&linked); err != nil {
+	if err := tx.QueryRow(ctx, `select external_id is not null from users where id = $1 and kind = 'human' for update`, id).Scan(&linked); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -382,7 +386,7 @@ func (s *Store) SetPendingLink(ctx context.Context, id int64, nameID string, set
 	}
 	var taken bool
 	if err := tx.QueryRow(ctx,
-		`select exists (select 1 from users where id <> $1 and (external_id = $2 or pending_link_name_id = $2))`,
+		`select exists (select 1 from users where id <> $1 and kind = 'human' and (external_id = $2 or pending_link_name_id = $2))`,
 		id, nameID).Scan(&taken); err != nil {
 		return fmt.Errorf("check name id: %w", err)
 	}
@@ -391,7 +395,7 @@ func (s *Store) SetPendingLink(ctx context.Context, id int64, nameID string, set
 	}
 	_, err = tx.Exec(ctx,
 		`update users set pending_link_name_id = $2, pending_link_set_at = now(),
-		        pending_link_expires_at = $3, pending_link_set_by_user_id = $4 where id = $1`,
+		        pending_link_expires_at = $3, pending_link_set_by_user_id = $4 where id = $1 and kind = 'human'`,
 		id, nameID, expires, setBy)
 	if isUniqueViolation(err) {
 		return ErrSSOIdentityTaken
@@ -407,7 +411,7 @@ func (s *Store) ClearPendingLink(ctx context.Context, id int64) error {
 	return s.execExpectOne(ctx,
 		`update users set pending_link_name_id = null, pending_link_set_at = null,
 		        pending_link_expires_at = null, pending_link_set_by_user_id = null
-		 where id = $1 and pending_link_name_id is not null`, id)
+		 where id = $1 and pending_link_name_id is not null and kind = 'human'`, id)
 }
 
 // UnlinkSSO detaches the user's SSO identity and ends their SSO sessions and SSO-created access tokens. When the user has no
@@ -421,7 +425,7 @@ func (s *Store) UnlinkSSO(ctx context.Context, id int64, newHash string) (passwo
 	defer func() { _ = tx.Rollback(ctx) }()
 	var linked, hasPassword bool
 	if err := tx.QueryRow(ctx,
-		`select external_id is not null, password_hash is not null from users where id = $1 for update`, id).
+		`select external_id is not null, password_hash is not null from users where id = $1 and kind = 'human' for update`, id).
 		Scan(&linked, &hasPassword); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return false, 0, ErrNotFound
@@ -433,11 +437,11 @@ func (s *Store) UnlinkSSO(ctx context.Context, id int64, newHash string) (passwo
 	}
 	if hasPassword {
 		_, err = tx.Exec(ctx,
-			`update users set idp_entity_id = null, external_id = null, external_id_format = null where id = $1`, id)
+			`update users set idp_entity_id = null, external_id = null, external_id_format = null where id = $1 and kind = 'human'`, id)
 	} else {
 		_, err = tx.Exec(ctx,
 			`update users set idp_entity_id = null, external_id = null, external_id_format = null,
-			        password_hash = $2, must_change_password = true where id = $1`, id, newHash)
+			        password_hash = $2, must_change_password = true where id = $1 and kind = 'human'`, id, newHash)
 	}
 	if err != nil {
 		return false, 0, fmt.Errorf("unlink: %w", err)
@@ -457,8 +461,8 @@ func (s *Store) UnlinkSSO(ctx context.Context, id int64, newHash string) (passwo
 // (case-insensitive) return ErrConflict, like CreateUser.
 func (s *Store) CreateBreakGlassAdmin(ctx context.Context, username, passwordHash string) (User, error) {
 	row := s.Pool.QueryRow(ctx,
-		`insert into users (username, password_hash, is_admin, must_change_password, break_glass)
-		 values ($1, $2, true, true, true) returning `+userColumns,
+		`insert into users (username, password_hash, is_admin, must_change_password, break_glass, kind)
+		 values ($1, $2, true, true, true, 'human') returning `+userColumns,
 		username, passwordHash)
 	u, err := scanUser(row)
 	if isUniqueViolation(err) {
@@ -488,8 +492,8 @@ func (s *Store) SetUserAIChat(ctx context.Context, userID int64, on bool) error 
 // ChangeUserAIChat is SetUserAIChat that also returns the value it replaced, read under the same row lock as the
 // write, so a caller that audits the change reports exactly what this call changed.
 func (s *Store) ChangeUserAIChat(ctx context.Context, userID int64, on bool) (was bool, err error) {
-	err = s.Pool.QueryRow(ctx, `update users u set ai_chat = $2 from (select id, ai_chat from users where id = $1 for update) old
-		where u.id = old.id returning old.ai_chat`, userID, on).Scan(&was)
+	err = s.Pool.QueryRow(ctx, `update users u set ai_chat = $2 from (select id, ai_chat from users where id = $1 and kind = 'human' for update) old
+		where u.id = old.id and u.kind = 'human' returning old.ai_chat`, userID, on).Scan(&was)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, ErrNotFound
 	}

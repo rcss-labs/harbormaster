@@ -21,10 +21,14 @@ var ErrSetupDone = errors.New("setup already done")
 
 var usernamePattern = regexp.MustCompile(`^[a-z][a-z0-9._-]{1,31}$`)
 
-// ValidateUsername enforces the username policy (already lower-cased and trimmed).
+// ValidateUsername enforces the username policy (already lower-cased and trimmed). The prefix of the agent identity's
+// username is reserved.
 func ValidateUsername(username string) error {
 	if !usernamePattern.MatchString(username) {
 		return &ValidationError{Msg: "Use 2-32 characters: lowercase letters, digits, dot, dash or underscore, starting with a letter."}
+	}
+	if strings.HasPrefix(username, store.AgentUsernamePrefix) {
+		return &ValidationError{Msg: "That username is reserved."}
 	}
 	return nil
 }

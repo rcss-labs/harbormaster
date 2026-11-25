@@ -126,6 +126,17 @@ func (a *Service) AuthenticateToken(ctx context.Context, raw, ip string) (store.
 	if err != nil {
 		return store.APIToken{}, store.User{}, err
 	}
+	// A person's token is as before. The agent identity authenticates only with a run token, and any other kind of user
+	// (or one this code does not know) with nothing.
+	switch user.Kind {
+	case store.UserKindHuman:
+	case store.UserKindAgent:
+		if parsed.Kind != apitoken.KindRun {
+			return store.APIToken{}, store.User{}, ErrUnauthenticated
+		}
+	default:
+		return store.APIToken{}, store.User{}, ErrUnauthenticated
+	}
 	if tok.LastUsedAt == nil || now.Sub(*tok.LastUsedAt) >= touchInterval {
 		err := a.store.TouchAPIToken(ctx, tok.ID, now, ip)
 		if errors.Is(err, store.ErrNotFound) {

@@ -127,7 +127,7 @@ func insertGrantToken(ctx context.Context, tx pgx.Tx, g OAuthGrant, t APIToken) 
 
 // CreateOAuthGrantWithTokens stores a grant and its first access and refresh tokens in one transaction. The tokens'
 // UserID and AuthSource are taken from the grant and their expiry is capped at the grant's. An empty AuthSource is
-// stored as "password". Returns ErrNotFound when the user is absent.
+// stored as "password". Returns ErrNotFound when the user is absent or is not a human: the agent identity holds no grant.
 func (s *Store) CreateOAuthGrantWithTokens(ctx context.Context, g OAuthGrant, access, refresh APIToken) (OAuthGrant, error) {
 	return s.CreateOAuthGrantWithTokensWithin(ctx, g, access, refresh, nil)
 }
@@ -143,7 +143,7 @@ func (s *Store) CreateOAuthGrantWithTokensWithin(ctx context.Context, g OAuthGra
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	locked, err := scanUser(tx.QueryRow(ctx, `select `+userColumns+` from users where id = $1 for update`, g.UserID))
+	locked, err := scanUser(tx.QueryRow(ctx, `select `+userColumns+` from users where id = $1 and kind = 'human' for update`, g.UserID))
 	if errors.Is(err, ErrNotFound) {
 		return OAuthGrant{}, ErrNotFound
 	}
@@ -238,7 +238,7 @@ func (s *Store) RotateOAuthRefreshWithin(ctx context.Context, publicID, secretHa
 	}
 	if maxLifetime != nil {
 		// Read without a lock: taking the user's lock after the grant's would invert the order revocation uses.
-		current, err := scanUser(tx.QueryRow(ctx, `select `+userColumns+` from users where id = $1`, grant.UserID))
+		current, err := scanUser(tx.QueryRow(ctx, `select `+userColumns+` from users where id = $1 and kind = 'human'`, grant.UserID))
 		if errors.Is(err, ErrNotFound) {
 			return OAuthGrant{}, ErrNotFound
 		}

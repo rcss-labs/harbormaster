@@ -97,6 +97,9 @@ func (s *Service) exchangeCode(ctx context.Context, req TokenRequest, now time.T
 	if err != nil {
 		return TokenResponse{}, serverError()
 	}
+	if user.Kind != store.UserKindHuman {
+		return TokenResponse{}, invalidGrant() // only a person holds an OAuth grant
+	}
 	subject, err := s.Store.LoadSubject(ctx, user.ID)
 	if errors.Is(err, store.ErrNotFound) {
 		return TokenResponse{}, invalidGrant()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/rcss-labs/harbormaster/internal/saml"
@@ -80,15 +81,16 @@ func (a *Service) PreviewSSO(ctx context.Context, id saml.Identity, cfg saml.Con
 func (a *Service) deriveUsername(ctx context.Context, id saml.Identity, cfg saml.Config) (string, error) {
 	var lookupErr error
 	username, err := saml.DeriveUsername(id, cfg, func(candidate string) bool {
-		_, err := a.store.GetUserByUsername(ctx, candidate)
-		if err == nil {
+		// The reserved prefix is off limits whether or not the identity exists yet, so a name is skipped, never created.
+		if strings.HasPrefix(candidate, store.AgentUsernamePrefix) {
 			return true
 		}
-		if !errors.Is(err, store.ErrNotFound) {
+		taken, err := a.store.UsernameTaken(ctx, candidate)
+		if err != nil {
 			lookupErr = err
 			return true // stop probing; the lookup error is returned below
 		}
-		return false
+		return taken
 	})
 	if lookupErr != nil {
 		return "", lookupErr
@@ -207,7 +209,7 @@ func (a *Service) startSSOSession(ctx context.Context, user store.User, id saml.
 // limit and lockout: a wrong password is recorded and audited like a failed password sign-in, and a
 // locked user is refused even with the right password. ip is the caller's address for that bookkeeping.
 func (a *Service) StartLink(ctx context.Context, userID int64, password, ip string) (store.User, error) {
-	user, err := a.store.GetUser(ctx, userID)
+	user, err := a.humanUser(ctx, userID)
 	if err != nil {
 		return store.User{}, err
 	}
@@ -240,7 +242,7 @@ func (a *Service) StartLink(ctx context.Context, userID int64, password, ip stri
 // Passwords are untouched. Failures are *saml.Error with ReasonSSOIdentityTaken, ReasonLinkUserGone or
 // ReasonLinkUserHasIdentity and are audited as sso_link_failed.
 func (a *Service) LinkSSO(ctx context.Context, userID int64, id saml.Identity, cfg saml.Config, ip string) (store.User, error) {
-	user, err := a.store.GetUser(ctx, userID)
+	user, err := a.humanUser(ctx, userID)
 	if errors.Is(err, store.ErrNotFound) {
 		return store.User{}, a.linkFailed(ctx, nil, ReasonLinkUserGone, id, ip)
 	}
