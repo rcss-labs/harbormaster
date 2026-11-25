@@ -11,7 +11,7 @@ Plans and applies run in your deployment system. Nothing below runs `terraform p
 | 1 | Ship the Harbormaster release with `HM_AGENT_URL` unset. Nothing changes | `GET /api/agent/status` answers `404`. There is no **Ask AI** button |
 | 2 | Run the agent module and add its `task_security_group_id` to the Harbormaster module's `alb_ingress_security_group_ids` | In the agent's ECS service, `runningCount` equals `desiredCount` and its target group has healthy targets (the `<name>-unhealthy-hosts` alarm exists only if you set `alarm_sns_topic_arns`) |
 | 3 | Set `HM_AGENT_URL` (module `extra_env`) and apply. All Harbormaster tasks that run the web or coordinator role must get it | **Settings > AI agent** shows **Reachable** |
-| 4 | Set a small allowance (for example a few dollars) first, because an allowance of 0 refuses the test. Then choose a model and run **Test model** | The test answers. Usage shows the call |
+| 4 | Set a small allowance first: several times what one question reserves (shown under the model in **Settings > AI agent**; for example $0.60 per question means $5 to $10), because an allowance of 0, or one below that figure, refuses the test. Then choose a model and run **Test model** | The test answers. Usage shows the call |
 | 5 | Turn on **AI chat** for yourself or a small group first. Ask the acceptance questions in section 2 | Section 2 |
 | 6 | Widen access. Watch spend for a week before you raise the allowance | Section 4 |
 
@@ -60,6 +60,7 @@ Status checks stop asking a dead agent for about ten seconds after a failure, so
 
 ## 4. The allowance and spend
 
+- **"The AI allowance is smaller than what one question can cost."** The allowance is below what one question reserves, so every question is refused although nothing was spent. **Settings > AI agent** shows the figure under the model ("One question reserves up to $X with this model") and warns when the allowance left is below it. Raise the allowance to several times that figure. Each refused question also leaves an `agent budget exhausted` warning in the Harbormaster log with the reservation and the amount left.
 - **"This month's AI allowance is used up."** An admin raises the allowance in **Settings > AI agent**, or waits for the next UTC month. A question needs room for its whole worst-case cost, so chat can refuse a question while some allowance is left. The worst case is the run's token limit at the model's higher price.
 - **Spend looks higher than the provider's bill.** Reservations and worst-case accounting keep the allowance firm. An interrupted question can be charged more than it used. Compare the usage table with the provider's own usage page.
 - **Spend rises fast.** Lower `limits.max_run_tokens` and `limits.max_steps`, remove an expensive model from the catalogue, or turn **AI chat** off for users. Remember that tool definitions use about 10,000 input tokens on every model call.
