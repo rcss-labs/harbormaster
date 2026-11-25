@@ -57,7 +57,12 @@ type RetentionConfig struct {
 	NotificationLog time.Duration
 	// Agent chat conversations, by last activity.
 	AgentConversations time.Duration
+	// Agent runs and automatic investigations, by age; this month's runs are never pruned.
+	AgentRuns time.Duration
 }
+
+// MinAgentRunsRetention is the shortest non-zero HM_RETENTION_AGENT_RUNS; the store enforces the same floor.
+const MinAgentRunsRetention = 48 * time.Hour
 
 // AnalyticsConfig toggles optional analytics collection.
 type AnalyticsConfig struct {
@@ -354,6 +359,7 @@ func Load(getenv func(string) string) (Config, error) {
 			ScanRuns:           reader.duration("HM_RETENTION_SCAN_RUNS", 720*time.Hour),
 			NotificationLog:    reader.duration("HM_RETENTION_NOTIFICATION_LOG", 720*time.Hour),
 			AgentConversations: reader.duration("HM_RETENTION_AGENT_CONVERSATIONS", 720*time.Hour),
+			AgentRuns:          reader.duration("HM_RETENTION_AGENT_RUNS", 2160*time.Hour),
 		},
 		Scan: ScanConfig{
 			Enabled:           reader.boolean("HM_SCAN_ENABLED", false),
@@ -432,6 +438,10 @@ func Load(getenv func(string) string) (Config, error) {
 		},
 	}
 
+	// A short retention would delete the audit trail of investigations an operator may still be reading.
+	if d := cfg.Retention.AgentRuns; d != 0 && d < MinAgentRunsRetention {
+		reader.fail("HM_RETENTION_AGENT_RUNS", "%s is too short: use 0 to keep everything or at least %s", d, MinAgentRunsRetention)
+	}
 	if reader.err != nil {
 		return Config{}, reader.err
 	}

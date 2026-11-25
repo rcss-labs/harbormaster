@@ -77,6 +77,7 @@ func TestLoad_Defaults(t *testing.T) {
 			ScanRuns:           720 * time.Hour,
 			NotificationLog:    720 * time.Hour,
 			AgentConversations: 720 * time.Hour,
+			AgentRuns:          2160 * time.Hour,
 		},
 		Scan: ScanConfig{
 			RoleName:    "harbormaster-scan",
@@ -1016,4 +1017,36 @@ func testCertPEM(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
+}
+
+func TestLoad_RetentionAgentRuns(t *testing.T) {
+	cfg, err := Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example"}))
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.Retention.AgentRuns != 2160*time.Hour {
+		t.Errorf("default Retention.AgentRuns = %v, want 2160h", cfg.Retention.AgentRuns)
+	}
+	cfg, err = Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example", "HM_RETENTION_AGENT_RUNS": "48h"}))
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.Retention.AgentRuns != 48*time.Hour {
+		t.Errorf("Retention.AgentRuns = %v, want 48h", cfg.Retention.AgentRuns)
+	}
+}
+
+func TestLoad_RetentionAgentRunsRefusesAShortValue(t *testing.T) {
+	for _, tc := range []struct {
+		raw   string
+		valid bool
+	}{{"1h", false}, {"47h59m", false}, {"1ns", false}, {"-48h", false}, {"48h", true}, {"0", true}, {"2160h", true}} {
+		_, err := Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example", "HM_RETENTION_AGENT_RUNS": tc.raw}))
+		if (err == nil) != tc.valid {
+			t.Errorf("HM_RETENTION_AGENT_RUNS=%s: err = %v, want valid = %v", tc.raw, err, tc.valid)
+		}
+		if err != nil && !strings.Contains(err.Error(), "HM_RETENTION_AGENT_RUNS") {
+			t.Errorf("HM_RETENTION_AGENT_RUNS=%s: message %q does not name the variable", tc.raw, err)
+		}
+	}
 }
