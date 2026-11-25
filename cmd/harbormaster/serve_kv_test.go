@@ -35,6 +35,7 @@ func startServeLogged(t *testing.T, extra map[string]string, logs io.Writer) str
 	for k, v := range extra {
 		env[k] = v
 	}
+	addr = env["HM_LISTEN"] // a test that must know the address beforehand passes its own
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() { done <- runServe(ctx, nil, func(k string) string { return env[k] }, logs) }()

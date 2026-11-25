@@ -229,3 +229,100 @@ func TestDevseed_NoAgentIdentityWithoutTheAgentDemo(t *testing.T) {
 		}
 	}
 }
+
+func reviewReceiverOptions(t *testing.T) []devseed.Option {
+	t.Helper()
+	box, err := secretbox.New("dev-session-key", secretbox.PurposeNotifySecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return []devseed.Option{devseed.WithAgentDemo(), devseed.WithReviewReceiver(box, "http://127.0.0.1:8480")}
+}
+
+// The demo starts with a weekly cost review over everything, on a route to the in-process receiver, and one finished
+// result with two pieces of evidence, so the reviews page is not empty. A restart adds nothing.
+func TestDevseed_ReviewDemo_SeedsAWeeklyCostReviewAndAFinishedRun(t *testing.T) {
+	ctx := t.Context()
+	st := storetest.Open(t)
+	opts := reviewReceiverOptions(t)
+	if err := devseed.Apply(ctx, st, true, opts...); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	settings, err := st.GetAgentSettings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := settings.RoleModels["reviewer"], (store.AgentModelRef{Provider: "fake", Model: "fake-1"}); got != want {
+		t.Errorf("reviewer model = %+v, want %+v", got, want)
+	}
+	reviews, err := st.ListReviews(ctx)
+	if err != nil || len(reviews) != 1 {
+		t.Fatalf("reviews = %+v, %v; want one", reviews, err)
+	}
+	review := reviews[0]
+	if review.Name != "Weekly cost" || review.Type != "cost" || !review.Enabled || review.Cadence != "weekly" || len(review.Scope) != 0 || len(review.RouteIDs) != 1 {
+		t.Fatalf("review = %+v, want an enabled weekly cost review over everything with one route", review)
+	}
+	route, err := st.GetNotificationRoute(ctx, review.RouteIDs[0])
+	if err != nil || route.Destination != notify.DestWebhook || !route.Enabled || route.Fallback || route.Investigate {
+		t.Fatalf("route = %+v, %v; want an enabled webhook route that is not a fallback", route, err)
+	}
+	runs, err := st.ListReviewRuns(ctx, store.ReviewRunFilter{Limit: 10})
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("runs = %+v, %v; want one", runs, err)
+	}
+	run := runs[0]
+	if run.State != store.InvestigationDone || run.Summary == "" || run.ReviewID == nil || *run.ReviewID != review.ID || run.FinishedAt == nil {
+		t.Fatalf("run = %+v, want a finished result of the review with a summary", run)
+	}
+	evidence, err := st.ListReviewRunEvidence(ctx, run.ID)
+	if err != nil || len(evidence) != 2 {
+		t.Fatalf("evidence = %+v, %v; want two items", evidence, err)
+	}
+
+	if err := devseed.Apply(ctx, st, true, opts...); err != nil {
+		t.Fatalf("second apply: %v", err)
+	}
+	again, err := st.ListReviewRuns(ctx, store.ReviewRunFilter{Limit: 10})
+	if err != nil || len(again) != 1 {
+		t.Fatalf("runs after a restart = %d, %v; want 1", len(again), err)
+	}
+	if reviews, err = st.ListReviews(ctx); err != nil || len(reviews) != 1 {
+		t.Fatalf("reviews after a restart = %d, %v; want 1", len(reviews), err)
+	}
+}
+
+// Without the receiver option (no session key) the model is seeded and no review is.
+func TestDevseed_ReviewDemo_NoReviewWithoutTheReceiver(t *testing.T) {
+	ctx := t.Context()
+	st := storetest.Open(t)
+	if err := devseed.Apply(ctx, st, true, devseed.WithAgentDemo()); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	settings, err := st.GetAgentSettings(ctx)
+	if err != nil || settings.RoleModels["reviewer"].Model != "fake-1" {
+		t.Fatalf("settings = %+v, %v; want the reviewer model", settings, err)
+	}
+	if reviews, err := st.ListReviews(ctx); err != nil || len(reviews) != 0 {
+		t.Fatalf("reviews = %+v, %v; want none", reviews, err)
+	}
+}
+
+// With the agent off nothing about reviews is seeded, even when a box is offered.
+func TestDevseed_ReviewDemo_NothingWithTheAgentOff(t *testing.T) {
+	ctx := t.Context()
+	st := storetest.Open(t)
+	box, err := secretbox.New("dev-session-key", secretbox.PurposeNotifySecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := devseed.Apply(ctx, st, true, devseed.WithReviewReceiver(box, "http://127.0.0.1:8480")); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if reviews, err := st.ListReviews(ctx); err != nil || len(reviews) != 0 {
+		t.Fatalf("reviews = %+v, %v; want none", reviews, err)
+	}
+	if routes, err := st.ListNotificationRoutes(ctx); err != nil || len(routes) != 0 {
+		t.Fatalf("routes = %+v, %v; want none", routes, err)
+	}
+}

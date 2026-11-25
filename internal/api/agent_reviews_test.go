@@ -175,8 +175,6 @@ func refused(t *testing.T, resp *http.Response) (code, field string) {
 	return out.Error.Code, out.Error.Field
 }
 
-func timePtr(t time.Time) *time.Time { return &t }
-
 type reviewRoute struct{ method, path string }
 
 // reviewRouteTable is every route of the reviews API; {id} paths use a number that need not exist (an admin boundary
@@ -330,7 +328,7 @@ func TestAgentReviews_ValidationTable(t *testing.T) {
 		{"long name", e.input(with("name", strings.Repeat("n", 81))), "invalid", "name", 422},
 		{"name with a line break", e.input(with("name", "two\nlines")), "invalid", "name", 422},
 		{"name with a separator", e.input(with("name", "two lines")), "invalid", "name", 422},
-		{"name that cleans to nothing", e.input(with("name", "​‍⁠")), "invalid", "name", 422},
+		{"name that cleans to nothing", e.input(with("name", "\u200b\u200d\u2060")), "invalid", "name", 422},
 		{"unknown type", e.input(with("type", "nonsense")), "invalid", "type", 422},
 		{"unknown cadence", e.input(withSchedule(map[string]any{"cadence": "hourly"})), "invalid", "schedule", 422},
 		{"minute out of range", e.input(withSchedule(map[string]any{"at_minute": 1440})), "invalid", "schedule", 422},
