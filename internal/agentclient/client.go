@@ -69,9 +69,10 @@ type Task struct {
 
 // TaskReview is what a review task asks for.
 type TaskReview struct {
-	Type   string `json:"type"`
-	Range  string `json:"range"`
-	Period string `json:"period"`
+	Type         string `json:"type"`
+	Range        string `json:"range"`
+	Period       string `json:"period"`
+	Instructions string `json:"instructions,omitempty"`
 }
 
 // TaskScope is the set of services a review covers.

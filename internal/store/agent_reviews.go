@@ -84,7 +84,10 @@ func invalidReview(format string, args ...any) error {
 
 // validateReview checks a definition before any SQL runs. It does not load the time zone: the API validates the
 // name and the schema stores the text.
-func validateReview(r Review) error {
+func validateReview(r Review) error { return validateReviewRules(r, true) }
+
+// validateReviewRules is validateReview; routesRequired false skips the count of routes (1 to 5) only.
+func validateReviewRules(r Review, routesRequired bool) error {
 	if n := utf8.RuneCountInString(r.Name); n < 1 || n > maxReviewNameRunes || !utf8.ValidString(r.Name) || strings.ContainsRune(r.Name, 0) {
 		return invalidReview("the name must be 1 to %d characters", maxReviewNameRunes)
 	}
@@ -106,7 +109,7 @@ func validateReview(r Review) error {
 	if r.Timezone == "" || !utf8.ValidString(r.Timezone) || strings.ContainsRune(r.Timezone, 0) {
 		return invalidReview("a time zone is required")
 	}
-	if len(r.RouteIDs) < 1 || len(r.RouteIDs) > maxReviewRoutes {
+	if routesRequired && (len(r.RouteIDs) < 1 || len(r.RouteIDs) > maxReviewRoutes) {
 		return invalidReview("a review needs 1 to %d routes", maxReviewRoutes)
 	}
 	if len(r.Scope) > maxReviewScopeEntries {
@@ -141,11 +144,11 @@ func validateReview(r Review) error {
 	return nil
 }
 
-// checkReview is validateReview plus the rules of the instructions: a custom review has text and every other type
+// checkReview is validateReviewRules plus the rules of the instructions: a custom review has text and every other type
 // has none, and the text is valid and at most 2000 characters. The store does no cleaning, scrubbing or hidden
 // character check; those belong to the API, and these are the backstop.
-func checkReview(r Review) error {
-	if err := validateReview(r); err != nil {
+func checkReview(r Review, routesRequired bool) error {
+	if err := validateReviewRules(r, routesRequired); err != nil {
 		return err
 	}
 	if (r.Type == ReviewTypeCustom) != (r.Instructions != "") {
@@ -312,7 +315,7 @@ func (s *Store) GetReview(ctx context.Context, id int64) (Review, error) {
 // returns ErrConflict, the 21st review ErrReviewLimit, a definition the rules refuse ErrReviewInvalid; nothing is
 // written then. A zero by records no user.
 func (s *Store) CreateReview(ctx context.Context, r Review, by int64) (Review, error) {
-	if err := checkReview(r); err != nil {
+	if err := checkReview(r, true); err != nil {
 		return Review{}, err
 	}
 	tx, err := s.Pool.Begin(ctx)
@@ -357,13 +360,32 @@ func (s *Store) CreateReview(ctx context.Context, r Review, by int64) (Review, e
 	return one[0], nil
 }
 
+// isSwitchOff reports whether next is the stored review with nothing changed but the switch turned off: an admin can
+// always do that, whatever became of the routes (PagerDuty, deleted, none) and the scope since it was saved.
+func isSwitchOff(stored, next Review) bool {
+	a, b := stored, next
+	if !a.Enabled || b.Enabled {
+		return false
+	}
+	return a.Name == b.Name && a.Type == b.Type && a.Cadence == b.Cadence && a.AtMinute == b.AtMinute && a.Weekday == b.Weekday &&
+		a.MonthDay == b.MonthDay && a.Timezone == b.Timezone && a.Version == b.Version &&
+		slices.Equal(a.Scope, b.Scope) && slices.Equal(sortedUnique(a.RouteIDs), sortedUnique(b.RouteIDs))
+}
+
 // UpdateReview replaces a review's fields, scope and routes when r.Version is still current and bumps the version.
 // A stale version or a name used by another review returns ErrConflict, a missing review ErrNotFound, a change of type
 // to or from custom ErrReviewTypeFixed. A change of the instructions raises the version and keeps the schedule. The schedule
 // time moves (schedule_changed_at = now) only when the cadence, minute, weekday, month day or zone changes or the
-// review goes from off to on.
+// review goes from off to on. An update that only turns an enabled review off (isSwitchOff) is checked for the route
+// count and the routes' destinations by nobody: it keeps what is stored.
 func (s *Store) UpdateReview(ctx context.Context, r Review, by int64) (Review, error) {
-	if err := checkReview(r); err != nil {
+	switchOff := false
+	if !r.Enabled {
+		if stored, err := s.GetReview(ctx, r.ID); err == nil {
+			switchOff = isSwitchOff(stored, r)
+		}
+	}
+	if err := checkReview(r, !switchOff); err != nil {
 		return Review{}, err
 	}
 	tx, err := s.Pool.Begin(ctx)
@@ -371,8 +393,10 @@ func (s *Store) UpdateReview(ctx context.Context, r Review, by int64) (Review, e
 		return Review{}, fmt.Errorf("update review: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
-	if err := checkReviewRoutes(ctx, tx, sortedUnique(r.RouteIDs)); err != nil {
-		return Review{}, err
+	if !switchOff {
+		if err := checkReviewRoutes(ctx, tx, sortedUnique(r.RouteIDs)); err != nil {
+			return Review{}, err
+		}
 	}
 	// Lock the row first: the type is read and the update written under the same lock.
 	var storedType string

@@ -396,3 +396,59 @@ func TestDeleteReview_KeepsItsRuns(t *testing.T) {
 		t.Fatalf("%d dependent rows left", n)
 	}
 }
+
+// An admin can always turn a review off (P3-R15): the update whose only change is enabled true to false keeps the
+// stored routes and scope whatever they became, and counts no route.
+func TestReview_TurningOffNeedsNoRoutes(t *testing.T) {
+	s, ctx := storetest.Open(t), context.Background()
+	good, pager := reviewRoute(t, s, "good"), reviewRoute(t, s, "soon-pager")
+	invExec(t, s, `update notification_routes set destination = 'pagerduty' where id = $1`, pager.ID)
+	a := mustReviewWithRoutesThenBreak(t, s, "a", good.ID, pager.ID)
+	off := a
+	off.Enabled = false
+	got, err := s.UpdateReview(ctx, off, 0)
+	if err != nil || got.Enabled || got.Version != 2 || len(got.RouteIDs) != 2 {
+		t.Fatalf("turn off with a PagerDuty route stored = %+v, %v; want off, version 2, both routes kept", got, err)
+	}
+
+	// Not the exception: still on, or anything else changed, or a route added.
+	b := mustReviewWithRoutesThenBreak(t, s, "b", good.ID, pager.ID)
+	same := b
+	if _, err := s.UpdateReview(ctx, same, 0); !errors.Is(err, store.ErrReviewInvalid) {
+		t.Errorf("saving it still on = %v, want ErrReviewInvalid", err)
+	}
+	renamed := b
+	renamed.Enabled, renamed.Name = false, "b2"
+	if _, err := s.UpdateReview(ctx, renamed, 0); !errors.Is(err, store.ErrReviewInvalid) {
+		t.Errorf("turning off and renaming = %v, want ErrReviewInvalid", err)
+	}
+	fewer := b
+	fewer.Enabled, fewer.RouteIDs = false, []int64{pager.ID}
+	if _, err := s.UpdateReview(ctx, fewer, 0); !errors.Is(err, store.ErrReviewInvalid) {
+		t.Errorf("turning off and dropping an allowed route = %v, want ErrReviewInvalid", err)
+	}
+
+	// Every route deleted: none left, and it can still be turned off, but not saved again off.
+	c := mustReview(t, s, newReview("c", good.ID))
+	if err := s.DeleteNotificationRoute(ctx, good.ID); err != nil {
+		t.Fatal(err)
+	}
+	c.RouteIDs, c.Enabled = nil, false
+	got, err = s.UpdateReview(ctx, c, 0)
+	if err != nil || got.Enabled || len(got.RouteIDs) != 0 {
+		t.Fatalf("turn off with no routes = %+v, %v", got, err)
+	}
+	if _, err := s.UpdateReview(ctx, got, 0); !errors.Is(err, store.ErrReviewInvalid) {
+		t.Errorf("saving an off review with no routes = %v, want ErrReviewInvalid", err)
+	}
+}
+
+// mustReviewWithRoutesThenBreak creates an enabled review on the routes as they are allowed now; the caller has made
+// one of them PagerDuty since, so the returned review is stored with a route it could not be saved with.
+func mustReviewWithRoutesThenBreak(t *testing.T, s *store.Store, name string, ids ...int64) store.Review {
+	t.Helper()
+	invExec(t, s, `update notification_routes set destination = 'email' where id = any($1)`, ids)
+	rv := mustReview(t, s, newReview(name, ids...))
+	invExec(t, s, `update notification_routes set destination = 'pagerduty' where id = $1`, ids[len(ids)-1])
+	return rv
+}

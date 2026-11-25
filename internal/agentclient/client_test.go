@@ -752,3 +752,69 @@ func TestCatalogue_ReviewTypesAndSupportsReview(t *testing.T) {
 		})
 	}
 }
+
+func TestRun_SendsACustomReviewTask(t *testing.T) {
+	var gotBody struct {
+		Task json.RawMessage `json:"task"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		writeLines(w, `{"type":"done"}`)
+	}))
+	defer srv.Close()
+	c, _ := New(srv.URL, "")
+	const text = "Compare spend per team.\nLeave out <b>staging</b> & sandbox accounts."
+	req := sampleRequest()
+	req.Role = "reviewer"
+	req.Task = &Task{
+		Kind:   "review",
+		Review: &TaskReview{Type: "custom", Range: "7d", Period: "2026-11-17 to 2026-11-24", Instructions: text},
+	}
+	if err := c.Run(context.Background(), "tok", req, func(Event) {}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	var task struct {
+		Review struct {
+			Type         string `json:"type"`
+			Instructions string `json:"instructions"`
+		} `json:"review"`
+	}
+	if err := json.Unmarshal(gotBody.Task, &task); err != nil {
+		t.Fatal(err)
+	}
+	if task.Review.Type != "custom" || task.Review.Instructions != text {
+		t.Errorf("review on the wire = %+v, want the instructions unchanged", task.Review)
+	}
+}
+
+func TestRun_BuiltInReviewTaskIsUnchanged(t *testing.T) {
+	var gotBody struct {
+		Task json.RawMessage `json:"task"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		writeLines(w, `{"type":"done"}`)
+	}))
+	defer srv.Close()
+	c, _ := New(srv.URL, "")
+	req := sampleRequest()
+	req.Role = "reviewer"
+	req.Task = &Task{
+		Kind:   "review",
+		Review: &TaskReview{Type: "cost", Range: "7d", Period: "2026-11-17 to 2026-11-24"},
+		Scope: &TaskScope{
+			Entries: []ScopeEntry{
+				{Kind: "tag", TagID: "t1", Name: "payments"},
+				{Kind: "account", AccountID: "123456789012", Region: "eu-west-1"},
+			},
+			ServicesTotal: 3,
+		},
+	}
+	if err := c.Run(context.Background(), "tok", req, func(Event) {}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	const want = `{"kind":"review","review":{"type":"cost","range":"7d","period":"2026-11-17 to 2026-11-24"},"scope":{"entries":[{"kind":"tag","tag_id":"t1","name":"payments"},{"kind":"account","account_id":"123456789012","region":"eu-west-1"}],"services_total":3}}`
+	if string(gotBody.Task) != want {
+		t.Errorf("task on the wire =\n%s\nwant\n%s", gotBody.Task, want)
+	}
+}

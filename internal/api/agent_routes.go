@@ -2,7 +2,7 @@ package api
 
 import "net/http"
 
-// agentRoutes registers the chat API, its admin settings and the investigation reads. Every route is session-only: none sets Token, so access tokens and run tokens
+// agentRoutes registers the chat API, its admin settings, the investigation reads and the review reads. Every route is session-only: none sets Token, so access tokens and run tokens
 // are refused with 403 token_not_allowed. serve registers them only while HM_AGENT_URL is set.
 func (s *Server) agentRoutes(mux *http.ServeMux) {
 	s.handle(mux, "GET /api/agent/status", s.agentStatus, routeOptions{})
@@ -18,5 +18,7 @@ func (s *Server) agentRoutes(mux *http.ServeMux) {
 	s.handle(mux, "GET /api/services/{serviceId}/investigations", s.listServiceInvestigations, routeOptions{})
 	s.handle(mux, "GET /api/investigations/{id}", s.getInvestigation, routeOptions{})
 	s.handle(mux, "GET /api/investigations/by-incident/{incidentId}", s.getIncidentInvestigation, routeOptions{})
+	s.handle(mux, "GET /api/reviews/runs", s.listReviewRuns, routeOptions{})
+	s.handle(mux, "GET /api/reviews/runs/{id}", s.getReviewRun, routeOptions{})
 	s.handle(mux, "POST /api/users/{id}/ai-chat", s.setUserAIChat, routeOptions{Admin: true})
 }
