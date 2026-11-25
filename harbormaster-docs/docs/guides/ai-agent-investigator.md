@@ -24,7 +24,7 @@ An alert that has no service, such as an unreachable account, starts no investig
 
 ### Group alerts
 
-A cluster or account entry that aggregates several services is investigated as one subject. Harbormaster records up to 50 services of the group as they were when it was requested. For a cluster or account alert, Harbormaster does not send the alert's own title and text. It writes them anew: the place (the cluster name, or the account id and region, never a display name), the counts from the alert (for example "2 of 5 services failing", which may include services the identity cannot see, or "unreachable"), and a list of the services that were failing when the alert was raised and that the agent identity may View now, at most ten, then "and K more". The AWS error text in the alert is not sent. The subject also carries the ids of up to 20 of those visible services; an id contains the service's name. The names of services the identity may not View are never sent. An account entry that has no region is not investigated (`not_visible`).
+A cluster or account entry that aggregates several services is investigated as one subject. Harbormaster records up to 50 services of the group as they were when it was requested. For a cluster or account alert, Harbormaster does not send the alert's own title and text. It writes them anew: the place (the cluster name, or the account id and region, never a display name), the counts from the alert (for example "2 of 5 services failing", which may include services the identity cannot see, or "unreachable"), and a list of the services that were failing when the alert was raised and that the agent identity may View now, at most ten, then "and K more". The AWS error text in the alert is not sent. The subject also carries the ids of up to 20 of those visible services; an id contains the service's name. The names of services the identity may not View are never sent. An account entry that has no region is not investigated (`not_visible`). The subject of an account alert has no cluster field, only the account id and region; a cluster alert's subject has the cluster. If the stored title does not end in the counts ("2 of 5 services failing" or "unreachable"), the title Harbormaster writes is "<place>: services failing". A service whose id is longer than 512 bytes is skipped: it is neither listed nor sent.
 
 ## Turn it on
 
@@ -37,12 +37,12 @@ Investigations need the AI agent (`HM_AGENT_URL`), an allowance, a model for inv
 
 Check it worked: when an alert opens on a service the agent can see, **Needs attention** on the Overview shows **Investigating**, then **Diagnosis ready**. Select it to read the investigation. Settings, AI agent lists every investigation with its state and cost.
 
-To turn it off, clear the switch on the routes, unset `HM_AGENT_URL`, or set `HM_AGENT_INVESTIGATIONS_PER_HOUR=0`. See the [runbook](../operations/runbooks/ai-agent.md#11-turn-investigations-off).
+To turn it off, clear the switch on the routes, unset `HM_AGENT_URL`, or set `HM_AGENT_INVESTIGATIONS_PER_HOUR=0`. Unsetting `HM_AGENT_URL` or setting the cap to `0` does not clear the switches: they stay on, and when the agent is set again the routes investigate again, and spend, at once. See the [runbook](../operations/runbooks/ai-agent.md#11-turn-investigations-off).
 
 ## What you see
 
 - **Overview.** An alert with an investigation shows its state as a link: **Investigating**, **Diagnosis ready**, or one of the sentences below.
-- **Service timeline.** Investigations appear as markers on the timeline. The investigation's service link opens `/services/<service-id>/timeline?investigation=<id>`. A Diagnosis message links to `/investigations/<id>`.
+- **Service timeline.** Investigations appear as markers on the timeline. The investigation's service link opens `/services/<service-id>/timeline?investigation=<id>`. A Diagnosis message links to `/investigations/<id>`. The Opened event sent to PagerDuty for a route with the switch on links to `/investigations/incident/<incident id>`, which shows that alert's investigation once it exists.
 - **Investigation page.** `/investigations/<id>` shows what it is about, the alert, the state, the summary and the evidence. The summary is plain text: no links, formatting or images. It carries the caption "Written by AI from what its identity may read. Check it before acting."
 - **Settings > AI agent.** Admins see every investigation, newest first, with state, subject, time and cost. After a retry, the cost is that of the last attempt only; the month's total under usage is complete.
 
@@ -84,12 +84,12 @@ Harbormaster checks every summary and note before it is stored, and again before
 It replaces the whole text with a fixed sentence ("The investigation finished. Open it in Harbormaster to read the findings.") when the summary:
 
 - is empty, longer than 1200 characters, or not valid text;
-- contains hidden or direction-changing characters (zero-width and bidi characters), including a zero-width joiner. This also withholds some summaries in Persian and Sinhala and some emoji. Such a summary is refused, never shown with the character removed;
+- contains a character a reader cannot see or that reorders text: control characters other than line feed and tab, every Unicode format character (zero-width, bidi and tag characters, including the zero-width joiner), variation selectors (including the one that follows many emoji) and fillers. This also withholds some summaries in Persian and Sinhala and some emoji. Such a summary is refused, never shown with the character removed. In stored evidence excerpts, control, bidi and tag characters become spaces instead;
 - contains image markup;
 - is changed by the secret scrubber, which means it looks like it contains a secret;
-- repeats 32 or more characters in a row, ignoring case and punctuation, of text the agent read in that run.
+- repeats a run of text the agent read in that run, ignoring case and punctuation: 32 or more characters of a log message, an environment variable value, a command or entry point of a task definition, or anything Harbormaster has not listed (error texts, labels attached to a container, log options beyond the standard ones, an answer cut by the read cap), or 80 or more characters of the other values it lists (a status sentence, an image reference, a label, a name). A summary may therefore hold up to 79 characters in a row of one listed value. The names of the investigated service and cluster may be repeated in the summary, not in notes.
 
-A note that fails the same checks becomes "See the excerpt." Links to anywhere other than your own Harbormaster address are replaced with `[link removed]` when a message is sent. Over-removal is accepted: some harmless link-like text may be removed too.
+A note that fails the same checks becomes "See the excerpt." Links to anywhere other than your own Harbormaster address are replaced with `[link removed]` when a message is sent. The unit that is replaced is a whole word between spaces, so in a script written without spaces (Chinese, Japanese, Thai) a link takes the text it touches with it, up to the next space: possibly a whole sentence. Over-removal is accepted: some harmless link-like text may be removed too.
 
 This is best effort:
 
@@ -106,7 +106,7 @@ The investigator does not borrow anyone's access. It runs as the agent identity,
 
 - Its access is the tags an admin chose in **Settings > AI agent**, View or View and logs, and nothing else. It starts with none.
 - It cannot sign in by password or SSO, hold a session, personal or OAuth token, or be an admin. It cannot Operate, Deploy, Edit, open a terminal or accept risk. It is not in the Users list and has no AI chat flag.
-- Its requests are limited to `HM_AGENT_IDENTITY_RATE_PER_SECOND` (5 a second, with a burst of 60 times that) and its log searches to `HM_AGENT_IDENTITY_LOG_SEARCH_MAX_GB` (2 GiB a search) and `HM_AGENT_IDENTITY_LOG_SEARCH_DAILY_GB` (20 GiB a UTC day). Log searches run in your AWS accounts and use CloudWatch Logs Insights, which AWS bills by data scanned.
+- Its requests are limited to `HM_AGENT_IDENTITY_RATE_PER_SECOND` (5 a second, with a burst of 60 times that) and its log searches to `HM_AGENT_IDENTITY_LOG_SEARCH_MAX_GB` (2 GiB a search) and `HM_AGENT_IDENTITY_LOG_SEARCH_DAILY_GB` (20 GiB a UTC day). Log searches run in your AWS accounts and use CloudWatch Logs Insights, which AWS bills by data scanned. The identity is one user, so it has one log-search slot, shared by all its runs: a search started while another investigation's search is running is refused, and that run carries on without it.
 - Changes to its access are audited as `agent_identity_update`. Each investigation run is audited as `agent_run` with the identity as actor.
 
 See [Permissions reference](../reference/permissions.md#the-agent-identity).
@@ -115,7 +115,7 @@ See [Permissions reference](../reference/permissions.md#the-agent-identity).
 
 For each investigation, the following go to the provider of the investigator model:
 
-- the instructions, the subject (the account, region, cluster and service of a service alert; for a group alert, its account id, region and cluster, and the ids, which contain the names, of up to 20 services the identity may View), and the alert's kind and opening time. For a service alert, its title and text go as stored. For a group alert, they are the ones Harbormaster writes anew (see [Group alerts](#group-alerts)). All of it passes secret scrubbing and a length cut;
+- the instructions, the subject (the account, region, cluster and service of a service alert; for a group alert, its account id and region (and the cluster, for a cluster alert), and the ids, which contain the names, of up to 20 services the identity may View), and the alert's kind and opening time. For a service alert, its title and text go as stored. For a group alert, they are the ones Harbormaster writes anew (see [Group alerts](#group-alerts)). All of it passes secret scrubbing and a length cut;
 - the tool definitions, and the scrubbed results of the tools the agent called, including log lines if the identity has Logs.
 
 Environment values in task definitions are redacted unless an admin lifted that for the provider, as for the chat. `HM_TOKEN_REDACT_ENV=true` overrides the lift. Secret-looking values are always redacted, best effort. The provider keeps what it keeps under its own terms. Because nobody asks for these runs, check the provider terms before you set the investigator model, and prefer a provider inside your own AWS account (Amazon Bedrock) for sensitive estates.
@@ -139,7 +139,7 @@ Investigations are deleted `HM_RETENTION_AGENT_RUNS` after they finish (90 days 
 - **One allowance.** Investigations spend from the monthly allowance that the chat uses. When it is used up, investigations are skipped as `budget` and the chat refuses questions too. A storm of alerts can use up an allowance that you meant for the chat. Watch spend, and see the [runbook](../operations/runbooks/ai-agent.md#10-an-alert-storm).
 - **Worst case is reserved.** Before a run starts, Harbormaster reserves its worst case (the run's token limit at the model's higher price). A run that might overspend is refused, and runs that start together cannot overspend together. An interrupted run can be charged more than it used.
 - **At most two runs per investigation:** the first, and one retry.
-- **Counts.** `HM_AGENT_INVESTIGATIONS_PER_HOUR` (20) caps starts in an hour, `HM_AGENT_INVESTIGATIONS_CONCURRENT` (2) caps parallel runs, and a request that waits longer than `HM_AGENT_INVESTIGATION_MAX_WAIT` (15 minutes) before its first start is skipped as `expired`. The hourly cap can overshoot by up to the number of parallel runs. These are counts, not spending limits: the allowance is the spending limit.
+- **Counts.** `HM_AGENT_INVESTIGATIONS_PER_HOUR` (20) caps starts in an hour, `HM_AGENT_INVESTIGATIONS_CONCURRENT` (2) caps parallel runs, and a request that waits longer than `HM_AGENT_INVESTIGATION_MAX_WAIT` (15 minutes) before its first start is skipped as `expired`. The hourly cap is checked once, before an investigation's first start: a retry of an investigation that already started is not counted again and is not held back by it (only `0` stops it). The hourly cap can overshoot by up to the number of parallel runs. These are counts, not spending limits: the allowance is the spending limit.
 - **A run has the agent's per-run limits** (steps, tokens and time, set on the agent service). A run that ends without a summary fails as `limit_reached`.
 - **Log search** by the identity uses CloudWatch Logs Insights in your accounts, within the limits above.
 

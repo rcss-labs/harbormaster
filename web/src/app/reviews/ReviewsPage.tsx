@@ -1,10 +1,9 @@
 import { Link } from 'react-router'
-import { useReviewRuns } from '../../api/reviews'
+import { useReviewResultsEnabled, useReviewRuns } from '../../api/reviews'
 import { Ago } from '../../components/Ago'
 import { EmptyState } from '../../components/EmptyState'
 import { Panel } from '../../components/Panel'
 import { Pill } from '../../components/Pill'
-import { useAuth } from '../auth/AuthProvider'
 import { useCrumbs } from '../shell/crumbs'
 import { firstLine } from '../investigations/InvestigationList'
 import { reviewPillKind, reviewStateText, reviewTypeLabel } from './reviewStateText'
@@ -12,10 +11,10 @@ import styles from './reviews.module.css'
 
 /** `/reviews`: the results the reader may read, newest first. Names and summaries are plain text nodes. */
 export function ReviewsPage() {
-  const { me } = useAuth()
+  const enabled = useReviewResultsEnabled()
   const query = useReviewRuns()
   useCrumbs([['Reviews']])
-  if (!me?.reviews_enabled) return <p>Page not found.</p>
+  if (!enabled) return <p>Page not found.</p>
 
   const rows = query.data?.pages.flatMap((page) => page.items) ?? []
   return (

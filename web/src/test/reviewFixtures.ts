@@ -33,11 +33,12 @@ export const toReviewListItem = (detail: ReviewRunDetailDTO): ReviewRunDTO => {
   return item as ReviewRunDTO
 }
 
-/** Turns reviews on (or off) for the signed-in admin and serves the two review routes. Returns the URLs requested. */
-export function mockReviews(details: ReviewRunDetailDTO[] = [REVIEW_RUN_DONE], reviewsEnabled = true, pageSize = 50) {
+/** Turns reviews on (or off) for the signed-in admin and serves the two review routes. Returns the URLs requested.
+ *  The agent is on when reviews are, unless `agentEnabled` says otherwise: reviews can be off while it is on. */
+export function mockReviews(details: ReviewRunDetailDTO[] = [REVIEW_RUN_DONE], reviewsEnabled = true, pageSize = 50, agentEnabled = reviewsEnabled) {
   const requested: string[] = []
   server.use(
-    http.get('/api/me', () => HttpResponse.json({ ...ME_ADMIN, agent_enabled: reviewsEnabled, reviews_enabled: reviewsEnabled })),
+    http.get('/api/me', () => HttpResponse.json({ ...ME_ADMIN, agent_enabled: agentEnabled, reviews_enabled: reviewsEnabled })),
     http.get('/api/reviews/runs/:id', ({ request, params }) => {
       requested.push(new URL(request.url).pathname)
       const found = details.find((detail) => String(detail.id) === params.id)

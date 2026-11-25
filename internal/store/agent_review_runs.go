@@ -123,8 +123,8 @@ func collectReviewRuns(rows pgx.Rows) ([]ReviewRun, error) {
 // RecordDueReviewRuns is the only writer of scheduled review runs. In one transaction, serialised by an advisory
 // lock, it re-reads each entry's review and inserts a row only when the review exists, is enabled, is still at the
 // entry's version and its schedule changed before the occurrence. A row already recorded for the review and period
-// is left alone, however many callers send it. A missed entry is recorded as skipped (reason missed, finished now),
-// the others as requested. created counts the rows inserted.
+// is left alone, however many callers send it, and takes no run id. A missed entry is recorded as skipped (reason
+// missed, finished now), the others as requested. created counts the rows inserted.
 func (s *Store) RecordDueReviewRuns(ctx context.Context, due []DueReview, now time.Time) (created int, err error) {
 	if len(due) == 0 {
 		return 0, nil
@@ -153,6 +153,7 @@ func (s *Store) RecordDueReviewRuns(ctx context.Context, due []DueReview, now ti
 			       $7::timestamptz, case when $6 then $7::timestamptz else null end
 			from agent_reviews r
 			where r.id = $1 and r.enabled and r.version = $2 and r.schedule_changed_at < $5
+			  and not exists (select 1 from agent_review_runs x where x.review_id = r.id and x.period_key = $3)
 			for share of r
 			on conflict (review_id, period_key) where review_id is not null do nothing`,
 			d.ReviewID, d.Version, d.PeriodKey, d.PeriodLabel, d.ScheduledFor, d.Missed, now)

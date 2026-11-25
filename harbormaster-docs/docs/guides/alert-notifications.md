@@ -59,7 +59,8 @@ A diagnosis is sent when all of these hold:
 - the route is on, has the switch on, and is not PagerDuty;
 - the Opened message of that alert was delivered to the route;
 - the investigation finished with a summary;
-- the alert has not resolved.
+- the alert has not resolved;
+- the later of the investigation's end and the Opened message's delivery is within `HM_AGENT_INVESTIGATION_WINDOW` (15 minutes by default) of now. A short window means a slow investigation, or an Opened message held through quiet hours and sent late, can finish too late: the investigation is stored and readable, but no Diagnosis is sent. A longer window sends later diagnoses, but also lets alerts that share an investigation span more time.
 
 If the alert resolves first, the investigation is still stored and readable, but no Diagnosis is sent, and one already waiting is cancelled. A route whose switch is turned off or that is deleted before the send gets nothing. Other routes are unaffected. A Diagnosis for a warning follows the route's quiet hours (warnings are held until 08:00 when **Hold warnings** is on); critical ones are never held. It appears in the delivery log as **Diagnosis**, is retried like other messages, and does not count toward the route's "last three deliveries failed" warning.
 

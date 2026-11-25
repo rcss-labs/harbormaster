@@ -27,6 +27,9 @@ var (
 		`{"service_id":"` + paymentsID + `","service":"payments-worker","monthly":80}]},` +
 		`"spot":{"services":[]},"arm64":{"services":[]},"polled_at":"2026-11-25T09:30:00Z"}`
 
+	// namedBody names the long service in a member no rule names too, so the name is text of the strict class.
+	namedBody = strings.Replace(costBody, `"note":"`+copiedLine, `"note":"`+longService, 1)
+
 	reviewSummary = "Spend is 4821.50 for the week. The largest cost is " + longService + ". Most can be saved by making it smaller."
 )
 
@@ -308,11 +311,11 @@ func TestReviewer_LongServiceNameInTheSummaryIsKept(t *testing.T) {
 	if len(longService) <= agentresult.VerbatimRun {
 		t.Fatal("the name is too short to be noticed")
 	}
-	res := reviewed(t, costBody, submitCall(reviewSummary, map[string]any{"ref": "e1", "note": "It is " + longService}))
+	res := reviewed(t, namedBody, submitCall(reviewSummary, map[string]any{"ref": "e1", "note": "It is " + longService}))
 	if res.Summary != reviewSummary || res.SummaryReplaced {
 		t.Errorf("result = %+v", res)
 	}
-	// Notes stay strict.
+	// No name is exempt in a note.
 	if len(res.Evidence) != 1 || res.Evidence[0].Note != agentresult.ReplacementNote {
 		t.Errorf("evidence = %+v", res.Evidence)
 	}
@@ -344,9 +347,63 @@ func TestReviewer_LongServiceNameInTheSummaryIsKept(t *testing.T) {
 
 func TestInvestigator_LongNameStillReplaces(t *testing.T) {
 	p := fake.New(calls(costCall("c1")), calls(submitCall(reviewSummary)))
-	res := requireResult(t, investigate(t, newLoop(p, replies(map[string]string{"get_cost_analytics": costBody})), p, investigatorInput()))
+	res := requireResult(t, investigate(t, newLoop(p, replies(map[string]string{"get_cost_analytics": namedBody})), p, investigatorInput()))
 	if !res.SummaryReplaced || res.Summary != agentresult.ReplacementSummary {
 		t.Errorf("result = %+v", res)
+	}
+}
+
+// A name over the loose run, in members that are loose only: the same rules hold for it there.
+func TestReviewer_ANameOverTheLooseRun(t *testing.T) {
+	name := longService + "-" + longService // 97 characters
+	if len(name) < agentresult.LooseRun || len(name) > 128 {
+		t.Fatalf("setup: %d characters", len(name))
+	}
+	id := model.ServiceKey{ClusterKey: prodCluster, Service: name}.ID()
+	named := strings.NewReplacer(longServiceID, id, longService, name)
+	body, summary := named.Replace(costBody), named.Replace(reviewSummary)
+	res := reviewed(t, body, submitCall(summary, map[string]any{"ref": "e1", "note": "It is " + name}))
+	if res.Summary != summary || res.SummaryReplaced {
+		t.Errorf("summary = %q", res.Summary)
+	}
+	if len(res.Evidence) != 1 || res.Evidence[0].ServiceID != id || res.Evidence[0].Note != agentresult.ReplacementNote {
+		t.Errorf("evidence = %+v", res.Evidence)
+	}
+	p := fake.New(calls(costCall("c1")), calls(submitCall(summary)))
+	res = requireResult(t, investigate(t, newLoop(p, replies(map[string]string{"get_cost_analytics": body})), p, investigatorInput()))
+	if !res.SummaryReplaced || res.Summary != agentresult.ReplacementSummary {
+		t.Errorf("an investigator: result = %+v", res)
+	}
+}
+
+func TestReviewer_TheToolDecidesHowLongACopyMayBe(t *testing.T) {
+	text := "the order ledger refused a new connection"
+	summary := "It seems the order ledger refused a new connection today."
+	for name, c := range map[string]struct {
+		tool, body string
+		replaced   bool
+	}{
+		"a stop reason":         {"get_reliability_analytics", `{"least_available":{"rows":[{"top_reason":"` + text + `"}]}}`, false},
+		"a tag's label":         {"get_cost_analytics", `{"by_tag":[{"label":"` + text + `"}]}`, false},
+		"a log line":            {"get_reliability_analytics", `{"lines":[{"message":"` + text + `"}]}`, true},
+		"a scan's error":        {"list_security", `{"images":[{"failure_detail":"` + text + `"}]}`, true},
+		"an environment value":  {"get_task_definition", `{"definition":{"containerDefinitions":[{"environment":[{"name":"A","value":"` + text + `"}]}]}}`, true},
+		"a command":             {"get_revision", `{"definition":{"containerDefinitions":[{"command":["` + text + `"]}]}}`, true},
+		"a member nobody named": {"get_cost_analytics", `{"message":"` + text + `"}`, true},
+		"text that is not JSON": {"get_cost_analytics", text, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			args := map[string]map[string]any{"get_task_definition": {"service_id": checkoutID}, "get_revision": {"service_id": checkoutID, "revision": 7}}[c.tool]
+			p := fake.New(calls(provider.ToolCall{ID: "c1", Name: c.tool, Arguments: args}), calls(submitCall(summary)))
+			runner := replies(map[string]string{c.tool: c.body})
+			res := requireResult(t, investigate(t, newLoop(p, runner), p, reviewerInput()))
+			if len(runner.Calls()) != 1 {
+				t.Fatal("the tool was not run")
+			}
+			if res.SummaryReplaced != c.replaced || (c.replaced && res.Summary != agentresult.ReplacementReviewSummary) {
+				t.Errorf("replaced = %v: %q", res.SummaryReplaced, res.Summary)
+			}
+		})
 	}
 }
 
@@ -662,5 +719,27 @@ func TestFake_DemoReviewerEveryType(t *testing.T) {
 	res = requireResult(t, investigate(t, newLoop(p, replies(map[string]string{"get_service": serviceBody})), p, investigatorInput()))
 	if len(res.Evidence) != 1 || res.Evidence[0].Tool != "get_service" {
 		t.Errorf("investigator: %+v", res)
+	}
+}
+
+// What submit_result says names what the run is doing. An investigator's words are the ones it always had.
+func TestSubmitResult_WordsNameTheKindOfRun(t *testing.T) {
+	for noun, in := range map[string]RunInput{"investigation": investigatorInput(), "review": reviewerInput()} {
+		p := fake.New(
+			calls(costCall("c1"), submitCall(nil)),
+			fake.Text("Costs rose.", smallUsage), fake.Text("They rose.", smallUsage),
+		)
+		events := investigate(t, newLoop(p, &recordingRunner{}), p, in)
+		tools := requestAt(t, p, 0).Tools
+		if got, want := tools[len(tools)-1].Description, "Finish the "+noun+" with your conclusion and the evidence for it. Call it once, alone: nothing runs after it. "+
+			"The text of each piece of evidence is taken from what you read; you only name it."; got != want {
+			t.Errorf("%s: description %q, want %q", noun, got, want)
+		}
+		if got, want := resultText(t, requestAt(t, p, 1), "c1"), "This tool was not run: submit_result ends the "+noun+", so call it alone."; !strings.Contains(got, want) {
+			t.Errorf("%s: the call beside submit_result was answered with %q, want %q", noun, got, want)
+		}
+		if got, want := events[len(events)-1].Message, "The "+noun+" ended without a result."; got != want {
+			t.Errorf("%s: ended with %q, want %q", noun, got, want)
+		}
 	}
 }

@@ -460,8 +460,8 @@ func TestJob_AgentBusyDoesNotUseAnAttempt(t *testing.T) {
 
 func TestJob_ConcurrencyNeverAboveTheSetting(t *testing.T) {
 	f := newFixture(t)
-	release := make(chan struct{})
-	f.agent.set(func(c *call) { <-release; c.send(goodRun("Fine.")...) })
+	released, release := gate(t)
+	f.agent.set(func(c *call) { <-released; c.send(goodRun("Fine.")...) })
 	for range 5 {
 		f.request("checkout-api")
 	}
@@ -474,7 +474,7 @@ func TestJob_ConcurrencyNeverAboveTheSetting(t *testing.T) {
 	if n := f.agent.count(); n != 2 {
 		t.Errorf("%d runs at once, want 2", n)
 	}
-	close(release)
+	release()
 	f.wait("all five", func() bool { return len(f.audit()) == 5 && !f.anyRunning() })
 	stop()
 	if f.agent.most != 2 {
@@ -567,10 +567,10 @@ func TestJob_CrashAfterClaimIsReclaimedAfterTheLease(t *testing.T) {
 func TestJob_PausedHolderCannotOverwriteTheResult(t *testing.T) {
 	f := newFixture(t)
 	id := f.request("checkout-api")
-	resume := make(chan struct{})
+	resumed, resume := gate(t)
 	f.agent.set(func(c *call) {
 		c.send(usage(600))
-		<-resume
+		<-resumed
 		c.send(resultEvent(agentresult.Result{Summary: "From the paused holder."}), doneEvent)
 	})
 	stop := f.start(f.runner)
@@ -582,7 +582,7 @@ func TestJob_PausedHolderCannotOverwriteTheResult(t *testing.T) {
 	stopSecond := f.start(f.newRunner(second))
 	f.wait("the new holder to finish", func() bool { return f.inv(id).State == "done" })
 	stopSecond()
-	close(resume)
+	resume()
 	f.wait("the paused holder to end", func() bool { return strings.Count(f.logs.String(), `"outcome":"done"`) >= 2 })
 	stop()
 	if v := f.inv(id); v.Summary != "From the new holder." || v.State != "done" {

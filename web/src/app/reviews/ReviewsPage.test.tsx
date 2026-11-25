@@ -47,7 +47,16 @@ describe('ReviewsPage', () => {
     expect(await screen.findByText('No review results yet.')).toBeInTheDocument()
   })
 
-  it('no request when reviews are off', async () => {
+  it('lists the stored results and opens one while reviews are off and the agent is on', async () => {
+    mockReviews([REVIEW_RUN_DONE], false, 50, true)
+    const user = userEvent.setup()
+    renderApp('/reviews')
+
+    await user.click(await screen.findByRole('link', { name: REVIEW_RUN_DONE.name }))
+    expect(await screen.findByText('Fargate hours doubled.')).toBeInTheDocument()
+  })
+
+  it('no request when the agent is off', async () => {
     const requested = mockReviews([REVIEW_RUN_DONE], false)
     renderApp('/reviews')
 

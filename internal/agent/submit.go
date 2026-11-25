@@ -11,12 +11,11 @@ import (
 // it is in no tool table and never reaches Harbormaster.
 const submitTool = "submit_result"
 
-const notRunBesideSubmit = "This tool was not run: submit_result ends the investigation, so call it alone."
-
-func submitToolDef() provider.ToolDef {
+// submitToolDef describes submit_result to a run of the given kind.
+func submitToolDef(kind string) provider.ToolDef {
 	return provider.ToolDef{
 		Name: submitTool,
-		Description: "Finish the investigation with your conclusion and the evidence for it. Call it once, alone: nothing runs after it. " +
+		Description: "Finish the " + kind + " with your conclusion and the evidence for it. Call it once, alone: nothing runs after it. " +
 			"The text of each piece of evidence is taken from what you read; you only name it.",
 		InputSchema: map[string]any{
 			"type": "object",
@@ -120,9 +119,9 @@ func parseSubmission(call provider.ToolCall) (sub submission, problem string) {
 // checked summary and notes; the rest comes from units. A reference that is not
 // a unit the model was shown, or is repeated, is dropped. replacement stands in for
 // a summary that failed its check.
-func buildResult(sub submission, units map[string]citedUnit, corpus *agentresult.Corpus, replacement string) agentresult.Result {
+func buildResult(sub submission, units map[string]citedUnit, corpus *agentresult.ReadCorpus, replacement string) agentresult.Result {
 	result := agentresult.Result{Evidence: []agentresult.Evidence{}}
-	result.Summary, result.SummaryReplaced = agentresult.CheckSummaryAs(sub.summary, corpus, replacement)
+	result.Summary, result.SummaryReplaced = agentresult.CheckReadSummaryAs(sub.summary, corpus, replacement)
 	cited := map[string]bool{}
 	for _, c := range sub.evidence {
 		unit, known := units[c.ref]
@@ -133,7 +132,7 @@ func buildResult(sub submission, units map[string]citedUnit, corpus *agentresult
 		cited[c.ref] = true
 		result.Evidence = append(result.Evidence, agentresult.Evidence{
 			Tool: unit.tool, ServiceID: unit.serviceID, Action: unit.action,
-			Note: agentresult.CheckNote(c.note, corpus), Excerpt: unit.excerpt,
+			Note: agentresult.CheckReadNote(c.note, corpus), Excerpt: unit.excerpt,
 		})
 	}
 	return result
@@ -162,7 +161,7 @@ func (r *session) refuse(call provider.ToolCall, problem string) (provider.Messa
 	if tool, known := r.lookupTool(call.Name); known {
 		name = tool.Name
 	}
-	return r.resultMessage(call, name, notRunBesideSubmit, true)
+	return r.resultMessage(call, name, "This tool was not run: submit_result ends the "+r.kind()+", so call it alone.", true)
 }
 
 // remind prepares the one reminder turn after a reply without a tool call, or
@@ -174,7 +173,7 @@ func (r *session) remind(resp provider.Response) (again bool) {
 		if resp.StopReason == "max_tokens" {
 			r.stop("The reply was cut short by the output limit.")
 		} else {
-			r.fail("no_result", "The investigation ended without a result.")
+			r.fail("no_result", "The "+r.kind()+" ended without a result.")
 		}
 		return false
 	}
