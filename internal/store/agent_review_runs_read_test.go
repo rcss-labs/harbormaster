@@ -15,9 +15,9 @@ func seedReadableRun(t *testing.T, s *store.Store, typ, state string, test bool,
 	t.Helper()
 	var id int64
 	if err := s.Pool.QueryRow(context.Background(), `insert into agent_review_runs
-		(review_name, review_type, period_key, period_label, scheduled_for, manual, state, requested_at, finished_at, covered_tags, test)
+		(review_name, review_type, period_key, period_label, scheduled_for, manual, state, requested_at, finished_at, covered_tags, test, delivery_planned_at)
 		values ('r', $1, 'x:' || gen_random_uuid()::text, 'l', $4::timestamptz, $3, $2, $4::timestamptz,
-		 case when $2::text in ('done', 'failed', 'skipped') then $4::timestamptz end, '{7}', $3)
+		 case when $2::text in ('done', 'failed', 'skipped') then $4::timestamptz end, '{7}', $3, case when $3 then $4::timestamptz end)
 		returning id`, typ, state, test, at).Scan(&id); err != nil {
 		t.Fatal(err)
 	}

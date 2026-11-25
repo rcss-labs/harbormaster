@@ -41,9 +41,9 @@ func (e *invEnv) seedRun(t *testing.T, s reviewSeed) int64 {
 	var id int64
 	err := e.st.Pool.QueryRow(t.Context(), `insert into agent_review_runs
 		(review_name, review_type, period_key, period_label, scheduled_for, state, summary, summary_replaced, covered_tags,
-		 services_total, scope_label, requested_at, finished_at, manual, test, instructions)
+		 services_total, scope_label, requested_at, finished_at, manual, test, instructions, delivery_planned_at)
 		values ('Weekly cost', $1, 'x:' || gen_random_uuid()::text, 'Week 47', $2::timestamptz, $3::text, $4, $5, $6, 3, 'Everything',
-		 $2::timestamptz, case when $3::text in ('done', 'failed', 'skipped') then $2::timestamptz else null end, $7, $7, $8)
+		 $2::timestamptz, case when $3::text in ('done', 'failed', 'skipped') then $2::timestamptz else null end, $7, $7, $8, case when $7 then $2::timestamptz end)
 		returning id`, s.typ, s.requested, s.state, s.summary, s.replaced, covered, s.test, s.instructions).Scan(&id)
 	if err != nil {
 		t.Fatal(err)
