@@ -15,9 +15,9 @@ var (
 	errNoReview    = errors.New("a review message needs its review, a run to point at and a known type")
 )
 
-// reviewTypeLabels maps each review type id to its fixed label. The label is derived from the id, so only these four
+// reviewTypeLabels maps each review type id to its fixed label. The label is derived from the id, so only these five
 // strings can reach a headline.
-var reviewTypeLabels = map[string]string{"cost": "Cost", "security": "Security findings", "reliability": "Reliability", "capacity": "Capacity"}
+var reviewTypeLabels = map[string]string{"cost": "Cost", "security": "Security findings", "reliability": "Reliability", "capacity": "Capacity", "custom": "Custom"}
 
 const (
 	// diagnosisNotice is the code-owned line every diagnosis carries, ahead of the model's text.

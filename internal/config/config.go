@@ -198,6 +198,8 @@ type Config struct {
 	AgentInvestigationsPerHour    int           // HM_AGENT_INVESTIGATIONS_PER_HOUR: investigations started in an hour; 0 = the investigator is off
 	AgentInvestigationMaxWait     time.Duration // HM_AGENT_INVESTIGATION_MAX_WAIT: a request older than this is not started
 
+	AgentCustomReviews bool // HM_AGENT_CUSTOM_REVIEWS: offers admin-written custom reviews; off by default
+
 	// KV selects the shared Valkey or Redis store; an empty URL means none
 	KV KVConfig
 
@@ -452,6 +454,7 @@ func Load(getenv func(string) string) (Config, error) {
 		AgentInvestigationsConcurrent: reader.integer("HM_AGENT_INVESTIGATIONS_CONCURRENT", 2),
 		AgentInvestigationsPerHour:    reader.integer("HM_AGENT_INVESTIGATIONS_PER_HOUR", 20),
 		AgentInvestigationMaxWait:     reader.duration("HM_AGENT_INVESTIGATION_MAX_WAIT", 15*time.Minute),
+		AgentCustomReviews:            reader.boolean("HM_AGENT_CUSTOM_REVIEWS", false),
 
 		KV: KVConfig{
 			URL:    strings.TrimSpace(reader.text("HM_KV_URL", "")),
