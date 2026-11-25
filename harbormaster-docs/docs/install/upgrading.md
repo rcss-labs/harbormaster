@@ -2,6 +2,8 @@
 
 This page explains how to move a running Harbormaster to a newer release. It is for the engineer who operates the deployment.
 
+The four AI sections below (the agent, automatic investigations, scheduled reviews and custom reviews) ship together in one release. A release that you install holds all four, so the rows for the steps between them are there for completeness.
+
 ## What happens at startup
 
 - **Migrations run at startup.** Every role (`all`, `web`, `poller`, `coordinator`) applies pending database migrations when `serve` starts, before it serves traffic. Each migration runs in its own transaction, and a database-level lock serializes tasks that start together. You do not run migrations by hand during a normal upgrade.
@@ -97,7 +99,7 @@ This release adds migrations `0221_agent_reviews` (the reviews, their scopes and
 1. Turn reviews off: set `HM_AGENT_REVIEWS_PER_DAY=0`, or switch off each review under **Settings > AI agent > Reviews**. Nothing new starts.
 2. Roll the image back.
 
-Review rows still waiting in the delivery log are not sent by an older release, but they are not dead either. When the new release runs again with reviews on, it sends a waiting row if its result finished less than 48 hours ago, and cancels an older one with the note "The review result is too old to send." Rows go after `HM_RETENTION_NOTIFICATION_LOG` in any case. Reviews, results and evidence stay in the database, unread, until the new release runs again and retention (`HM_RETENTION_AGENT_RUNS`) removes the results. No migration is undone, and the schema stays as it is. See the [runbook](../operations/runbooks/ai-agent.md#16-reviews-upgrade-and-rollback).
+Review rows still waiting in the delivery log are not sent by an older release, but they are not dead either. When the new release runs again with reviews on, it sends a waiting row if its result finished less than 48 hours ago and the review is still on, and cancels an older one with the note "The review result is too old to send." Rows go after `HM_RETENTION_NOTIFICATION_LOG` in any case. Reviews, results and evidence stay in the database, unread, until the new release runs again and retention (`HM_RETENTION_AGENT_RUNS`) removes the results. No migration is undone, and the schema stays as it is. See the [runbook](../operations/runbooks/ai-agent.md#16-reviews-upgrade-and-rollback).
 
 ## The release that adds custom reviews
 

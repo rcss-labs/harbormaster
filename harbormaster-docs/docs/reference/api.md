@@ -285,14 +285,14 @@ These routes exist only while `HM_AGENT_URL` is set (otherwise `404`). All use t
 
 | Method and path | Needs | Purpose |
 | --- | --- | --- |
-| `GET /api/reviews/runs` | Signed in | Review results the caller may read, newest first, 50 a page. Query: `limit` and `cursor` (the `next_cursor` of the last page). A result the caller may not read is left out. |
-| `GET /api/reviews/runs/{id}` | Signed in | One result with its summary and the evidence the caller may read (`evidence_hidden` counts the rest). `404` when the caller may not read it. |
+| `GET /api/reviews/runs` | Signed in | Review results the caller may read, newest first, 50 a page. Query: `limit` and `cursor` (the `next_cursor` of the last page). A result the caller may not read is left out, and a test run is left out of the list for anyone who is not an admin. |
+| `GET /api/reviews/runs/{id}` | Signed in | One result with its summary and the evidence the caller may read (`evidence_hidden` counts the rest). `404` when the caller may not read it, and a test run answers `404` to anyone who is not an admin. |
 | `GET /api/agent/reviews` | Admin | List reviews with their schedule, scope, routes, next run, last run and worst case for a month. |
 | `POST /api/agent/reviews` | Admin | Create a review. A review of type `custom` carries `instructions`, and needs `HM_AGENT_CUSTOM_REVIEWS=true`. |
 | `PUT /api/agent/reviews/{id}` | Admin | Replace a review. Send the `version` you read: a stale one answers `409` (`review_changed`). |
 | `DELETE /api/agent/reviews/{id}` | Admin | Delete a review. Its results stay until retention removes them. |
 | `POST /api/agent/reviews/preview` | Admin | For a draft: services in scope, how many the agent cannot see, next run and worst case for a month. It reserves and spends nothing. |
-| `POST /api/agent/reviews/{id}/run` | Admin | Record a run to start now. Answers `202` with `{"run_id"}`. Spends nothing until the coordinator starts it. `409` (`review_busy`) when the review already has a run waiting or running. No body, `{}` or `{"deliver": true}` is an ordinary run that is sent. `{"deliver": false}` is a test run: stored, never sent, readable by admins only. Anything else in the body (`null`, another type, other members) answers `422`. |
+| `POST /api/agent/reviews/{id}/run` | Admin | Record a run to start now. Answers `202` with `{"run_id"}`. Spends nothing until the coordinator starts it. `409` (`review_busy`) when the review already has a run waiting or running. No body, `{}` or `{"deliver": true}` is an ordinary run that is sent. `{"deliver": false}` is a test run: stored, never sent, readable by admins only. Anything else in the body (`null`, another type, other members) answers `422`, and a content type that is not JSON answers `415`. |
 | `GET /api/agent/reviews/runs` | Admin | Results of one review or all, with their cost (both attempts). Query: `review_id`, `cursor`, `limit`. |
 
 A result has `id`, `review_id`, `name`, `type` (`cost`, `security`, `reliability`, `capacity` or `custom`), `manual`, `test`, `state`, `reason`, `period_label`, `scope_label`, `services_total`, `scheduled_for`, `requested_at`, `started_at`, `finished_at`, `summary` and `summary_replaced`. The summary is plain text written by AI.
