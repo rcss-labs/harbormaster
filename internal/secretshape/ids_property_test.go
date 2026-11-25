@@ -55,6 +55,10 @@ func pieceKinds() []pieceKind {
 		{"words", true, func(rng *rand.Rand) string { return words[rng.Intn(len(words))] }},
 		{"hex 40 to 64", false, func(rng *rand.Rand) string { return randomText(rng, lowerHex, 40+rng.Intn(25)) }},
 		{"HEX 40", false, func(rng *rand.Rand) string { return strings.ToUpper(randomText(rng, lowerHex, 40)) }},
+		{"patterned hex 40 to 63", false, func(rng *rand.Rand) string {
+			return strings.Repeat("0123456789abcdef", 4)[:40+rng.Intn(24)]
+		}},
+		{"hex part", false, func(rng *rand.Rand) string { return "logs-" + strings.Repeat("0123456789ABCDEF", 3) }},
 		{"hex 33", false, func(rng *rand.Rand) string { return randomText(rng, lowerHex, 33) }},
 		{"random 16 to 31", false, func(rng *rand.Rand) string { return randomText(rng, alnum+"-_", 16+rng.Intn(16)) }},
 		{"random 32 to 64", false, func(rng *rand.Rand) string { return randomText(rng, alnum+"-_", 32+rng.Intn(33)) }},

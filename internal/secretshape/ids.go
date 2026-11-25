@@ -65,7 +65,8 @@ func isPlainPiece(piece string) bool {
 		return false
 	}
 	for _, word := range strings.FieldsFunc(piece, func(r rune) bool { return r == '-' || r == '_' }) {
-		if !wordySegment.MatchString(word) {
+		// A long hex run is never plain, whatever wordySegment says of it.
+		if hexOnly.MatchString(word) || !wordySegment.MatchString(word) {
 			return false
 		}
 	}
