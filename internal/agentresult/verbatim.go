@@ -159,9 +159,10 @@ func isNameByte(b byte) bool {
 }
 
 // AllowNames lets a summary name the given services and clusters whole, however long the names are: in the copy check
-// of CheckSummary a window of characters that lies wholly inside one of them is not counted as copied text. A name is one token of letters, digits,
-// hyphens and underscores, at most 128 characters; anything else is ignored. Names are compared without regard to
-// case. At most 10,000 are kept. The corpus itself is unchanged, and a window that takes in a name and text beside it is checked as ever.
+// of CheckSummary a window of characters that lies wholly inside one of them is not counted as copied text. A name is
+// one token of letters, digits, hyphens and underscores, at most 128 characters; anything else is ignored. Names are
+// compared without regard to case. At most 10,000 are kept. The corpus itself is unchanged, and a window that takes in
+// a name and text beside it is checked as ever.
 func (c *Corpus) AllowNames(names ...string) {
 	for _, name := range names {
 		if len(c.allowed) >= maxAllowedNames {
@@ -189,13 +190,13 @@ func (c *Corpus) AllowNames(names ...string) {
 
 // normalizeTracked is Normalize that also returns, for each character of its result, the number of the allowed name
 // (a whole token: a maximal run of letters, digits, hyphens and underscores, found in text as given) that the
-// character belongs to, or 0. The space that joins two words of one name belongs to it; a space before or after it does not.
+// character belongs to, or 0. The space that joins two words of one name belongs to it; a space before or after it
+// does not.
 func (c *Corpus) normalizeTracked(text string) (string, []int32) {
 	var out strings.Builder
 	out.Grow(len(text))
 	owner := make([]int32, 0, len(text))
 	var current, next int32
-	started := false // the current name has written a character
 	pendingSpace := false
 	for i := 0; i < len(text); {
 		if isNameByte(text[i]) && (i == 0 || !isNameByte(text[i-1])) {
@@ -203,7 +204,7 @@ func (c *Corpus) normalizeTracked(text string) (string, []int32) {
 			for end < len(text) && isNameByte(text[end]) {
 				end++
 			}
-			current, started = 0, false
+			current = 0
 			if end-i <= maxAllowedNameLength && c.allowed[strings.ToLower(text[i:end])] {
 				next++
 				current = next
@@ -216,8 +217,8 @@ func (c *Corpus) normalizeTracked(text string) (string, []int32) {
 		if unicode.IsLetter(r) || unicode.IsDigit(r) {
 			if pendingSpace && out.Len() > 0 {
 				out.WriteByte(' ')
-				if started {
-					owner = append(owner, current)
+				if n := len(owner); n > 0 && owner[n-1] == current {
+					owner = append(owner, current) // the space between two words of one name
 				} else {
 					owner = append(owner, 0)
 				}
@@ -225,7 +226,6 @@ func (c *Corpus) normalizeTracked(text string) (string, []int32) {
 			pendingSpace = false
 			out.WriteRune(unicode.ToLower(r))
 			owner = append(owner, current)
-			started = current != 0
 		} else {
 			pendingSpace = true
 		}

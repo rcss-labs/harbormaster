@@ -79,7 +79,8 @@ func fieldHoldsSecret(field string) bool {
 // id). A task id gives the cluster only when its ARN carries one (task/<cluster>/<task>). ok is false for anything that
 // is not such an id, with the same test the scrubber uses to let an id stand.
 func IDNames(id string) (cluster, service string, ok bool) {
-	if !isHarbormasterID(id) {
+	// The base64 decoder skips \r and \n inside its input, so an id with a line break would decode to a real one.
+	if strings.ContainsAny(id, "\r\n") || !isHarbormasterID(id) {
 		return "", "", false
 	}
 	raw, err := base64.RawURLEncoding.Strict().DecodeString(id)

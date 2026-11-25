@@ -601,3 +601,37 @@ func TestAllowNames_TwoLongNamesWithOneSpace(t *testing.T) {
 		t.Errorf("the names apart in the summary: refused %q", got)
 	}
 }
+
+func TestAllowNames_EveryOtherCheckStillRunsWhenNamesArePresent(t *testing.T) {
+	const hebrew = "החיבור למסד הנתונים נדחה שוב ושוב אחרי שלושה ניסיונות"
+	words := strings.Fields(copiedSentence)
+	corpus := func() *Corpus {
+		c := corpusOf(`{"service":"`+longServiceName+`","message":"`+copiedSentence+`","note":"`+hebrew+`","tag":"é`+longServiceName+`"}`,
+			`{"detail":"`+longServiceName+`-zulu-shadow-worker"}`)
+		c.AllowNames(longServiceName)
+		return c
+	}
+	full := corpus()
+	full.Add(strings.Repeat(" ", CorpusCap))
+	secret := "AKIA" + "IOSFODNN7EXAMPLE"
+	for name, tc := range map[string]struct {
+		summary string
+		corpus  *Corpus
+	}{
+		"hebrew after a name":      {longServiceName + " " + hebrew, corpus()},
+		"hebrew before a name":     {hebrew + " " + longServiceName, corpus()},
+		"escapes between words":    {longServiceName + ` ` + strings.Join(words, `\n`), corpus()},
+		"escapes before a name":    {strings.Join(words, `\n`) + `\n` + longServiceName, corpus()},
+		"secret":                   {"The " + longServiceName + " used " + secret + ".", corpus()},
+		"image markup":             {"The " + longServiceName + " ![x](https://example.com/a.png) failed.", corpus()},
+		"full corpus":              {"The " + longServiceName + " restarted.", full},
+		"letter before a name":     {"The é" + longServiceName + " restarted.", corpus()},
+		"a longer token":           {"The " + longServiceName + "-zulu-shadow-worker restarted.", corpus()},
+		"empty summary":            {"", corpus()},
+		"over the cap, with names": {longServiceName + strings.Repeat(" ok", SummaryCap), corpus()},
+	} {
+		if got, replaced := CheckSummaryAs(tc.summary, tc.corpus, ReplacementReviewSummary); !replaced || got != ReplacementReviewSummary {
+			t.Errorf("%s: kept %q", name, got)
+		}
+	}
+}

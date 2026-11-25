@@ -31,6 +31,9 @@ func TestIDNames_RefusesInvalidPaddedAndNonCanonicalIDs(t *testing.T) {
 	enc := base64.RawURLEncoding.EncodeToString
 	for name, id := range map[string]string{
 		"empty":            "",
+		"line feed":        good[:10] + "\n" + good[10:],
+		"carriage return":  good[:10] + "\r" + good[10:],
+		"trailing newline": good + "\n",
 		"prose":            "the checkout service",
 		"padded":           good + "=",
 		"standard base64":  strings.NewReplacer("-", "+", "_", "/").Replace(enc([]byte(idAccount + "|" + idRegion + "|prod-cluster|checkout-api~~"))),
