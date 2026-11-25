@@ -124,6 +124,8 @@ States: `requested` (waiting for a slot, or for a retry), `running`, `done`, `fa
 
 Useful log lines on the coordinator: `investigate: agent catalogue unavailable`, `investigate: coordinator lease not confirmed, not starting`, `investigate: the previous run is not settled`, `agent identity not ready`, and, from the part that records requests and plans diagnosis messages, `notify: investigation step` with a `step` and a running `count`. They never contain alert text, the agent's message or any of the result.
 
+An earlier run that cannot be settled. Before a new attempt, the investigator ends the run an earlier holder of the investigation left behind. If that cannot be written (almost always a database fault: the database is down, slow or locked), the coordinator logs `investigate: the previous run is not settled` with the error, starts no second run beside it, and tries again after 1 minute, every minute for as long as it fails. The retry does not use one of the two attempts and the request does not expire, so nothing is lost; the earlier run may still hold its reservation from the allowance until it is settled. To find the cause, read the error on that log line, check that the database is reachable from the coordinator and not at its connection limit, and look for a long transaction that holds a lock (the query in [Upgrading](../../install/upgrading.md#the-release-that-adds-automatic-investigations) lists them). Once the database answers the next retry settles the run, and the investigation goes on. If the line stops appearing, nothing is left to do.
+
 An investigation request that is waiting stays in the database until it runs or is skipped. If you turn the agent off for good, such rows keep their alert text; retention does not remove an investigation that is waiting or running.
 
 ## 10. An alert storm
@@ -131,14 +133,14 @@ An investigation request that is waiting stays in the database until it runs or 
 Many alerts at once do not delay any alert message: Opened messages are planned and sent first, and nothing in the investigator runs before them. Investigations are paced and capped:
 
 - Alerts for one service or one cluster or account entry within `HM_AGENT_INVESTIGATION_WINDOW` (15 minutes) share one investigation.
-- At most `HM_AGENT_INVESTIGATIONS_CONCURRENT` (2) run at once, and at most `HM_AGENT_INVESTIGATIONS_PER_HOUR` (20) start in an hour. The hourly cap can overshoot by up to the number of parallel runs.
+- At most `HM_AGENT_INVESTIGATIONS_CONCURRENT` (2) run at once, and at most `HM_AGENT_INVESTIGATIONS_PER_HOUR` (20) start in an hour. The hourly cap can overshoot by up to the number of parallel runs. It is checked once, before an investigation's first start; the retry of one that already started is not held back by it.
 - A request that has waited more than `HM_AGENT_INVESTIGATION_MAX_WAIT` (15 minutes) is skipped as `expired`, so a long queue does not deliver stale diagnoses. The rest of a storm ends as `rate_limited`.
 - Each run reserves its worst case from the monthly allowance, which the chat shares. A storm can use it up: later investigations end as `budget` and chat refuses questions until an admin raises the allowance or the month ends.
 
 What to do:
 
 1. Check **Settings > AI agent** for the spend and the investigations list. Cost per investigation is shown (after a retry, only the last attempt's).
-2. To stop new investigations at once, set `HM_AGENT_INVESTIGATIONS_PER_HOUR=0` and apply. Nothing starts, and requests still waiting end as `rate_limited`. To stop them for one route, clear **Investigate with AI** on it.
+2. To stop new investigations at once, set `HM_AGENT_INVESTIGATIONS_PER_HOUR=0` and apply. Nothing starts, no new request is recorded, and requests still waiting (retries included) end as `rate_limited`. No Diagnosis message is planned or sent while it is `0`, so one already waiting stays unsent. To stop them for one route, clear **Investigate with AI** on it.
 3. To keep investigations and bound a storm, lower `HM_AGENT_INVESTIGATIONS_PER_HOUR`. Raise the allowance only if you accept the spend.
 4. Diagnosis messages waiting for an alert that then resolves are cancelled, so a storm that clears leaves little to send.
 
@@ -147,9 +149,9 @@ What to do:
 Any one of these works. Opened and other alert messages are never affected.
 
 1. Clear **Investigate with AI** on the routes. Diagnosis rows already waiting for such a route are cancelled when they are due ("Investigate with AI is off."), and new requests are not recorded for it.
-2. Set `HM_AGENT_INVESTIGATIONS_PER_HOUR=0`. Requests are still recorded, and end as `rate_limited` without cost.
+2. Set `HM_AGENT_INVESTIGATIONS_PER_HOUR=0`. No new request is recorded, and requests already waiting end as `rate_limited` without a new run. Diagnosis messages stop with it, and the switches on the routes are not changed.
 3. Clear the investigator model in **Settings > AI agent**. Requests end as `not_configured`.
-4. Unset `HM_AGENT_URL` (section 7). This also turns off the chat.
+4. Unset `HM_AGENT_URL` (section 7). This also turns off the chat. The **Investigate with AI** switches stay on in the routes, so when `HM_AGENT_URL` is set again those routes start investigating, and spending from the allowance, at once. Clear the switches first if you do not want that.
 
 ## 12. Upgrade and rollback
 
