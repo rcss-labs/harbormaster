@@ -361,7 +361,8 @@ func degradedRoute(base string) map[string]any {
 	}
 }
 
-// deploymentsFinished reports whether every deployment in a service page's history has its outcome recorded.
+// deploymentsFinished reports whether a service page's history has at least one deployment and every one has its
+// outcome recorded; an empty history is a page read before the history was written, not a settled one.
 func deploymentsFinished(page string) bool {
 	var out struct {
 		Deployments []struct {
@@ -369,6 +370,9 @@ func deploymentsFinished(page string) bool {
 		} `json:"deployments_14d"`
 	}
 	if err := json.Unmarshal([]byte(page), &out); err != nil {
+		return false
+	}
+	if len(out.Deployments) == 0 {
 		return false
 	}
 	for _, d := range out.Deployments {

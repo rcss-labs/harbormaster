@@ -430,7 +430,7 @@ func TestSlackBody_UpdateHeadline(t *testing.T) {
 // The top-level text is what Slack shows in push notifications and plain-text clients; it is parsed for mentions and
 // links like the blocks are, so it must be escaped the same way.
 func TestSlackBody_FallbackTextIsEscaped(t *testing.T) {
-	for _, event := range []Event{EventOpened, EventUpdate, EventResolved} {
+	for _, event := range []Event{EventOpened, EventRepeat, EventUpdate, EventResolved, EventTest} {
 		m := testMessage(event)
 		m.Subject.Title = "<!channel> <@U1> a & b <https://evil|x>"
 		body, err := SlackBody(m)
@@ -442,6 +442,13 @@ func TestSlackBody_FallbackTextIsEscaped(t *testing.T) {
 		}
 		if err := json.Unmarshal(body, &decoded); err != nil {
 			t.Fatal(err)
+		}
+		if event == EventTest {
+			// The test message has a fixed headline and carries no alert title.
+			if decoded.Text != "Test message from Harbormaster" {
+				t.Errorf("test: fallback text = %q", decoded.Text)
+			}
+			continue
 		}
 		for _, bad := range []string{"<!channel>", "<@U1>", "<https://evil|x>"} {
 			if strings.Contains(decoded.Text, bad) {
