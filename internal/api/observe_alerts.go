@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"time"
 
@@ -33,6 +34,9 @@ type AlertDTO struct {
 	Cause      string          `json:"cause"`
 	NextStep   AlertStepDTO    `json:"next_step"`
 	JustBefore *AlertChangeDTO `json:"just_before"`
+	// Investigation is the alert's open investigation as {id, state, reason}, or JSON null when it has none. It is
+	// absent for access tokens and while the agent is off.
+	Investigation json.RawMessage `json:"investigation,omitempty"`
 }
 
 type AlertCountDTO struct {
@@ -92,11 +96,20 @@ func (s *Server) getAlerts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	links, err := s.alertInvestigationLinks(r, visible)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+
 	out := AlertsDTO{Items: make([]AlertDTO, 0, len(visible)), PolledAt: newestAlertsPoll(loops, targetVisible)}
 	for _, alert := range visible {
 		item := alertDTO(alert)
 		if change := changes[store.ChangeQuery{Key: alert.Key, Before: alert.At}]; change != nil {
 			item.JustBefore = &AlertChangeDTO{At: change.At, Text: change.Text, Source: change.Source}
+		}
+		if links != nil {
+			item.Investigation = alertInvestigation(links, alert)
 		}
 		out.Items = append(out.Items, item)
 		switch alert.Severity {

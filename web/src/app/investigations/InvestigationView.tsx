@@ -36,9 +36,9 @@ export function InvestigationView({ investigation }: { investigation: Investigat
         ) : (
           members.length > 0 && (
             <ul className={styles.members} aria-label="Services">
-              {members.map((member) => (
-                <li key={member.service_id}>
-                  <Link to={`/services/${member.service_id}/timeline`}>{member.service}</Link>
+              {members.map((member, index) => (
+                <li key={`${member.cluster}/${member.service}/${index}`}>
+                  {member.service_id === '' ? member.service : <Link to={`/services/${member.service_id}/timeline`}>{member.service}</Link>}
                   {member.cluster !== '' && <span className={styles.muted}>{` · ${member.cluster}`}</span>}
                 </li>
               ))}
