@@ -4,7 +4,8 @@ import { saveScreenshot } from './helpers'
 
 // The agent runs on its scripted fake model (HM_AGENT_FAKE_PROVIDER): it calls get_overview, then gives a canned answer.
 const CANNED_ANSWER = 'This is a canned answer from the demo model.'
-const USED_UP = "This month's AI allowance is used up. Ask an admin to raise it."
+// An allowance of 0 is below what one question reserves, so the refusal says the allowance is too small, not used up.
+const TOO_SMALL = 'The AI allowance is smaller than what one question can cost. Ask an admin to raise it.'
 
 const askAI = (page: Page) => page.getByRole('button', { name: 'Ask AI' })
 const drawer = (page: Page) => page.getByRole('dialog', { name: 'Agent' })
@@ -64,12 +65,12 @@ test.describe('agent chat as sam', () => {
     await expect(drawer(page).getByText(CANNED_ANSWER)).toBeVisible()
   })
 
-  test('with the allowance at 0 the drawer shows the used-up message', async ({ page }) => {
+  test('with the allowance at 0 the drawer says the allowance is too small', async ({ page }) => {
     const before = await setAllowance(page.request, '0')
     try {
       await page.goto('/clusters')
       await ask(page, 'Is anyone there?')
-      await expect(drawer(page).getByRole('alert')).toHaveText(USED_UP)
+      await expect(drawer(page).getByRole('alert')).toHaveText(TOO_SMALL)
     } finally {
       await setAllowance(page.request, before)
     }
