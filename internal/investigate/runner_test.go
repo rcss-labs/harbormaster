@@ -536,6 +536,7 @@ func TestJob_CoordinatorChangeMidRunRetriesOnce(t *testing.T) {
 	if v := f.inv(id); v.State != "requested" || v.Attempts != 1 {
 		t.Fatalf("after the first holder: %s, attempts %d", v.State, v.Attempts)
 	}
+	f.clock.advance(time.Second) // the runs are listed by their start
 	v := f.runnerTo(f.newRunner(f.agent), id, "done")
 	if v.Attempts != 2 || v.Summary != "Second holder." {
 		t.Errorf("investigation = %+v", v)
@@ -595,6 +596,7 @@ func TestJob_LeaseNotConfirmedStartsNothing(t *testing.T) {
 	for n := 1; n <= 3; n++ {
 		t.Run(fmt.Sprint("from check ", n), func(t *testing.T) {
 			f := newFixture(t)
+			f.runner.Concurrent = 1 // so that the checks come in one order
 			id := f.request("checkout-api")
 			var checks atomic.Int64
 			f.runner.Guard = func(context.Context) error {
@@ -609,6 +611,10 @@ func TestJob_LeaseNotConfirmedStartsNothing(t *testing.T) {
 			v := f.inv(id)
 			if v.State != "requested" || v.Attempts != 0 || v.StartedAt != nil {
 				t.Errorf("investigation = %s, attempts %d, started %v", v.State, v.Attempts, v.StartedAt)
+			}
+			// Only the last check comes after a reservation; nothing is held of the allowance before it.
+			if runs := f.runs(); (len(runs) > 0) != (n == 3) {
+				t.Errorf("runs = %+v", runs)
 			}
 			for _, r := range f.runs() {
 				if r.state != "failed" || r.cost != 0 || r.tokens != 0 {
@@ -647,17 +653,24 @@ func TestJob_StoppedDuringSetUpGivesTheClaimBack(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newFixture(t)
+			f.runner.Concurrent = 1 // so that the checks come in one order
 			id := f.request("checkout-api")
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			var checks atomic.Int64
-			f.runner.Guard = func(context.Context) error {
+			f.runner.Guard = func(ctx context.Context) error {
 				if stopNow(f, checks.Add(1)) {
 					cancel()
 				}
-				return nil
+				if len(f.runs()) == 0 {
+					return ctx.Err()
+				}
+				return nil // the lease was confirmed and the job stopped right after
 			}
 			f.runner.Run(ctx)
+			if reserved := len(f.runs()) > 0; reserved != (name == "after the reservation") {
+				t.Errorf("a run was reserved: %v", reserved)
+			}
 			if v := f.inv(id); v.State != "requested" || v.Attempts != 0 || v.ClaimSeq != 1 {
 				t.Errorf("investigation = %s, attempts %d, claims %d", v.State, v.Attempts, v.ClaimSeq)
 			}
@@ -961,13 +974,13 @@ func TestJob_TaskTextIsScrubbedAndWithinTheAgentsLimits(t *testing.T) {
 	f := newFixture(t)
 	id := f.request("checkout-api")
 	f.exec(`update agent_investigations set alert_title = $2, alert_text = $3 where id = $1`, id,
-		strings.Repeat("é", 1500), strings.Repeat("x ", 995)+fakeSecret+strings.Repeat(" y", 2000))
+		strings.Repeat("é", 1500), strings.Repeat("x ", 743)+fakeSecret+strings.Repeat(" y", 2000))
 	f.runTo(id, "done")
 	alert := f.agent.call(0).Task.Alert
 	if len(alert.Title) > 2000 || len(alert.Text) > 2000 || alert.Title == "" || strings.Contains(alert.Title, "\ufffd") {
 		t.Errorf("title of %d bytes, text of %d", len(alert.Title), len(alert.Text))
 	}
-	if strings.Contains(alert.Text, fakeSecret[:8]) {
+	if strings.Contains(alert.Text, fakeSecret[:6]) {
 		t.Error("the text holds a secret")
 	}
 }

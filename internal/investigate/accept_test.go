@@ -152,6 +152,11 @@ func TestAccept_RechecksSummaryNoteAndExcerpt(t *testing.T) {
 	if strings.Contains(e.Excerpt, fakeSecret) || strings.ContainsRune(e.Excerpt, 0) || len(e.Excerpt) > agentresult.ExcerptCap || !utf8.ValidString(e.Excerpt) {
 		t.Errorf("excerpt of %d bytes: %.80q", len(e.Excerpt), e.Excerpt)
 	}
+	// A secret across the cut is still recognised.
+	across := Accept(resultWith(logsItem(strings.Repeat("x ", 743)+fakeSecret+strings.Repeat(" y", 200))), readAll)
+	if len(across.Evidence) != 1 || strings.Contains(across.Evidence[0].Excerpt, fakeSecret[:6]) {
+		t.Errorf("excerpt with a secret across the cut: %+v", across.Evidence)
+	}
 	if e.Note != agentresult.ReplacementNote || got.Evidence[1].Note != agentresult.ReplacementNote || got.Evidence[2].Note != "two lines" {
 		t.Errorf("notes = %q, %q, %q", e.Note, got.Evidence[1].Note, got.Evidence[2].Note)
 	}
