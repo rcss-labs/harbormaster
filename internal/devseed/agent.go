@@ -239,7 +239,7 @@ func seedReviewResult(ctx context.Context, st *store.Store, review store.Review)
 			{Ordinal: 2, Tool: "list_services", Action: "view", AccountID: sandbox, Region: "us-east-1", ClusterName: "background-jobs", ServiceName: "image-resizer",
 				Note: "A second service the demo model looked at."},
 		},
-	}, now)
+	}, nil, now)
 	if err != nil {
 		return fmt.Errorf("seed review result: %w", err)
 	}
