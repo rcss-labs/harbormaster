@@ -106,6 +106,9 @@ type Server struct {
 	// KickNotify wakes the notification dispatcher after a route change; nil is a no-op. Like KickOffHours it travels
 	// on the signal bus; if nobody hears it a change waits at most HM_NOTIFY_INTERVAL.
 	KickNotify func()
+	// KickReview wakes the review job after a definition change or a run now; nil is a no-op. It travels on the signal
+	// bus like KickNotify; if nobody hears it the job notices at its next tick.
+	KickReview func()
 	// KVHealth reports whether the shared Valkey or Redis store is reachable, for the poller status; nil means there is
 	// no store.
 	KVHealth kv.Upper
@@ -472,6 +475,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	if s.Cfg.AgentEnabled() {
 		s.agentRoutes(mux) // the AI chat: absent (404) while HM_AGENT_URL is unset
 		s.agentIdentityRoutes(mux)
+		s.agentReviewRoutes(mux)
 	}
 	if s.oauthOn() {
 		s.oauthRoutes(mux) // OAuth for MCP connectors: absent (404) while HM_OAUTH is off

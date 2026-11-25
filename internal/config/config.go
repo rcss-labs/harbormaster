@@ -197,6 +197,9 @@ type Config struct {
 	AgentInvestigationsConcurrent int           // HM_AGENT_INVESTIGATIONS_CONCURRENT: investigations that run at the same time
 	AgentInvestigationsPerHour    int           // HM_AGENT_INVESTIGATIONS_PER_HOUR: investigations started in an hour; 0 = the investigator is off
 	AgentInvestigationMaxWait     time.Duration // HM_AGENT_INVESTIGATION_MAX_WAIT: a request older than this is not started
+	// Scheduled reviews (phase 3); the settings page shows them read-only.
+	AgentReviewsPerDay int           // HM_AGENT_REVIEWS_PER_DAY: 0 turns reviews off, at most 200 runs start a day
+	AgentReviewMaxLate time.Duration // HM_AGENT_REVIEW_MAX_LATE: an occurrence older than this is skipped as missed
 
 	// KV selects the shared Valkey or Redis store; an empty URL means none
 	KV KVConfig
@@ -452,6 +455,8 @@ func Load(getenv func(string) string) (Config, error) {
 		AgentInvestigationsConcurrent: reader.integer("HM_AGENT_INVESTIGATIONS_CONCURRENT", 2),
 		AgentInvestigationsPerHour:    reader.integer("HM_AGENT_INVESTIGATIONS_PER_HOUR", 20),
 		AgentInvestigationMaxWait:     reader.duration("HM_AGENT_INVESTIGATION_MAX_WAIT", 15*time.Minute),
+		AgentReviewsPerDay:            reader.integer("HM_AGENT_REVIEWS_PER_DAY", 24),
+		AgentReviewMaxLate:            reader.duration("HM_AGENT_REVIEW_MAX_LATE", 6*time.Hour),
 
 		KV: KVConfig{
 			URL:    strings.TrimSpace(reader.text("HM_KV_URL", "")),
@@ -462,6 +467,12 @@ func Load(getenv func(string) string) (Config, error) {
 	// A short retention would delete the audit trail of investigations an operator may still be reading.
 	if d := cfg.Retention.AgentRuns; d != 0 && d < MinAgentRunsRetention {
 		reader.fail("HM_RETENTION_AGENT_RUNS", "%s is too short: use 0 to keep everything or at least %s", d, MinAgentRunsRetention)
+	}
+	if cfg.AgentReviewsPerDay < 0 || cfg.AgentReviewsPerDay > 200 {
+		reader.fail("HM_AGENT_REVIEWS_PER_DAY", "%d is out of range: use 0 (reviews off) to 200", cfg.AgentReviewsPerDay)
+	}
+	if d := cfg.AgentReviewMaxLate; d < 15*time.Minute || d > 12*time.Hour {
+		reader.fail("HM_AGENT_REVIEW_MAX_LATE", "%s is out of range: use 15m to 12h", d)
 	}
 	if reader.err != nil {
 		return Config{}, reader.err
