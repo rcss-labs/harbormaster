@@ -106,6 +106,8 @@ type Job struct {
 	Role    string
 	Task    agentclient.Task
 	Details map[string]any // added to the run's audit row; ids and fixed words only
+	// LeaveMicroUSD is the room the reservation must leave in the month's budget for other runs. It is not held.
+	LeaveMicroUSD int64
 	// Started records the run under the caller's claim, after it is reserved. store.ErrConflict ends the run.
 	Started func(ctx context.Context, runID uuid.UUID, provider, model string) error
 	// Renew, when set, runs after the run token is made, once the run's timeout is known.
@@ -143,6 +145,8 @@ type Outcome struct {
 	Panicked bool
 	// ModelUnreachable: the agent reported that it could not reach its model.
 	ModelUnreachable bool
+	// Refused: the agent answered that the request itself is wrong, so sending it again would be no use.
+	Refused bool
 	// Finished: the run was reserved and has been settled, its token deleted and its audit row written. Conclude
 	// ran. SaveErr is why Save failed, if it did, or the panic of a Conclude that panicked (then nothing was saved,
 	// and the outcome is Failed with Panicked set). When not Finished, nothing was reserved or the reservation was

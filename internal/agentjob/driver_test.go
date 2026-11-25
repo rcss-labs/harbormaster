@@ -553,7 +553,7 @@ func resultWith(items ...agentresult.Evidence) agentresult.Result {
 func readAll(model.ServiceKey, authz.Action) bool { return true }
 
 // Phase 2's Accept, now here: the same decisions for the same inputs.
-func TestAccept_MovedUnchanged(t *testing.T) {
+func TestAccept_InvestigatorOptionsAreUnchanged(t *testing.T) {
 	encode := func(s string) string { return base64.RawURLEncoding.EncodeToString([]byte(s)) }
 	lying := logsItem("connection refused")
 	lying.Action = "view"
@@ -610,7 +610,7 @@ func TestAccept_MovedUnchanged(t *testing.T) {
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			got := Accept(c.res, c.can)
+			got := Accept(c.res, c.can, investigationOptions)
 			if len(got.Evidence) != c.kept || got.EvidenceDropped != c.dropped {
 				t.Fatalf("kept %d, dropped %d; want %d and %d: %+v", len(got.Evidence), got.EvidenceDropped, c.kept, c.dropped, got.Evidence)
 			}
@@ -720,5 +720,50 @@ func TestDriver_ASetUpOverThatPanicsStillSettlesTheRun(t *testing.T) {
 	runs := f.runs()
 	if len(runs) != 1 || runs[0].state == "running" || runs[0].tokens != 0 || runs[0].audits != 1 || !out.Finished || calls.Load() != 1 || out.Kind != Done || f.agent.calls() != 1 {
 		t.Errorf("outcome %+v, set-up over called %d times, runs %+v", out, calls.Load(), runs)
+	}
+}
+
+// ---- room to leave, and a refused request --------------------------------------------------------------------------
+
+// The reservation leaves room in the budget and holds only its own part; 0 leaves none.
+func TestDriver_ReservesLeavingRoom(t *testing.T) {
+	for name, c := range map[string]struct {
+		budget, leave int64
+		kind          Kind
+	}{
+		"nothing to leave":       {testReservation, 0, Done},
+		"no room to leave":       {testReservation, 1, Budget},
+		"one too little":         {testReservation + 500, 501, Budget},
+		"exactly the room":       {testReservation + 500, 500, Done},
+		"a leave that is a lie":  {testReservation + 500, -1, Failed},
+		"a leave no sum can add": {testReservation + 500, math.MaxInt64, Budget},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			f.settings(func(s *store.AgentSettings) { s.MonthlyBudgetMicroUSD = c.budget })
+			out := f.driver.Run(context.Background(), f.prepared(), Job{Role: testRole, LeaveMicroUSD: c.leave,
+				Started: func(context.Context, uuid.UUID, string, string) error { return nil }})
+			if out.Kind != c.kind || (c.kind != Done && (f.agent.calls() != 0 || len(f.runs()) != 0)) {
+				t.Errorf("kind = %v, %d agent calls, runs %+v; want %v", out.Kind, f.agent.calls(), f.runs(), c.kind)
+			}
+			if c.kind == Done {
+				var reserved int64
+				if err := f.st.Pool.QueryRow(context.Background(), `select reserved_micro_usd from agent_runs`).Scan(&reserved); err != nil || reserved != testReservation {
+					t.Errorf("reserved %d, %v", reserved, err)
+				}
+			}
+		})
+	}
+}
+
+// A request that the agent calls malformed is told apart from an agent that is not there; its kind is the same.
+func TestDriver_ABadRequestIsReported(t *testing.T) {
+	for status, refused := range map[int]bool{http.StatusBadRequest: true, http.StatusBadGateway: false, http.StatusUnauthorized: false} {
+		f := newFixture(t)
+		f.agent.set(func(c *call) { c.w.WriteHeader(status) })
+		out := f.driver.Run(context.Background(), f.prepared(), Job{Role: testRole, Started: func(context.Context, uuid.UUID, string, string) error { return nil }})
+		if out.Kind != AgentUnavailable || out.Refused != refused {
+			t.Errorf("%d: kind %v, refused %v; want AgentUnavailable and %v", status, out.Kind, out.Refused, refused)
+		}
 	}
 }

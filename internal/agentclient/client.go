@@ -30,6 +30,8 @@ var (
 	ErrAgentUnavailable = errors.New("the agent is unavailable")
 	// ErrAgentBusy: the agent is running its maximum number of concurrent runs.
 	ErrAgentBusy = errors.New("the agent is busy")
+	// ErrBadRequest: the agent refused the request as malformed (400). Such an error is ErrAgentUnavailable too.
+	ErrBadRequest = errors.New("the agent refused the request")
 	// ErrUnknownModel: the agent does not offer the requested provider and model.
 	ErrUnknownModel = errors.New("the agent does not offer that model")
 	// ErrNoPaidCall: it is certain that a failed test call called no model. It comes beside the error that says why.
@@ -324,6 +326,9 @@ func (e *statusError) Error() string {
 	return fmt.Sprintf("%v: status %d", ErrAgentUnavailable, e.code)
 }
 func (e *statusError) Unwrap() error { return ErrAgentUnavailable }
+func (e *statusError) Is(target error) bool {
+	return target == ErrBadRequest && e.code == http.StatusBadRequest
+}
 
 type catalogueWire struct {
 	Providers []struct {

@@ -118,7 +118,7 @@ func (r *active) begin(ctx context.Context) bool {
 		return r.unconfirmed(ctx, err)
 	}
 	timeout := agentrun.RunTimeout(r.p.Catalogue.RunTimeout)
-	if err := d.Runs.Reserve(ctx, r.run, timeout); err != nil {
+	if err := d.Runs.ReserveLeaving(ctx, r.run, timeout, job.LeaveMicroUSD); err != nil {
 		if errors.Is(err, agentrun.ErrAllowanceUsedUp) || errors.Is(err, agentrun.ErrAllowanceTooSmall) {
 			r.out.Kind = Budget
 			return false
@@ -244,7 +244,7 @@ func (r *active) conclude() {
 		case errors.Is(r.agentErr, agentclient.ErrAgentBusy):
 			out.Kind = AgentBusy
 		case errors.Is(r.agentErr, agentclient.ErrAgentUnavailable):
-			out.Kind = AgentUnavailable
+			out.Kind, out.Refused = AgentUnavailable, errors.Is(r.agentErr, agentclient.ErrBadRequest)
 		case code == codeNoResult:
 			out.Kind = NoResult
 		case code == codeUnavailable:
