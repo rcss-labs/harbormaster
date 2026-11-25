@@ -509,7 +509,7 @@ func TestReview_NameThatLooksLikeAnEncodedWordIsNotDecoded(t *testing.T) {
 
 func TestCleanReviewName_IsTheOneCleaning(t *testing.T) {
 	for in, want := range map[string]string{
-		"x*\nChecked": "x* Checked", "  a ‮ b  ": "a b", "​\r\n": "", "plain": "plain",
+		"x*\nChecked": "x* Checked", "  a \u202e b  ": "a b", "\u200b\r\n": "", "plain": "plain",
 	} {
 		if got := CleanReviewName(in); got != want {
 			t.Errorf("CleanReviewName(%q) = %q, want %q", in, got, want)
