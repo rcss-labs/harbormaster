@@ -208,7 +208,8 @@ func (s *Store) RequestManualReviewRun(ctx context.Context, reviewID int64, peri
 // with no retry time or a past one, or running with an expired lease. It returns ErrNotFound when nothing is due,
 // while another review run is running with a live lease, and while an investigation requested after
 // investigationsWaitingSince is waiting (a review never starts ahead of one). A row with no attempt left is failed
-// as interrupted, not returned, and the next due row is tried. Everything runs in one transaction under the lock.
+// as interrupted, not returned, and the next due row is tried. Everything runs in one transaction under the lock, after waiting for the rows of running runs, and an expired running
+// row goes before a requested one, so there is never a second live lease.
 func (s *Store) ClaimReviewRun(ctx context.Context, now time.Time, lease time.Duration, investigationsWaitingSince time.Time) (ReviewRun, ReviewClaim, error) {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
@@ -217,6 +218,10 @@ func (s *Store) ClaimReviewRun(ctx context.Context, now time.Time, lease time.Du
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
 	if _, err := tx.Exec(ctx, reviewRunsLock); err != nil {
 		return ReviewRun{}, ReviewClaim{}, fmt.Errorf("claim review run: lock: %w", err)
+	}
+	// Wait for any holder still writing its running row (a renew), so the checks below see its lease.
+	if _, err := tx.Exec(ctx, `select 1 from agent_review_runs where state = 'running' order by id for update`); err != nil {
+		return ReviewRun{}, ReviewClaim{}, fmt.Errorf("claim review run: wait for running rows: %w", err)
 	}
 	var blocked bool
 	if err := tx.QueryRow(ctx, `select exists (select 1 from agent_review_runs where state = 'running' and claimed_until > $1)
@@ -237,7 +242,7 @@ func (s *Store) ClaimReviewRun(ctx context.Context, now time.Time, lease time.Du
 			where id = (select id from agent_review_runs
 			  where (state = 'requested' and (claimed_until is null or claimed_until <= $1))
 			     or (state = 'running' and claimed_until <= $1)
-			  order by requested_at, id limit 1 for update skip locked)
+			  order by (state = 'running') desc, requested_at, id limit 1 for update)
 			returning `+reviewRunColumns, now, now.Add(lease), maxInvestigationAttempts))
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Rows failed on the way stay failed.
@@ -275,8 +280,8 @@ func (s *Store) fencedReviewUpdate(ctx context.Context, what string, c ReviewCla
 	return nil
 }
 
-// StartReviewRun records the agent run of the claimed attempt at now and moves the previous run id aside, so both
-// attempts can be costed. ErrConflict when the claim is stale.
+// StartReviewRun records the agent run of the claimed attempt at now and keeps the first attempt's run id as
+// prev_run_id on the second, so both paid attempts are costed; a run given back free on the first attempt is not kept. ErrConflict when the claim is stale.
 func (s *Store) StartReviewRun(ctx context.Context, c ReviewClaim, start ReviewStart, now time.Time) error {
 	for _, f := range []struct {
 		name, text string
@@ -290,7 +295,9 @@ func (s *Store) StartReviewRun(ctx context.Context, c ReviewClaim, start ReviewS
 	if tags == nil {
 		tags = []int64{}
 	}
-	return s.fencedReviewUpdate(ctx, "start review run", c, `prev_run_id = coalesce(run_id, prev_run_id), run_id = $4, provider = $5, model = $6,
+	return s.fencedReviewUpdate(ctx, "start review run", c, `prev_run_id = case when attempts = 2 and run_id is distinct from $4 then coalesce(prev_run_id, run_id)
+				when attempts = 2 then prev_run_id end,
+		run_id = $4, provider = $5, model = $6,
 		scope_label = $7, range = $8, covered_tags = $9, services_total = $10, started_at = $11`,
 		start.RunID, start.Provider, start.Model, start.ScopeLabel, start.Range, tags, start.ServicesTotal, now)
 }
@@ -480,12 +487,17 @@ func (s *Store) ReviewRunCosts(ctx context.Context, ids []int64) (map[int64]int6
 
 // DeleteReviewRunsBefore removes settled (done, failed, skipped) review runs finished before t, and never one that
 // finished less than 48 hours before now, whatever t is. A requested or running row is never removed here, and
-// reviews are not touched. Evidence cascades.
+// the newest scheduled run of each existing review stays. Reviews are not
+// touched. Evidence cascades.
 func (s *Store) DeleteReviewRunsBefore(ctx context.Context, t, now time.Time) (int64, error) {
 	if floor := now.Add(-minInvestigationRetention); t.After(floor) {
 		t = floor
 	}
-	tag, err := s.Pool.Exec(ctx, `delete from agent_review_runs where state in ('done', 'failed', 'skipped') and finished_at < $1`, t)
+	// The newest scheduled run of each existing review stays whatever its age: it is what stops a period that was
+	// already run from being recorded again.
+	tag, err := s.Pool.Exec(ctx, `delete from agent_review_runs r where r.state in ('done', 'failed', 'skipped') and r.finished_at < $1
+		and not (r.review_id is not null and not r.manual and r.id = (select n.id from agent_review_runs n
+		  where n.review_id = r.review_id and not n.manual order by n.requested_at desc, n.id desc limit 1))`, t)
 	if err != nil {
 		return 0, fmt.Errorf("delete review runs: %w", err)
 	}

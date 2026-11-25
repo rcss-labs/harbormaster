@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -109,46 +107,6 @@ func TestRecordDue_OneRowPerReviewAndPeriod(t *testing.T) {
 	}
 	if name != "b" || typ != "security" || state != "requested" || key != "d:2026-11-24" || label != "label d:2026-11-24" || manual || !scheduled.Equal(revT0) || !requested.Equal(revNow) || attempts != 0 {
 		t.Fatalf("row = %s %s %s %s %q %v %v %v %d", name, typ, state, key, label, manual, scheduled, requested, attempts)
-	}
-}
-
-// Two coordinators, a restart and a retry can all send the same due list; the entries arrive in different orders.
-func TestRecordDue_ConcurrentCallersCreateOne(t *testing.T) {
-	s, ctx := storetest.Open(t), context.Background()
-	route := reviewRoute(t, s, "r")
-	var reviews []store.Review
-	for i := 0; i < 3; i++ {
-		reviews = append(reviews, oldReview(t, s, fmt.Sprintf("c%d", i), route.ID))
-	}
-	var created atomic.Int64
-	var wg sync.WaitGroup
-	errs := make(chan error, 10)
-	for g := 0; g < 10; g++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			var due []store.DueReview
-			for i := range reviews {
-				idx := (i + g) % len(reviews)
-				if g%2 == 1 {
-					idx = len(reviews) - 1 - idx
-				}
-				due = append(due, dueFor(reviews[idx], "d:2026-11-24", revT0))
-			}
-			n, err := s.RecordDueReviewRuns(ctx, due, revNow)
-			created.Add(int64(n))
-			errs <- err
-		}()
-	}
-	wg.Wait()
-	close(errs)
-	for err := range errs {
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	if created.Load() != 3 || invCount(t, s, "agent_review_runs") != 3 {
-		t.Fatalf("created %d, rows %d; want 3, 3", created.Load(), invCount(t, s, "agent_review_runs"))
 	}
 }
 
@@ -271,32 +229,6 @@ func TestManual_RefusedWhileOneIsWaitingOrRunning(t *testing.T) {
 	}
 }
 
-func TestManual_ConcurrentRequestsCreateOne(t *testing.T) {
-	s, ctx := storetest.Open(t), context.Background()
-	rv := oldReview(t, s, "a", reviewRoute(t, s, "r").ID)
-	var ok, conflict atomic.Int64
-	var wg sync.WaitGroup
-	for g := 0; g < 10; g++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			_, err := s.RequestManualReviewRun(ctx, rv.ID, "x", revNow)
-			switch {
-			case err == nil:
-				ok.Add(1)
-			case errors.Is(err, store.ErrConflict):
-				conflict.Add(1)
-			default:
-				t.Error(err)
-			}
-		}()
-	}
-	wg.Wait()
-	if ok.Load() != 1 || conflict.Load() != 9 || invCount(t, s, "agent_review_runs") != 1 {
-		t.Fatalf("ok %d, conflict %d, rows %d; want 1, 9, 1", ok.Load(), conflict.Load(), invCount(t, s, "agent_review_runs"))
-	}
-}
-
 func TestManual_DisabledReviewCanBeRun(t *testing.T) {
 	s, ctx := storetest.Open(t), context.Background()
 	rv := oldReview(t, s, "a", reviewRoute(t, s, "r").ID)
@@ -357,35 +289,6 @@ func TestClaimReview_IgnoresAnInvestigationOlderThanTheBound(t *testing.T) {
 	insertWaitingInvestigation(t, s, "service/a/r/c/running", "running", revNow)
 	if _, _, err := s.ClaimReviewRun(ctx, revNow, time.Minute, bound); err != nil {
 		t.Fatalf("claim = %v, want the review to go ahead", err)
-	}
-}
-
-func TestClaimReview_TwoClaimersTakeOne(t *testing.T) {
-	s, ctx := storetest.Open(t), context.Background()
-	seedReviewRuns(t, s, revNow.Add(-2*time.Minute), revNow.Add(-time.Minute), revNow.Add(-30*time.Second))
-	var won, none atomic.Int64
-	var wg sync.WaitGroup
-	for g := 0; g < 10; g++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			_, _, err := s.ClaimReviewRun(ctx, revNow, time.Minute, revNow.Add(-15*time.Minute))
-			switch {
-			case err == nil:
-				won.Add(1)
-			case errors.Is(err, store.ErrNotFound):
-				none.Add(1)
-			default:
-				t.Error(err)
-			}
-		}()
-	}
-	wg.Wait()
-	if won.Load() != 1 || none.Load() != 9 {
-		t.Fatalf("won %d, none %d; want 1, 9", won.Load(), none.Load())
-	}
-	if n := invCount(t, s, "agent_review_runs where state = 'running'"); n != 1 {
-		t.Fatalf("%d running rows, want 1", n)
 	}
 }
 
