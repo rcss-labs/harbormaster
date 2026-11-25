@@ -314,3 +314,49 @@ func TestChecksAndCut_LinearOnLargeInput(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckSummaryAs_UsesTheGivenSentence(t *testing.T) {
+	corpus := corpusOf(copiedLog)
+	got, replaced := CheckSummaryAs("It logged: "+copiedLog, corpus, ReplacementReviewSummary)
+	if !replaced || got != ReplacementReviewSummary {
+		t.Fatalf("copy: got %q, replaced %v", got, replaced)
+	}
+	got, replaced = CheckSummaryAs("The checkout service is healthy.", corpus, ReplacementReviewSummary)
+	if replaced || got != "The checkout service is healthy." {
+		t.Fatalf("clean: got %q, replaced %v", got, replaced)
+	}
+	if got, replaced = CheckSummaryAs("anything", nil, ReplacementReviewSummary); !replaced || got != ReplacementReviewSummary {
+		t.Fatalf("nil corpus: got %q, replaced %v", got, replaced)
+	}
+	if got, replaced = CheckSummaryAs("It logged: "+copiedLog, corpus, ReplacementSummary); !replaced || got != ReplacementSummary {
+		t.Fatalf("investigation sentence: got %q, replaced %v", got, replaced)
+	}
+}
+
+func TestCheckSummaryAs_UnknownReplacementFallsBack(t *testing.T) {
+	corpus := corpusOf(copiedLog)
+	for _, bad := range []string{"", "Everything is fine, nothing to see.", ReplacementNote, ReplacementReviewSummary + " "} {
+		if got, replaced := CheckSummaryAs("It logged: "+copiedLog, corpus, bad); !replaced || got != ReplacementSummary {
+			t.Errorf("check with %q: got %q, replaced %v", bad, got, replaced)
+		}
+		if got, replaced := RecheckSummaryAs(strings.Repeat("a", SummaryCap+1), bad); !replaced || got != ReplacementSummary {
+			t.Errorf("recheck with %q: got %q, replaced %v", bad, got, replaced)
+		}
+	}
+}
+
+func TestRecheckSummaryAs_CapAndScrubOnly(t *testing.T) {
+	const r = ReplacementReviewSummary
+	if got, replaced := RecheckSummaryAs(copiedLog, r); replaced || got != copiedLog {
+		t.Errorf("copy-looking text refused without a corpus: replaced %v", replaced)
+	}
+	if got, replaced := RecheckSummaryAs(strings.Repeat("a", SummaryCap+1), r); !replaced || got != r {
+		t.Errorf("over cap: got %q, replaced %v", got, replaced)
+	}
+	if got, replaced := RecheckSummaryAs("key "+"AKIA"+"IOSFODNN7EXAMPLE", r); !replaced || got != r {
+		t.Errorf("secret: got %q, replaced %v", got, replaced)
+	}
+	if got, replaced := RecheckSummaryAs(" ", r); !replaced || got != r {
+		t.Errorf("empty: got %q, replaced %v", got, replaced)
+	}
+}

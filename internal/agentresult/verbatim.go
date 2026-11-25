@@ -6,6 +6,7 @@ import (
 	"math/rand/v2"
 	"strconv"
 	"strings"
+	"testing"
 	"unicode"
 	"unicode/utf8"
 )
@@ -39,11 +40,34 @@ type Corpus struct {
 	text []byte // normalised values, each followed by valueSeparator
 	raw  int    // raw bytes offered so far
 	full bool
+
+	exemptNames bool // string values under the members of exemptMembers are not stored
+	added       bool // Add has been called
+}
+
+// exemptMembers are the JSON member names whose short string values name a service or cluster rather than quote a log.
+var exemptMembers = map[string]bool{"service": true, "cluster": true, "name": true, "label": true}
+
+// exemptValueMax is the longest value, in bytes, that an exempt member may hold and stay unstored.
+const exemptValueMax = 128
+
+// ExemptNames makes the corpus leave out the string values held directly by a JSON member named service, cluster,
+// name or label (at most 128 bytes), so a summary may name the services it reviews. Call it before the first Add.
+func (c *Corpus) ExemptNames() {
+	if c.added {
+		// A late call must not weaken the check: the corpus stays strict. Tests learn of the mistake.
+		if testing.Testing() {
+			panic("agentresult: ExemptNames called after Add")
+		}
+		return
+	}
+	c.exemptNames = true
 }
 
 // Add keeps the string values of a run's read text: every string value of a JSON body (keys are not values), the
 // whole text otherwise. Past CorpusCap raw bytes nothing more is stored and the corpus is Full.
 func (c *Corpus) Add(text string) {
+	c.added = true
 	if c.full {
 		return
 	}
@@ -55,7 +79,7 @@ func (c *Corpus) Add(text string) {
 	}
 	trimmed := strings.TrimSpace(text)
 	if trimmed != "" && (trimmed[0] == '{' || trimmed[0] == '[') {
-		if values, ok := jsonStringValues(trimmed); ok {
+		if values, ok := jsonStringValues(trimmed, c.exemptNames); ok {
 			for _, v := range values {
 				c.store(v)
 			}
@@ -66,10 +90,12 @@ func (c *Corpus) Add(text string) {
 }
 
 // jsonStringValues returns every string value of the JSON in text, in order, with duplicate keys' values all kept
-// and keys left out. ok is false when text is not JSON.
-func jsonStringValues(text string) (values []string, ok bool) {
+// and keys left out. With exempt, a string of at most exemptValueMax bytes held directly by a member named in
+// exemptMembers is left out too: not one inside an object or array under that member. ok is false when text is not JSON.
+func jsonStringValues(text string, exempt bool) (values []string, ok bool) {
 	dec := json.NewDecoder(strings.NewReader(text))
 	var inObject, expectKey []bool // one entry per open container
+	var member []string            // the key of the member being read, per open container
 	valueDone := func() {
 		if n := len(inObject); n > 0 && inObject[n-1] {
 			expectKey[n-1] = true
@@ -88,13 +114,19 @@ func jsonStringValues(text string) (values []string, ok bool) {
 			if v == '{' || v == '[' {
 				inObject = append(inObject, v == '{')
 				expectKey = append(expectKey, v == '{')
+				member = append(member, "")
 				continue
 			}
-			inObject, expectKey = inObject[:len(inObject)-1], expectKey[:len(expectKey)-1]
+			inObject, expectKey, member = inObject[:len(inObject)-1], expectKey[:len(expectKey)-1], member[:len(member)-1]
 			valueDone()
 		case string:
 			if n := len(inObject); n > 0 && inObject[n-1] && expectKey[n-1] {
 				expectKey[n-1] = false // a key
+				member[n-1] = v
+				continue
+			}
+			if n := len(inObject); exempt && n > 0 && inObject[n-1] && exemptMembers[member[n-1]] && len(v) <= exemptValueMax {
+				valueDone()
 				continue
 			}
 			values = append(values, v)

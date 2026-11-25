@@ -53,19 +53,41 @@ func passesBasics(text string, limit int) bool {
 	return secretshape.ScrubText(text) == text
 }
 
+// knownReplacement returns replacement when it is one of the two summary sentences and the investigation sentence
+// otherwise.
+func knownReplacement(replacement string) string {
+	if replacement == ReplacementReviewSummary {
+		return replacement
+	}
+	return ReplacementSummary
+}
+
 // CheckSummary is the agent service's full check. A summary that fails any test is replaced whole, never trimmed:
 // a partly cleaned text could still carry the rest of a secret. A nil or full corpus cannot vouch for it, so it fails.
 func CheckSummary(summary string, corpus *Corpus) (clean string, replaced bool) {
+	return CheckSummaryAs(summary, corpus, ReplacementSummary)
+}
+
+// CheckSummaryAs is CheckSummary with the sentence a failed summary is replaced by. Only the two replacement constants
+// are accepted; anything else gets the investigation sentence, so a caller cannot make the check hand back its own text.
+func CheckSummaryAs(summary string, corpus *Corpus, replacement string) (clean string, replaced bool) {
+	replacement = knownReplacement(replacement)
 	if !passesBasics(summary, SummaryCap) || hasImageMarkup(summary) || corpus == nil || corpus.Full() || corpus.HasRunIn(summary) {
-		return ReplacementSummary, true
+		return replacement, true
 	}
 	return summary, false
 }
 
 // RecheckSummary is Harbormaster's repeat: the cap and the scrubber only, it holds no corpus.
 func RecheckSummary(summary string) (clean string, replaced bool) {
+	return RecheckSummaryAs(summary, ReplacementSummary)
+}
+
+// RecheckSummaryAs is RecheckSummary with the replacement sentence, under the rule of CheckSummaryAs.
+func RecheckSummaryAs(summary, replacement string) (clean string, replaced bool) {
+	replacement = knownReplacement(replacement)
 	if !passesBasics(summary, SummaryCap) {
-		return ReplacementSummary, true
+		return replacement, true
 	}
 	return summary, false
 }

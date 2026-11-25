@@ -306,3 +306,157 @@ func TestCorpus_LongSecondKeyIsNotAValue(t *testing.T) {
 		t.Error("the value after a long second key was dropped")
 	}
 }
+
+const longServiceName = "payments-checkout-settlement-reconciliation-worker-eu" // 53 chars: over one run
+
+func exemptCorpusOf(texts ...string) *Corpus {
+	c := &Corpus{}
+	c.ExemptNames()
+	for _, text := range texts {
+		c.Add(text)
+	}
+	return c
+}
+
+func TestCorpus_ExemptNamesLetsALongServiceNamePass(t *testing.T) {
+	name := strings.Repeat("checkout-", 7)[:60]
+	summary := "The " + name + " service restarted; " + name + " is healthy again."
+	c := exemptCorpusOf(`{"service":"` + name + `","state":"ok"}`)
+	if got, replaced := CheckSummaryAs(summary, c, ReplacementReviewSummary); replaced || got != summary {
+		t.Fatalf("service name refused: %q, replaced %v", got, replaced)
+	}
+	for _, member := range []string{"cluster", "name", "label"} {
+		c = exemptCorpusOf(`{"` + member + `":"` + name + `"}`)
+		if _, replaced := CheckSummaryAs(summary, c, ReplacementReviewSummary); replaced {
+			t.Errorf("%s: refused", member)
+		}
+	}
+	// Names inside an array of objects, at depth.
+	c = exemptCorpusOf(`{"items":[{"meta":{"service":"` + name + `"}}]}`)
+	if _, replaced := CheckSummaryAs(summary, c, ReplacementReviewSummary); replaced {
+		t.Error("nested member refused")
+	}
+}
+
+func TestCorpus_ExemptNamesStillCatchesTheSameTextElsewhere(t *testing.T) {
+	name := strings.Repeat("checkout-", 7)[:60]
+	summary := "The " + name + " service restarted."
+	for _, body := range []string{
+		`{"message":"` + name + `"}`,
+		`{"service":{"message":"` + name + `"}}`,      // an object under the member is not exempt
+		`{"service":["` + name + `"]}`,                // neither is an array
+		`{"service":"short","detail":"` + name + `"}`, // a later member
+		`{"servicex":"` + name + `"}`,
+		`{"Service":"` + name + `"}`,
+		`plain text ` + name,
+		`[{"message":"` + name + `"}]`,
+	} {
+		c := exemptCorpusOf(body)
+		if got, replaced := CheckSummaryAs(summary, c, ReplacementReviewSummary); !replaced || got != ReplacementReviewSummary {
+			t.Errorf("%s: kept %q", body, got)
+		}
+	}
+	// The value of a key is not mistaken for a key: the name sits under "note", after a member named "name".
+	c := exemptCorpusOf(`{"name":"x","note":"` + name + `"}`)
+	if _, replaced := CheckSummaryAs(summary, c, ReplacementReviewSummary); !replaced {
+		t.Error("value after an exempt member was exempt too")
+	}
+}
+
+func TestCorpus_ExemptNamesStopsAt128Bytes(t *testing.T) {
+	at := strings.Repeat("alpha-", 10) + "beta-gamma-delta " + strings.Repeat("omega-", 8) + "psi" // 128 bytes
+	over := at + "c"                                                                               // 129 bytes
+	atSummary := "It named " + at + " here."
+	if _, replaced := CheckSummaryAs(atSummary, exemptCorpusOf(`{"name":"`+at+`"}`), ReplacementReviewSummary); replaced {
+		t.Error("128 bytes was stored")
+	}
+	if _, replaced := CheckSummaryAs("It named "+over+" here.", exemptCorpusOf(`{"name":"`+over+`"}`), ReplacementReviewSummary); !replaced {
+		t.Error("129 bytes was exempt")
+	}
+	// The bound is on bytes, not characters: 64 two-byte letters are 128 bytes, 65 are 130.
+	two, three := strings.Repeat("é", 64), strings.Repeat("é", 65)
+	if _, replaced := CheckSummaryAs("It named "+two+" here.", exemptCorpusOf(`{"name":"`+two+`"}`), ReplacementReviewSummary); replaced {
+		t.Error("128 bytes of two-byte letters was stored")
+	}
+	if _, replaced := CheckSummaryAs("It named "+three+" here.", exemptCorpusOf(`{"name":"`+three+`"}`), ReplacementReviewSummary); !replaced {
+		t.Error("130 bytes of two-byte letters was exempt")
+	}
+}
+
+func TestCorpus_ExemptNamesStillScrubs(t *testing.T) {
+	secret := "AKIA" + "IOSFODNN7EXAMPLE"
+	c := exemptCorpusOf(`{"name":"` + secret + `"}`)
+	if got, replaced := CheckSummaryAs("The role used "+secret+" to start.", c, ReplacementReviewSummary); !replaced || got != ReplacementReviewSummary {
+		t.Fatalf("got %q, replaced %v", got, replaced)
+	}
+}
+
+func TestCorpus_WithoutExemptionNothingChanged(t *testing.T) {
+	name := strings.Repeat("checkout-", 7)[:60]
+	summary := "The " + name + " service restarted."
+	for _, body := range []string{
+		`{"service":"` + name + `"}`, `{"cluster":"` + name + `"}`, `{"name":"` + name + `"}`, `{"label":"` + name + `"}`,
+		`{"a":{"service":"` + name + `"}}`,
+	} {
+		c := corpusOf(body)
+		if got, replaced := CheckSummaryAs(summary, c, ReplacementReviewSummary); !replaced || got != ReplacementReviewSummary {
+			t.Errorf("%s: kept %q", body, got)
+		}
+		if got, replaced := CheckSummary(summary, c); !replaced || got != ReplacementSummary {
+			t.Errorf("%s: CheckSummary kept %q", body, got)
+		}
+	}
+}
+
+func TestCorpus_ExemptValuesCountTowardTheCap(t *testing.T) {
+	c := exemptCorpusOf(`{"service":"` + strings.Repeat("a", 100) + `"}`)
+	c.Add(strings.Repeat(" ", CorpusCap-200))
+	if c.Full() {
+		t.Fatal("full before the cap")
+	}
+	c.Add(`{"service":"` + strings.Repeat("b", 100) + `"}`)
+	if !c.Full() {
+		t.Fatal("exempt values were not counted toward the cap")
+	}
+	if _, replaced := CheckSummaryAs("fine summary", c, ReplacementReviewSummary); !replaced {
+		t.Error("a full corpus vouched for a summary")
+	}
+}
+
+func TestCorpus_ExemptNamesLinearOnLargeBodies(t *testing.T) {
+	big := func(n int) string {
+		return strings.Repeat(`{"service":"s","list":[{"name":"n","x":`, n/40) + "1" + strings.Repeat("}]}", n/40)
+	}
+	flat := func(n int) string {
+		return "[" + strings.Repeat(`{"label":"l","message":"m"},`, n/27) + `{"label":"z"}]`
+	}
+	for name, gen := range map[string]func(int) string{"nested": big, "flat": flat} {
+		small, large := gen(25_000), gen(CorpusCap*9/10)
+		ts := timeOf(func() { c := exemptCorpusOf(small); _ = c.HasRunIn(longServiceName + longServiceName) })
+		var c *Corpus
+		tl := timeOf(func() { c = exemptCorpusOf(large); _ = c.HasRunIn(longServiceName + longServiceName) })
+		if c.Full() {
+			t.Fatalf("%s: input over the cap", name)
+		}
+		if tl > 100*ts+50*time.Millisecond || tl > 2*time.Second {
+			t.Errorf("%s: about 2 MiB took %v against %v for 25 KB", name, tl, ts)
+		}
+	}
+}
+
+func TestCorpus_ExemptNamesAfterAddPanicsAndStaysStrict(t *testing.T) {
+	name := strings.Repeat("checkout-", 7)[:60]
+	c := &Corpus{}
+	c.Add(`{"service":"` + name + `"}`)
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Error("a late ExemptNames did not panic under test")
+			}
+		}()
+		c.ExemptNames()
+	}()
+	if !c.HasRunIn(name) {
+		t.Error("the corpus was not left strict")
+	}
+}
