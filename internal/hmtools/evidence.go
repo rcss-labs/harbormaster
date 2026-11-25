@@ -88,7 +88,9 @@ var evidenceRules = map[string]EvidenceRule{
 	"search_logs":   {Kind: EvidencePerItem, Action: EvidenceLogs, Items: "rows", IDField: "service_id"},
 
 	// Many services in rows nested in the answer: each row of the named arrays is labelled by its own id member.
-	// The totals by cluster, account and tag, the series and the KPIs of these answers are not citable.
+	// The totals by cluster, account and tag, the series and the KPIs of these answers are not citable. A row can
+	// name a service that has since been deleted (history rows outlive it); the reader filter shows such a row to
+	// admins only, so the label here stays the row's own service whatever its state.
 	"get_cost_analytics": {Kind: EvidencePerItemNested, Action: EvidenceView, Arrays: []ItemArray{
 		{Path: []string{"rightsizing", "services"}, IDField: "service_id"},
 		{Path: []string{"spot", "services"}, IDField: "service_id"},
@@ -148,7 +150,7 @@ func citable(rule EvidenceRule) bool {
 
 // Unit is one citable piece of a tool answer, labelled with the one service and action that govern it.
 // ServiceID is the caller's string, not a parsed id: for EvidenceServiceArg it is the call's own argument, for
-// the per-item kinds the element's id member exactly as it appeared in the (possibly scrubbed) body. It is only known
+// the per-item kinds the element's id member, exactly as it appeared in the (possibly scrubbed) body. It is only known
 // to be non-empty, at most 512 bytes, free of control characters, edge spaces and "[" (the scrubber's marker); the
 // caller must still parse it (model.ParseServiceID) and check what the identity may read.
 type Unit struct {
@@ -177,7 +179,8 @@ func Units(tool string, args map[string]any, body string) []Unit {
 	case EvidencePerItem:
 		return perItemUnits(rule, []byte(body))
 	case EvidencePerItemNested:
-		return nestedUnits(rule.Action, rule.Arrays, []byte(body))
+		units, _ := walkNested(rule.Action, rule.Arrays, []byte(body), false)
+		return units
 	}
 	return nil
 }
@@ -308,7 +311,7 @@ func perItemUnits(rule EvidenceRule, body []byte) []Unit {
 	}
 	var units []Unit
 	for _, element := range elements {
-		if unit, ok := elementUnit(element, rule.IDField, rule.Action); ok {
+		if unit, ok := elementUnit(element, rule.IDField, rule.Action, nil); ok {
 			units = append(units, unit)
 		}
 		if len(units) >= maxEvidenceUnits {
@@ -319,8 +322,8 @@ func perItemUnits(rule EvidenceRule, body []byte) []Unit {
 }
 
 // elementUnit makes the unit of one array element: an object with exactly one usable string id member. Anything
-// else, a repeated member name included, gives no unit.
-func elementUnit(element json.RawMessage, idField, action string) (Unit, bool) {
+// else, a repeated member name included, gives no unit. The members named in omit are left out of the unit's text.
+func elementUnit(element json.RawMessage, idField, action string, omit map[string]bool) (Unit, bool) {
 	if firstByte(element) != '{' {
 		return Unit{}, false
 	}
@@ -336,55 +339,115 @@ func elementUnit(element json.RawMessage, idField, action string) (Unit, bool) {
 		if json.Unmarshal(m.value, &serviceID) != nil || !usableServiceID(serviceID) {
 			return Unit{}, false
 		}
-		return Unit{ServiceID: serviceID, Action: action, Text: compactJSON(element)}, true
+		return Unit{ServiceID: serviceID, Action: action, Text: elementText(element, members, omit)}, true
 	}
 	return Unit{}, false
 }
 
-// nestedUnits turns the elements of the named arrays into units, each attributed to the id in its own member, in
-// document order and at most maxEvidenceUnits across all arrays. A step of a path that is missing, null or not an
-// object, or an end that is not an array, gives nothing for that array and is no error. An object with a repeated
-// member name on the way to an array gives nothing below it, and neither does a body that is not an object.
-func nestedUnits(action string, arrays []ItemArray, body []byte) []Unit {
+// elementText is the compact JSON of an element, without the members named in omit.
+func elementText(element json.RawMessage, members []member, omit map[string]bool) string {
+	omitted := false
+	for _, m := range members {
+		omitted = omitted || omit[m.name]
+	}
+	if !omitted {
+		return compactJSON(element)
+	}
+	var kept []string
+	for _, m := range members {
+		if !omit[m.name] {
+			kept = append(kept, jsonKey(m.name)+":"+compactJSON(m.value))
+		}
+	}
+	return "{" + strings.Join(kept, ",") + "}"
+}
+
+// callerMembers are members of a nested row that say what the caller may do with the service, not what the
+// service is. They are left out of a unit's text, so a reader of the evidence is not shown the writer's rights.
+var callerMembers = map[string]bool{"can_edit": true, "can_deploy": true}
+
+// walkNested is the one walk over the named arrays of a nested answer, in document order. It makes a unit of each
+// element that has a usable id, at most maxEvidenceUnits across all arrays, and, when wantRest, also returns the
+// answer with those elements taken out of their arrays: everything else stays, an emptied array as `[]`, so the
+// names of the panels survive. A step of a path that is missing, null or not an object, or an end that is not an
+// array, gives nothing for that array and is no error. An object with a repeated member name on the way to an
+// array gives nothing below it and is kept as it is, and so is a body that is not an object.
+func walkNested(action string, arrays []ItemArray, body []byte, wantRest bool) ([]Unit, string) {
 	var units []Unit
-	var visit func(object []byte, path []string) bool
-	visit = func(object []byte, path []string) (more bool) {
+	full := false
+	var visit func(object []byte, path []string) string
+	visit = func(object []byte, path []string) string {
 		members, duplicate, ok := objectMembers(object)
 		if !ok || duplicate {
-			return true
+			return compactJSON(object)
 		}
+		var parts []string
 		for _, m := range members {
 			here := append(path[:len(path):len(path)], m.name)
-			var onTheWay bool
+			value, handled := "", false
 			for _, array := range arrays {
 				switch {
-				case slices.Equal(array.Path, here):
+				case slices.Equal(array.Path, here) && firstByte(m.value) == '[':
 					elements, ok := arrayElements(m.value)
 					if !ok {
 						continue
 					}
+					var left []string
 					for _, element := range elements {
-						if unit, ok := elementUnit(element, array.IDField, action); ok {
-							units = append(units, unit)
+						if !full {
+							if unit, ok := elementUnit(element, array.IDField, action, callerMembers); ok {
+								units = append(units, unit)
+								full = len(units) >= maxEvidenceUnits
+								continue
+							}
 						}
-						if len(units) >= maxEvidenceUnits {
-							return false
+						if wantRest {
+							left = append(left, compactJSON(element))
 						}
 					}
-				case len(array.Path) > len(here) && slices.Equal(array.Path[:len(here)], here):
-					onTheWay = true
+					value, handled = "["+strings.Join(left, ",")+"]", true
+				case len(array.Path) > len(here) && slices.Equal(array.Path[:len(here)], here) && firstByte(m.value) == '{':
+					value, handled = visit(m.value, here), true
 				}
 			}
-			if onTheWay && firstByte(m.value) == '{' && !visit(m.value, here) {
-				return false
+			if !wantRest {
+				continue
 			}
+			if !handled {
+				value = compactJSON(m.value)
+			}
+			parts = append(parts, jsonKey(m.name)+":"+value)
 		}
-		return true
+		return "{" + strings.Join(parts, ",") + "}"
 	}
-	if firstByte(body) == '{' {
-		visit(body, nil)
+	if firstByte(body) != '{' {
+		return nil, ""
 	}
-	return units
+	rest := visit(body, nil)
+	return units, rest
+}
+
+// jsonKey is a member name as a JSON string, without the HTML escapes the standard encoder adds.
+func jsonKey(name string) string {
+	var out bytes.Buffer
+	encoder := json.NewEncoder(&out)
+	encoder.SetEscapeHTML(false)
+	if encoder.Encode(name) != nil {
+		return `""`
+	}
+	return strings.TrimSuffix(out.String(), "\n")
+}
+
+// NestedRest is what a nested per-item answer holds besides its units: the answer with the elements Units makes
+// units of taken out of their arrays, as compact JSON. It is "" for any other tool, for a body Units would not
+// read, and for a body that is not an object.
+func NestedRest(tool, body string) string {
+	rule, ok := evidenceRules[tool]
+	if !ok || rule.Kind != EvidencePerItemNested || !citable(rule) || len(body) > maxEvidenceBody || !json.Valid([]byte(body)) {
+		return ""
+	}
+	_, rest := walkNested(rule.Action, rule.Arrays, []byte(body), true)
+	return rest
 }
 
 // firstByte is the first byte of raw that is not JSON whitespace, or 0.

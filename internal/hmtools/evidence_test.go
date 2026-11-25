@@ -365,6 +365,11 @@ func FuzzUnits(f *testing.F) {
 		`{"rows":[{"service_id":"s"}]}`, `{"a":[{"b":[1]}]}`, `{"items":[{"id":"\u0000"}]}`, `{"\ud800":1}`, `[1e999]`,
 		`{"a":1}{"b":2}`, strings.Repeat("[", 20000), `{"items":[` + strings.Repeat(`{"id":"s"},`, 3000) + `{}]}`,
 		"\xff\xfe", `{"service_id":"x","items":[{"id":"y"}]}`,
+		`{"rightsizing":{"services":[{"service_id":"s","can_edit":true}]},"spot":{"services":null},"arm64":[]}`,
+		`{"rightsizing":{"services":[{"service_id":"s"}],"services":[{"service_id":"t"}]}}`,
+		`{"getting_worse":{"data":{"rows":[{"service_id":"s"},{"service_id":7}]}},"least_available":{"rows":{}}}`,
+		`{"at_scaling_max":[{"service_id":"s","can_edit":1,"can_edit":2}],"over_reserved":{"data":null}}`,
+		`{"rightsizing":` + strings.Repeat(`{"services":`, 3000) + `[]` + strings.Repeat(`}`, 3000) + `}`,
 	}
 	for _, seed := range seeds {
 		f.Add(seed)
@@ -379,6 +384,16 @@ func FuzzUnits(f *testing.F) {
 			}
 			if len(units) > 2000 {
 				t.Fatalf("%s: %d units", tool.Name, len(units))
+			}
+			if rest := NestedRest(tool.Name, body); rule.Kind != EvidencePerItemNested && rest != "" || rest != "" && !json.Valid([]byte(rest)) {
+				t.Fatalf("%s: rest %q for %q", tool.Name, rest, body)
+			}
+			if rule.Kind == EvidencePerItemNested {
+				for _, u := range units {
+					if !json.Valid([]byte(u.Text)) {
+						t.Fatalf("%s: unit text %q is not JSON", tool.Name, u.Text)
+					}
+				}
 			}
 			for _, u := range units {
 				if u.ServiceID == "" || len(u.ServiceID) > 512 || u.Action == "" || !json.Valid([]byte(body)) {
@@ -657,5 +672,56 @@ func TestUnits_ExistingPerItemRulesAreUnchanged(t *testing.T) {
 		if got := Units(c.tool, nil, c.body); !reflect.DeepEqual(got, c.want) {
 			t.Errorf("%s %s: units %+v, want %+v", c.tool, c.body, got, c.want)
 		}
+	}
+}
+
+func TestNestedRest_KeepsEverythingButTheCitedRows(t *testing.T) {
+	got := NestedRest("get_cost_analytics", nestedBody)
+	want := `{"tab":"cost","by_cluster":[{"key":"c1","service_id":"never"}],"rightsizing":{"state":"ok","services":[]},"spot":{"min_tasks":2,"services":[]},"arm64":{"already_arm64":4,"services":[]}}`
+	if got != want {
+		t.Errorf("rest %s\nwant %s", got, want)
+	}
+	// A row without a usable id is not a unit, so it stays; so does a null panel.
+	got = NestedRest("get_reliability_analytics", `{"least_available":{"rows":[{"service_id":""},{"service_id":"s1"}],"total":2},"getting_worse":{"data":null}}`)
+	want = `{"least_available":{"rows":[{"service_id":""}],"total":2},"getting_worse":{"data":null}}`
+	if got != want {
+		t.Errorf("rest %s\nwant %s", got, want)
+	}
+	for tool, body := range map[string]string{"get_service": `{"a":1}`, "list_services": `{"items":[{"id":"s"}]}`, "get_cost_analytics": `[1]`, "no_such_tool": `{}`} {
+		if got := NestedRest(tool, body); got != "" {
+			t.Errorf("%s: rest %q, want none", tool, got)
+		}
+	}
+	if got := NestedRest("get_cost_analytics", `{"a":`); got != "" {
+		t.Errorf("invalid body: rest %q", got)
+	}
+}
+
+// An object with a repeated member name gives no unit below it, and the rest shows it whole, so nothing is lost
+// and nothing is cited twice.
+func TestNestedRest_ARepeatedMemberShowsEverythingBelowIt(t *testing.T) {
+	body := `{"rightsizing":{"services":[{"service_id":"s1"}],"services":[{"service_id":"s2"}]},"spot":{"services":[{"service_id":"s3"}]}}`
+	units := Units("get_cost_analytics", nil, body)
+	if len(units) != 1 || units[0].ServiceID != "s3" {
+		t.Fatalf("units %+v, want only the spot row", units)
+	}
+	want := `{"rightsizing":{"services":[{"service_id":"s1"}],"services":[{"service_id":"s2"}]},"spot":{"services":[]}}`
+	if got := NestedRest("get_cost_analytics", body); got != want {
+		t.Errorf("rest %s\nwant %s", got, want)
+	}
+}
+
+// can_edit and can_deploy say what the caller may do, not what the service is: they are not part of the evidence.
+func TestUnits_NestedLeavesOutTheCallersRights(t *testing.T) {
+	body := `{"rightsizing":{"services":[{"service_id":"s1","can_edit":true,"monthly":1}]},"spot":{"services":[{"can_deploy":false,"service_id":"s2"}]},
+	 "arm64":{"services":[{"service_id":"s3","note":"<a&b>","can_edit":true}]}}`
+	got := unitTexts(Units("get_cost_analytics", nil, body))
+	want := []string{`{"service_id":"s1","monthly":1}`, `{"service_id":"s2"}`, `{"service_id":"s3","note":"<a&b>"}`}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("texts %q, want %q", got, want)
+	}
+	// Per-item rules keep every member.
+	if got := Units("list_alerts", nil, `{"items":[{"service_id":"s1","can_edit":true}]}`); len(got) != 1 || got[0].Text != `{"service_id":"s1","can_edit":true}` {
+		t.Errorf("per-item units %+v", got)
 	}
 }

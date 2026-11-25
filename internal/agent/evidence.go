@@ -3,7 +3,6 @@ package agent
 import (
 	"bytes"
 	"encoding/json"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -100,14 +99,22 @@ func commonPrefix(a, b string) int {
 var oneLine = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ", "\v", " ", "\f", " ", "\u0085", " ", "\u2028", " ", "\u2029", " ")
 
 // numberUnits splits a scrubbed answer into units numbered from next, and
-// returns the text that shows them: one line each, then what no unit covers. An
-// answer without units is returned as it is.
+// returns the text that shows them: one line each, then what no unit covers
+// (before the units for a nested answer). An answer without units is returned as
+// it is.
 func numberUnits(tool string, args map[string]any, text string, next int) (string, []numberedUnit) {
 	found := hmtools.Units(tool, args, text)
 	if len(found) == 0 || next+len(found)-1 > maxUnitNumber {
 		return text, nil
 	}
 	var shown strings.Builder
+	rest := restOf(tool, text, found)
+	// The totals of an analytics answer come before its rows: a result over the byte cap is cut from the end,
+	// and the rows are what can be spared.
+	restFirst := rest != "" && restComesFirst(tool)
+	if restFirst {
+		shown.WriteString(notCitable + oneLine.Replace(rest) + "\n")
+	}
 	units := make([]numberedUnit, len(found))
 	for i, u := range found {
 		if i > 0 {
@@ -120,18 +127,25 @@ func numberUnits(tool string, args map[string]any, text string, next int) (strin
 		}}
 		shown.WriteString(" " + oneLine.Replace(u.Text))
 	}
-	if rest := restOf(tool, text, found); rest != "" {
+	if rest != "" && !restFirst {
 		shown.WriteString("\n" + notCitable + oneLine.Replace(rest))
 	}
 	return shown.String(), units
 }
 
+// restComesFirst is true for the tools whose answers hold totals beside their rows.
+func restComesFirst(tool string) bool {
+	rule, _ := hmtools.EvidenceRuleFor(tool)
+	return rule.Kind == hmtools.EvidencePerItemNested
+}
+
 // restOf is the part of a JSON answer that no unit covers, as compact JSON, or
-// "" when there is none. Units come in document order, so one walk finds it.
+// "" when there is none. Units come in document order, so one walk finds it; a
+// nested answer is walked by hmtools, which makes its units.
 func restOf(tool, text string, units []hmtools.Unit) string {
 	rule, _ := hmtools.EvidenceRuleFor(tool)
 	if rule.Kind == hmtools.EvidencePerItemNested {
-		return nestedRest(rule.Arrays, bytes.TrimSpace([]byte(text)), units)
+		return hmtools.NestedRest(tool, text)
 	}
 	covered := func(piece string) bool {
 		if len(units) == 0 || units[0].Text != piece {
@@ -199,98 +213,6 @@ func restOf(tool, text string, units []hmtools.Unit) string {
 		return ""
 	}
 	return "{" + strings.Join(rest, ",") + "}"
-}
-
-// nestedRest is the answer with the elements the units cover taken out of the named arrays, as compact JSON, or ""
-// when nothing else is left. It follows the same walk as hmtools.Units, so the units are used up in the order the
-// elements appear. An array or an object that the removal emptied is left out; one that was empty to begin with, an
-// array that is not the named one and an object with a repeated member name (which gave no units) stay as they are.
-func nestedRest(arrays []hmtools.ItemArray, body []byte, units []hmtools.Unit) string {
-	covered := func(piece string) bool {
-		if len(units) == 0 || units[0].Text != piece {
-			return false
-		}
-		units = units[1:]
-		return true
-	}
-	var strip func(raw json.RawMessage, path []string) (rest string, left bool)
-	strip = func(raw json.RawMessage, path []string) (string, bool) {
-		members, ok := distinctMembers(raw)
-		if !ok {
-			return compactJSON(raw), true
-		}
-		var kept []string
-		removed := false
-		for _, m := range members {
-			here := append(path[:len(path):len(path)], m.name)
-			value, keep := compactJSON(m.value), true
-			for _, array := range arrays {
-				if slices.Equal(array.Path, here) {
-					var elements []json.RawMessage
-					if !bytes.HasPrefix(bytes.TrimSpace(m.value), []byte("[")) || json.Unmarshal(m.value, &elements) != nil {
-						continue
-					}
-					var uncovered []string
-					for _, element := range elements {
-						if compact := compactJSON(element); !covered(compact) {
-							uncovered = append(uncovered, compact)
-						}
-					}
-					if len(uncovered) == 0 && len(elements) > 0 {
-						keep = false
-					}
-					value = "[" + strings.Join(uncovered, ",") + "]"
-				} else if len(array.Path) > len(here) && slices.Equal(array.Path[:len(here)], here) && bytes.HasPrefix(bytes.TrimSpace(m.value), []byte("{")) {
-					value, keep = strip(m.value, here)
-				}
-			}
-			if !keep {
-				removed = true
-				continue
-			}
-			key, _ := json.Marshal(m.name)
-			kept = append(kept, string(key)+":"+value)
-		}
-		if len(kept) == 0 && removed {
-			return "", false
-		}
-		return "{" + strings.Join(kept, ",") + "}", true
-	}
-	if len(body) == 0 || body[0] != '{' {
-		return ""
-	}
-	rest, _ := strip(body, nil)
-	return rest
-}
-
-type namedValue struct {
-	name  string
-	value json.RawMessage
-}
-
-// distinctMembers reads a JSON object into its members in document order. It is false for anything that is not an
-// object, and for an object that repeats a member name.
-func distinctMembers(raw []byte) ([]namedValue, bool) {
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
-		return nil, false
-	}
-	seen := map[string]struct{}{}
-	var members []namedValue
-	for decoder.More() {
-		token, err := decoder.Token()
-		name, isName := token.(string)
-		var value json.RawMessage
-		if err != nil || !isName || decoder.Decode(&value) != nil {
-			return nil, false
-		}
-		if _, repeated := seen[name]; repeated {
-			return nil, false
-		}
-		seen[name] = struct{}{}
-		members = append(members, namedValue{name, value})
-	}
-	return members, true
 }
 
 func compactJSON(raw []byte) string {
