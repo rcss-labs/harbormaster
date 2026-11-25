@@ -30,18 +30,27 @@ func (d *Driver) Run(ctx context.Context, p Prepared, job Job) (out Outcome) {
 		if job.SetUpOver != nil {
 			job.SetUpOver()
 		}
-		return Outcome{Kind: NotConfigured}
+		return Outcome{Kind: ModelUnavailable}
 	}
 	r := &active{
 		d: d, p: p, job: job,
 		run: store.AgentRun{ID: uuid.New(), Role: job.Role, UserID: &p.Identity.ID, Provider: p.Provider, Model: p.Model.ID, ReservedMicroUSD: reservation},
 	}
 	r.out = Outcome{Kind: Failed, RunID: r.run.ID, Provider: r.run.Provider, Model: r.run.Model}
-	r.setUpOver = sync.OnceFunc(func() {
-		if job.SetUpOver != nil {
-			job.SetUpOver()
-		}
-	})
+	// Once, and never a panic: a caller that fails to let the next set-up in must not keep this run from being settled.
+	var setUpOver sync.Once
+	r.setUpOver = func() {
+		setUpOver.Do(func() {
+			defer func() {
+				if rec := recover(); rec != nil {
+					d.logErr("agentjob: panic", agentrun.NewPanicError(rec))
+				}
+			}()
+			if job.SetUpOver != nil {
+				job.SetUpOver()
+			}
+		})
+	}
 	defer func() {
 		if rec := recover(); rec != nil {
 			d.logErr("agentjob: panic", agentrun.NewPanicError(rec))
@@ -72,9 +81,10 @@ type active struct {
 	cancel   context.CancelFunc
 	token    string
 
-	out       Outcome
-	setUpOver func()
-	once      sync.Once
+	out         Outcome
+	setUpOver   func()
+	concludeErr error // the caller panicked in Conclude: nothing it would have saved was saved
+	once        sync.Once
 }
 
 // stopped sets how a step that failed with err ended the run: the caller's claim is lost, the job is stopping, or
@@ -264,6 +274,9 @@ func (r *active) finish(ctx context.Context) {
 		}
 		res := r.d.Runs.Finish(ctx, ops)
 		r.out.Finished, r.out.SaveErr = true, res.SaveErr
+		if r.concludeErr != nil {
+			r.out.SaveErr = r.concludeErr
+		}
 	})
 }
 
@@ -276,12 +289,18 @@ func (r *active) conclusion() (c Conclusion) {
 	}
 	defer func() {
 		if rec := recover(); rec != nil {
-			r.d.logErr("agentjob: panic", agentrun.NewPanicError(rec))
+			pe := agentrun.NewPanicError(rec)
+			r.d.logErr("agentjob: panic", pe)
 			r.out.Kind, r.out.Panicked, r.out.Result = Failed, true, nil
+			r.concludeErr = pe
 			c = Conclusion{Word: defaultWord(Failed)}
 		}
 	}()
-	return r.job.Conclude(r.out)
+	c = r.job.Conclude(r.out)
+	if c.Word == "" {
+		c.Word = defaultWord(r.out.Kind)
+	}
+	return c
 }
 
 // defaultWord is the audit word for a kind when the caller words none.

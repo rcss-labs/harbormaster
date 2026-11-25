@@ -217,7 +217,7 @@ func (j *job) prepare(ctx context.Context) *ending {
 	prepared, kind := j.drv.PrepareWith(ctx, identity, roleName)
 	switch kind {
 	case agentjob.Ready:
-	case agentjob.NotConfigured:
+	case agentjob.NotConfigured, agentjob.ModelUnavailable:
 		return skip(reasonNotConfigured)
 	case agentjob.AgentUnavailable:
 		end := j.notStarted()
@@ -254,8 +254,20 @@ func (j *job) details() map[string]any {
 // write that does it.
 func (j *job) conclude(out agentjob.Outcome) agentjob.Conclusion {
 	j.result = out.Result
-	j.end = j.endOf(out)
+	j.end = j.safeEndOf(out)
 	return agentjob.Conclusion{Word: j.end.word, Save: j.settle}
+}
+
+// safeEndOf is endOf, except that a panic in it ends the investigation as failed: the run is paid for and is being
+// settled, so the claim must not be left running for a second one.
+func (j *job) safeEndOf(out agentjob.Outcome) (end ending) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			j.logError("investigate: panic", agentrun.NewPanicError(rec))
+			end = failed(reasonError)
+		}
+	}()
+	return j.endOf(out)
 }
 
 // endOf is what the way a run came out means for the investigation.
@@ -265,7 +277,7 @@ func (j *job) endOf(out agentjob.Outcome) ending {
 		return ending{kind: endDone, word: "done"}
 	case agentjob.Budget:
 		return skipped(reasonBudget)
-	case agentjob.NotConfigured:
+	case agentjob.NotConfigured, agentjob.ModelUnavailable:
 		return skipped(reasonNotConfigured)
 	case agentjob.LimitReached:
 		return failed(reasonLimitReached)

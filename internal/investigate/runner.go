@@ -162,12 +162,13 @@ func (r *Runner) claim(ctx context.Context) (*job, bool) {
 		}
 		return nil, false
 	}
+	log := r.log().With("investigation_id", v.ID)
 	return &job{
 		r: r, inv: v, claim: v.Claim(),
 		drv: &agentjob.Driver{
 			Store: r.Store, Auth: r.Auth, Agent: r.Agent,
-			Runs:  &agentrun.Runner{Store: r.Store, Now: r.now, Log: r.log(), Draining: ctx.Done()},
-			Guard: r.Guard, Now: r.now, Log: r.log(), OnEvent: r.onEvent, Slack: r.slack,
+			Runs:  &agentrun.Runner{Store: r.Store, Now: r.now, Log: log, Draining: ctx.Done()},
+			Guard: r.Guard, Now: r.now, Log: log, OnEvent: r.onEvent, Slack: r.slack,
 		},
 	}, true
 }

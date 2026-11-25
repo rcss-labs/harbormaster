@@ -32,7 +32,8 @@ const (
 	NoResult                     // the agent finished without one and said so
 	LimitReached                 // the agent finished without a result, having hit a limit
 	Budget                       // the reservation was refused: nothing was spent
-	NotConfigured                // no model for the role, or the agent does not offer it
+	NotConfigured                // no model for the role, or the agent does not offer the role
+	ModelUnavailable             // the chosen model is not in the catalogue, or no run of it can be priced
 	AgentBusy                    // the agent refused the run before it did anything
 	AgentUnavailable             // the agent could not be reached, or its stream broke
 	Cancelled                    // the context ended, or the lease was not certain
@@ -61,7 +62,9 @@ type RunClient interface {
 	Run(ctx context.Context, bearer string, req agentclient.RunRequest, onEvent func(agentclient.Event)) error
 }
 
-// Driver runs background runs for jobs. It is cheap: a job may make one for each run.
+// Driver runs background runs for jobs. It is cheap and is copied for each run: Guard and Runs.Draining belong to one
+// lease term (the guard of the lease held, the draining channel of the term's context), so a Driver built once for
+// all terms, with nil values, would start runs under a lease that is gone. Log should carry the job's id.
 type Driver struct {
 	Store DriverStore
 	Auth  Minter
@@ -94,6 +97,7 @@ type Prepared struct {
 	Model     agentclient.Model
 	Provider  string
 	RedactEnv bool
+	Settings  store.AgentSettings // as read when the run was prepared
 }
 
 // Job is one run to make. Everything the driver does not know of the caller is in here.
@@ -131,22 +135,25 @@ type Outcome struct {
 	Tools    []string
 	Result   *agentresult.Result // of a Done run only
 
-	// Called: the agent was called. A Cancelled one that was not called was not started at all.
+	// Called: the agent was called. A run with Called false never reached the agent, so a caller must not count it
+	// as an attempt; a Cancelled one that was not called was not started at all.
 	Called bool
 	// Panicked: the run was ended by a panic.
 	Panicked bool
 	// ModelUnreachable: the agent reported that it could not reach its model.
 	ModelUnreachable bool
 	// Finished: the run was reserved and has been settled, its token deleted and its audit row written. Conclude
-	// ran. SaveErr is why Save failed, if it did. When not Finished, nothing was reserved or the reservation was
+	// ran. SaveErr is why Save failed, if it did, or the panic of a Conclude that panicked (then nothing was saved,
+	// and the outcome is Failed with Panicked set). When not Finished, nothing was reserved or the reservation was
 	// refused, and the caller ends its own record.
 	Finished bool
 	SaveErr  error
 }
 
 // Prepare spends nothing: it finds the agent's identity, what it may see, the model chosen for the role and the
-// agent's catalogue. Kinds: Ready, NotConfigured (no model for the role, the model is not offered, the role is not
-// offered, or no run could be priced), AgentUnavailable (no catalogue), Failed (a read failed).
+// agent's catalogue. Kinds: Ready; NotConfigured (no model is chosen for the role, or the agent does not offer the
+// role); ModelUnavailable (the chosen model is not in the catalogue, or no run of it can be priced); AgentUnavailable
+// (no catalogue); Failed (a read failed); Cancelled (a step failed because ctx had ended).
 func (d *Driver) Prepare(ctx context.Context, role string) (Prepared, Kind) {
 	identity, kind := d.Identify(ctx)
 	if kind != Ready {
@@ -155,7 +162,7 @@ func (d *Driver) Prepare(ctx context.Context, role string) (Prepared, Kind) {
 	subject, err := Within(ctx, func(ctx context.Context) (authz.Subject, error) { return d.Store.LoadSubject(ctx, identity.ID) })
 	if err != nil {
 		d.logError(ctx, "agentjob: load what the agent identity may see", err)
-		return Prepared{}, Failed
+		return Prepared{}, failedKind(ctx, Failed)
 	}
 	subject.ReadOnly = true
 	p, kind := d.PrepareWith(ctx, identity, role)
@@ -168,7 +175,7 @@ func (d *Driver) Identify(ctx context.Context) (store.User, Kind) {
 	identity, err := Within(ctx, d.Store.EnsureAgentIdentity)
 	if err != nil {
 		d.logError(ctx, "agentjob: load the agent identity", err)
-		return store.User{}, Failed
+		return store.User{}, failedKind(ctx, Failed)
 	}
 	return identity, Ready
 }
@@ -179,7 +186,7 @@ func (d *Driver) PrepareWith(ctx context.Context, identity store.User, role stri
 	settings, err := Within(ctx, d.Store.GetAgentSettings)
 	if err != nil {
 		d.logError(ctx, "agentjob: load the agent settings", err)
-		return Prepared{}, Failed
+		return Prepared{}, failedKind(ctx, Failed)
 	}
 	ref, chosen := settings.RoleModels[role]
 	if !chosen {
@@ -188,17 +195,27 @@ func (d *Driver) PrepareWith(ctx context.Context, identity store.User, role stri
 	cat, err := d.Agent.Catalogue(ctx)
 	if err != nil {
 		d.logError(ctx, "agentjob: agent catalogue unavailable", err)
-		return Prepared{}, AgentUnavailable
+		return Prepared{}, failedKind(ctx, AgentUnavailable)
+	}
+	if !cat.Supports(role) {
+		return Prepared{}, NotConfigured
 	}
 	chosenModel, offered := cat.Find(ref.Provider, ref.Model)
-	_, known := worstCase(chosenModel, cat.MaxRunTokens)
-	if !offered || !cat.Supports(role) || !known {
-		return Prepared{}, NotConfigured
+	if _, known := worstCase(chosenModel, cat.MaxRunTokens); !offered || !known {
+		return Prepared{}, ModelUnavailable
 	}
 	return Prepared{
 		Identity: identity, Catalogue: cat, Model: chosenModel, Provider: ref.Provider,
-		RedactEnv: !slices.Contains(settings.UnredactedProviders, ref.Provider),
+		RedactEnv: !slices.Contains(settings.UnredactedProviders, ref.Provider), Settings: settings,
 	}, Ready
+}
+
+// failedKind is the kind of a step that failed: Cancelled when the job is stopping, which is why it failed.
+func failedKind(ctx context.Context, kind Kind) Kind {
+	if ctx.Err() != nil {
+		return Cancelled
+	}
+	return kind
 }
 
 // worstCase is the most a run can cost. It is not known, and such a run must not start, when the agent states no

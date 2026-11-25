@@ -94,6 +94,7 @@ type fakeAgent struct {
 	catalogueStatus int
 	roles           []string
 	models          []string
+	free            bool // the models state no price
 	runs            int
 }
 
@@ -109,7 +110,11 @@ func newFakeAgent(t *testing.T) *fakeAgent {
 		}
 		var models []map[string]any
 		for _, id := range a.models {
-			models = append(models, map[string]any{"id": id, "input_per_mtok_micro_usd": 3_000_000, "output_per_mtok_micro_usd": 15_000_000, "context_tokens": 200_000})
+			in, out := 3_000_000, 15_000_000
+			if a.free {
+				in, out = 0, 0
+			}
+			models = append(models, map[string]any{"id": id, "input_per_mtok_micro_usd": in, "output_per_mtok_micro_usd": out, "context_tokens": 200_000})
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"providers": []map[string]any{{"provider": testProvider, "models": models}}, "roles": a.roles,
@@ -279,12 +284,13 @@ func TestDriver_PrepareKinds(t *testing.T) {
 		role    string
 		want    Kind
 	}{
-		"no model for the role":   {prepare: func(f *fixture) { f.settings(func(s *store.AgentSettings) { s.RoleModels = nil }) }, want: NotConfigured},
-		"model not in catalogue":  {prepare: func(f *fixture) { f.agent.models = []string{"claude-opus-4-5-20251101"} }, want: NotConfigured},
-		"role not offered":        {prepare: func(f *fixture) { f.agent.roles = []string{"chat"} }, want: NotConfigured},
-		"no catalogue":            {prepare: func(f *fixture) { f.agent.catalogueStatus = http.StatusServiceUnavailable }, want: AgentUnavailable},
-		"a model that has no use": {prepare: func(f *fixture) { f.agent.models = nil }, want: NotConfigured},
-		"ready":                   {prepare: func(*fixture) {}, want: Ready},
+		"no model for the role":  {prepare: func(f *fixture) { f.settings(func(s *store.AgentSettings) { s.RoleModels = nil }) }, want: NotConfigured},
+		"model not in catalogue": {prepare: func(f *fixture) { f.agent.models = []string{"claude-opus-4-5-20251101"} }, want: ModelUnavailable},
+		"model without a price":  {prepare: func(f *fixture) { f.agent.free = true }, want: ModelUnavailable},
+		"role not offered":       {prepare: func(f *fixture) { f.agent.roles = []string{"chat"} }, want: NotConfigured},
+		"no catalogue":           {prepare: func(f *fixture) { f.agent.catalogueStatus = http.StatusServiceUnavailable }, want: AgentUnavailable},
+		"no model at all":        {prepare: func(f *fixture) { f.agent.models = nil }, want: ModelUnavailable},
+		"ready":                  {prepare: func(*fixture) {}, want: Ready},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -621,3 +627,98 @@ func TestAccept_MovedUnchanged(t *testing.T) {
 }
 
 var _ = fmt.Sprint
+
+// ---- fix round 1 ---------------------------------------------------------------------------------------------------
+
+func TestDriver_PreparedCarriesTheSettings(t *testing.T) {
+	f := newFixture(t)
+	p := f.prepared()
+	if p.Settings.MonthlyBudgetMicroUSD != 100_000_000 || p.Settings.RoleModels[testRole].Model != testModel {
+		t.Errorf("settings = %+v", p.Settings)
+	}
+}
+
+// A step that failed because the job is stopping is Cancelled, not a failure of the agent.
+func TestDriver_PrepareIsCancelledWhenTheContextEnded(t *testing.T) {
+	f := newFixture(t)
+	f.agent.catalogueStatus = http.StatusServiceUnavailable
+	if _, kind := f.driver.Prepare(context.Background(), testRole); kind != AgentUnavailable {
+		t.Fatalf("kind = %v, want AgentUnavailable while the job runs", kind)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, kind := f.driver.Prepare(ctx, testRole); kind != Cancelled {
+		t.Errorf("kind = %v, want Cancelled", kind)
+	}
+}
+
+// A model that cannot be priced is not run, and a caller that serialises its set-ups is let go.
+func TestDriver_AnUnpricedModelIsNotRun(t *testing.T) {
+	f := newFixture(t)
+	p := f.prepared()
+	p.Model.InputMicroUSDPerMTok, p.Model.OutputMicroUSDPerMTok = 0, 0
+	var over atomic.Int32
+	out := f.driver.Run(context.Background(), p, Job{Role: testRole, SetUpOver: func() { over.Add(1) }})
+	if out.Kind != ModelUnavailable || out.Finished || over.Load() != 1 || len(f.runs()) != 0 {
+		t.Errorf("outcome %+v, setup over %d, runs %d", out, over.Load(), len(f.runs()))
+	}
+}
+
+// A caller that words nothing gets the default word for how the run came out.
+func TestDriver_AnEmptyWordIsTheDefaultWord(t *testing.T) {
+	for name, c := range map[string]struct {
+		script func(c *call)
+		want   string
+	}{
+		"done":      {func(c *call) { c.send(usage(100), resultEvent("Fine."), doneEvent) }, "done"},
+		"no result": {func(c *call) { c.send(usage(100), agentError("no_result")) }, "no_result"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			f.agent.set(c.script)
+			job := Job{Role: testRole, Started: func(context.Context, uuid.UUID, string, string) error { return nil },
+				Conclude: func(Outcome) Conclusion { return Conclusion{} }}
+			f.driver.Run(context.Background(), f.prepared(), job)
+			if rows := f.auditRows(); len(rows) != 1 || rows[0].Details["outcome"] != c.want {
+				t.Errorf("audit = %+v, want outcome %s", rows, c.want)
+			}
+		})
+	}
+}
+
+// A caller that panics while saying what to make of a run leaves it settled as failed, and the driver does not say
+// that anything was saved.
+func TestDriver_AConcludeThatPanicsIsNotASave(t *testing.T) {
+	f := newFixture(t)
+	var saved atomic.Int32
+	job := Job{Role: testRole, Started: func(context.Context, uuid.UUID, string, string) error { return nil },
+		Conclude: func(Outcome) Conclusion {
+			saved.Add(1)
+			panic("PANIC-SENTINEL")
+		}}
+	out := f.driver.Run(context.Background(), f.prepared(), job)
+	runs := f.runs()
+	var pe *agentrun.PanicError
+	if len(runs) != 1 || runs[0].state != "failed" || runs[0].tokens != 0 || runs[0].audits != 1 || f.agent.calls() != 1 {
+		t.Fatalf("runs = %+v after %d calls, want one failed run, no token, one audit row", runs, f.agent.calls())
+	}
+	if out.Kind != Failed || !out.Panicked || out.Result != nil || !out.Finished || !errors.As(out.SaveErr, &pe) {
+		t.Errorf("outcome = %+v, want a failed, panicked, finished run whose save is a panic", out)
+	}
+	if strings.Contains(f.logs.String(), "PANIC-SENTINEL") {
+		t.Error("the panic's value was logged")
+	}
+}
+
+// A caller whose release of its set-up lock panics does not keep the run from being settled.
+func TestDriver_ASetUpOverThatPanicsStillSettlesTheRun(t *testing.T) {
+	f := newFixture(t)
+	var calls atomic.Int32
+	job := Job{Role: testRole, Started: func(context.Context, uuid.UUID, string, string) error { return nil },
+		SetUpOver: func() { calls.Add(1); panic("PANIC-SENTINEL") }}
+	out := f.driver.Run(context.Background(), f.prepared(), job)
+	runs := f.runs()
+	if len(runs) != 1 || runs[0].state == "running" || runs[0].tokens != 0 || runs[0].audits != 1 || !out.Finished || calls.Load() != 1 || out.Kind != Done || f.agent.calls() != 1 {
+		t.Errorf("outcome %+v, set-up over called %d times, runs %+v", out, calls.Load(), runs)
+	}
+}
