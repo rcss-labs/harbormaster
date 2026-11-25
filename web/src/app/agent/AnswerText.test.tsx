@@ -34,6 +34,13 @@ describe('AnswerText', () => {
     expect(screen.getByRole('link', { name: 'the service' })).toHaveAttribute('href', '/services/abc?x=1')
   })
 
+  it('a path that is not an estate page is plain text', () => {
+    const { container } = show('[a](/settings/users) [b](/me/access) [c](/oauth/authorize) [d](/tasks/abc/terminal) [e](/services/../settings) [f](/%73ettings)')
+    expect(container.querySelector('a')).toBeNull()
+    expect(container).toHaveTextContent('a (/settings/users)')
+    expect(container).toHaveTextContent('e (/services/../settings)')
+  })
+
   it('javascript: link is plain text', () => {
     const { container } = show('[click](javascript:alert(1)) [tab](/\t/example.com) [data](data:text/html,x)')
     expect(container.querySelector('a')).toBeNull()
@@ -48,7 +55,7 @@ describe('AnswerText', () => {
   })
 
   it('api paths are plain text', () => {
-    const { container } = show('[a](/api/auth/logout) [b](/API/x) [c](/api?x=1) [ok](/apis/x)')
+    const { container } = show('[a](/api/auth/logout) [b](/API/x) [c](/api?x=1) [ok](/services/x)')
     expect(container.querySelectorAll('a')).toHaveLength(1)
     expect(screen.getByRole('link', { name: 'ok' })).toBeInTheDocument()
     expect(container).toHaveTextContent('/api/auth/logout')

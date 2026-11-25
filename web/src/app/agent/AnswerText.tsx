@@ -1,21 +1,12 @@
 import { Fragment, memo, type ReactNode } from 'react'
 import { Link, useInRouterContext } from 'react-router'
+import { isEstatePath } from './estateLinks'
 import styles from './agent.module.css'
 
 /**
  * Renders a model's answer from plain text into React elements only. The text can come from untrusted logs, so there is no
  * HTML, no image element and no external link: those render as the literal text they were written as.
  */
-
-/** A path on this site: one leading "/" that is not "//" or "/\", with no whitespace or control characters (browsers drop tabs and newlines inside a URL). */
-const SAME_ORIGIN_PATH = /^\/(?![/\\])[^\s\\]*$/
-
-const hasControlCharacter = (value: string) => [...value].some((char) => char.charCodeAt(0) < 0x20 || char.charCodeAt(0) === 0x7f)
-
-/** The app's own API is never a place to send the user from model text. */
-const API_PATH = /^\/api(?:[/?#]|$)/i
-
-export const isSameOriginPath = (target: string): boolean => SAME_ORIGIN_PATH.test(target) && !hasControlCharacter(target) && !API_PATH.test(target)
 
 function AnswerLink({ to, children }: { to: string; children: ReactNode }) {
   const inRouter = useInRouterContext()
@@ -101,7 +92,7 @@ function renderInline(text: string): ReactNode[] {
           flush(i)
           if (image) {
             out.push(text.slice(i, end + 1)) // an image is never fetched: show what was written
-          } else if (isSameOriginPath(target)) {
+          } else if (isEstatePath(target)) {
             out.push(
               <AnswerLink key={key++} to={target}>
                 {label || target}
