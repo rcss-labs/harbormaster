@@ -70,10 +70,11 @@ func cutRunes(s string, max int) string {
 // dynamic string is escaped for & < >; the link is also escaped for ". The alert text is cut, with an ellipsis, so
 // the whole message fits Telegram's limit.
 func TelegramText(m Message) string {
+	if m.isDiagnosis() {
+		return telegramDiagnosisText(m)
+	}
 	var title string
 	switch {
-	case m.isDiagnosis():
-		title = m.plainHeadline()
 	case m.Event == EventTest:
 		title = "Test message from Harbormaster"
 	case m.Event == EventResolved:
@@ -85,14 +86,13 @@ func TelegramText(m Message) string {
 	}
 	head := "<b>" + telegramEscape.Replace(cutRunes(title, telegramMaxTitle)) + "</b>"
 	tail := "\n" + telegramEscape.Replace(cutRunes(m.where(), telegramMaxTitle)) +
-		"\n" + `<a href="` + telegramAttrEscape.Replace(m.Link()) + `">` + m.linkText() + `</a>`
-	text := m.bodyText()
-	if text == "" {
+		"\n" + `<a href="` + telegramAttrEscape.Replace(m.Link()) + `">Open in Harbormaster</a>`
+	if m.Subject.Text == "" {
 		return head + tail
 	}
 	// "\n" before the text counts one unit.
 	budget := telegramMaxUnits - utf16Units(head) - utf16Units(tail) - 1
-	return head + "\n" + cutEscaped(text, budget) + tail
+	return head + "\n" + cutEscaped(m.Subject.Text, budget) + tail
 }
 
 // TelegramBody renders the sendMessage JSON. The chat id is sent as the string given (a number, negative for

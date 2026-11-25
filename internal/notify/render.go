@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"mime"
+	"mime/quotedprintable"
 	"net/url"
 	"strconv"
 	"strings"
@@ -99,10 +100,11 @@ func SlackBody(m Message) ([]byte, error) {
 	if err := m.checkDiagnosis(); err != nil {
 		return nil, err
 	}
+	if m.isDiagnosis() {
+		return slackDiagnosisBody(m)
+	}
 	var title string
 	switch {
-	case m.isDiagnosis():
-		title = "*" + slackEscape.Replace(m.plainHeadline()) + "*"
 	case m.Event == EventTest:
 		title = "Test message from Harbormaster"
 	case m.Event == EventResolved:
@@ -113,21 +115,17 @@ func SlackBody(m Message) ([]byte, error) {
 		title = ":large_orange_circle: *" + slackEscape.Replace(m.updatePrefix()+m.Subject.Title) + "*"
 	}
 	section := title
-	if text := m.bodyText(); text != "" {
-		section += "\n" + slackEscape.Replace(text)
+	if m.Subject.Text != "" {
+		section += "\n" + slackEscape.Replace(m.Subject.Text)
 	}
-	context := slackEscape.Replace(m.where()) + " · <" + m.Link() + "|" + m.linkText() + ">"
-	body := map[string]any{
+	context := slackEscape.Replace(m.where()) + " · <" + m.Link() + "|Open in Harbormaster>"
+	return json.Marshal(map[string]any{
 		"text": m.plainHeadline(),
 		"blocks": []any{
 			map[string]any{"type": "section", "text": map[string]any{"type": "mrkdwn", "text": section}},
 			map[string]any{"type": "context", "elements": []any{map[string]any{"type": "mrkdwn", "text": context}}},
 		},
-	}
-	if m.isDiagnosis() {
-		body["unfurl_links"], body["unfurl_media"] = false, false
-	}
-	return json.Marshal(body)
+	})
 }
 
 const pagerDutySummaryMax = 1024
@@ -210,7 +208,7 @@ func WebhookBody(m Message) ([]byte, error) {
 		"account_id": s.Key.AccountID, "region": s.Key.Region, "at": s.At.UTC().Format(time.RFC3339), "url": m.Link(),
 	}
 	if m.isDiagnosis() {
-		body["summary"], body["investigation_id"] = m.summary(), m.Diagnosis.InvestigationID
+		body["summary"], body["investigation_id"], body["ai_generated"] = m.summary(), m.Diagnosis.InvestigationID, true
 	}
 	if s.Scope != "" {
 		services := make([]map[string]any, len(s.Members))
@@ -248,7 +246,7 @@ func crlf(text string) string {
 func emailText(m Message) string {
 	var b strings.Builder
 	if m.isDiagnosis() {
-		b.WriteString(crlf(m.summary()) + "\r\n\r\n" + m.Link() + "\r\n")
+		b.WriteString(diagnosisNotice + "\r\n\r\n" + crlf(m.summary()) + "\r\n\r\n" + m.Link() + "\r\n")
 		return b.String()
 	}
 	b.WriteString(m.plainHeadline() + "\r\n\r\n")
@@ -284,6 +282,14 @@ func Email(m Message, from string, to []string) (subject string, body []byte) {
 	fmt.Fprintf(&b, "Message-ID: <hm-%d-%d@harbormaster.invalid>\r\n", m.DeliveryID, m.Subject.At.Unix())
 	b.WriteString("MIME-Version: 1.0\r\n")
 	b.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
+	if m.isDiagnosis() {
+		// Model text can hold lines of any length; quoted-printable keeps every line short and safe.
+		b.WriteString("Content-Transfer-Encoding: quoted-printable\r\n\r\n")
+		encoder := quotedprintable.NewWriter(&b)
+		_, _ = encoder.Write([]byte(emailText(m)))
+		_ = encoder.Close()
+		return subject, b.Bytes()
+	}
 	b.WriteString("Content-Transfer-Encoding: 8bit\r\n\r\n")
 	b.WriteString(emailText(m))
 	return subject, b.Bytes()
@@ -295,6 +301,9 @@ type Preview struct{ Destination, Title, Body, JSON string }
 
 // RenderPreview renders m the way the destination's sender would, so the preview cannot drift from what is sent.
 func RenderPreview(destination string, m Message) (Preview, error) {
+	if err := m.checkDiagnosis(); err != nil {
+		return Preview{}, err
+	}
 	p := Preview{Destination: destination}
 	switch destination {
 	case DestSlack:
@@ -302,7 +311,11 @@ func RenderPreview(destination string, m Message) (Preview, error) {
 			return Preview{}, err
 		}
 		p.Title = m.plainHeadline()
-		p.Body = strings.TrimSpace(m.bodyText() + "\n" + m.where())
+		text := m.Subject.Text
+		if m.isDiagnosis() {
+			text = diagnosisNotice + "\n" + m.summary()
+		}
+		p.Body = strings.TrimSpace(text + "\n" + m.where())
 	case DestPagerDuty:
 		if _, err := PagerDutyBody(m, "preview"); err != nil {
 			return Preview{}, err

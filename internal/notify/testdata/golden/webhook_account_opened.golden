@@ -1,0 +1,1 @@
+{"account_id":"111111111111","at":"2026-11-21T12:00:00Z","cluster":"","delivery_id":42,"event":"alert.raised","kind":"account_unreachable","region":"us-east-1","scope":"account","service":"","severity":"critical","text":"Access was denied.","title":"Account unreachable","url":"https://hm.example.com/settings/accounts"}
