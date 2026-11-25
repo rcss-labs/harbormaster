@@ -15,10 +15,8 @@ import (
 // They look random, but the model needs them to name a service in its next call. The long-run rule sets such a piece
 // aside; nothing else in this package treats them differently, so a name such as "password" or a value pattern still
 // hides one.
-const (
-	minIDLength = 16
-	maxIDLength = 2048
-)
+// The smallest valid id is 32 characters, so only the upper bound needs a check.
+const maxIDLength = 2048
 
 var (
 	idAccount = regexp.MustCompile(`^[0-9]{12}$`)
@@ -53,7 +51,7 @@ func runIsRandom(run string) bool {
 
 // isHarbormasterID reports whether piece is a well-formed id as described above whose decoded fields hold no secret.
 func isHarbormasterID(piece string) bool {
-	if len(piece) < minIDLength || len(piece) > maxIDLength {
+	if len(piece) > maxIDLength {
 		return false
 	}
 	for i := 0; i < len(piece); i++ {
@@ -99,15 +97,8 @@ func isHarbormasterID(piece string) bool {
 	return true
 }
 
-// fieldHoldsSecret applies the value rules to one decoded field. It does not apply the id rule again.
+// fieldHoldsSecret applies the value patterns and the URL password rule to one decoded field. The long-run rule is
+// not applied: CDK and CloudFormation give services long random-looking names, and their ids must work.
 func fieldHoldsSecret(field string) bool {
-	if len(patternSpans(field)) > 0 {
-		return true
-	}
-	for _, m := range longRun.FindAllString(field, -1) {
-		if looksLikeRandomRun(m) {
-			return true
-		}
-	}
-	return false
+	return len(patternSpans(field)) > 0
 }

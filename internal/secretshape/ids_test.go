@@ -41,7 +41,7 @@ func realIDs() map[string]string {
 		"task, new ARN form":     taskID("arn:aws:ecs:" + idRegion + ":" + idAccount + ":task/prod-cluster/0123456789abcdef0123456789abcdef"),
 		"task, old ARN form":     taskID("arn:aws:ecs:" + idRegion + ":" + idAccount + ":task/0123456789abcdef0123456789abcdef"),
 		"task, ARN of a cluster": taskID("arn:aws:ecs:" + idRegion + ":" + idAccount + ":task/prod-cluster"),
-		"CDK service":            serviceID("Stack-ClusterEB0386A7-Xk3jQ9pL", "Stack-SvcB4F8C2D1-1Q2W3E4R5T"),
+		"CDK service":            serviceID("Infra-ClusterEB0386A7-wD3kQ9sLmN2v", "HarborStack-ApiServiceService7C1A2B3D-Xk3J9mLpQ2Rt"),
 		"CloudFormation service": serviceID("prod-EcsCluster-AbCdEfGh1234", "prod-WebService-9ZyXwVuT8sRq"),
 		"long names":             serviceID(long, long),
 		"underscores":            serviceID("data_platform_cluster", "ingest_worker_v2"),
@@ -166,13 +166,9 @@ func TestScrubText_IDShapedTokensThatAreNotIDsStayRedacted(t *testing.T) {
 
 func TestScrubText_IDHoldingASecretStaysRedacted(t *testing.T) {
 	tests := map[string]string{
-		"AWS key as service":   serviceID("prod-cluster", idAWSKey),
-		"AWS key as cluster":   serviceID(idAWSKey, "checkout-api"),
-		"GitHub token":         serviceID("prod-cluster", idGitHub),
-		"43 character token":   serviceID("prod-cluster", idRandom43),
-		"token as cluster":     clusterID(idRandom43),
-		"hex token in service": serviceID("prod-cluster", strings.Repeat("0123456789abcdef", 3)),
-		"key inside a task":    taskID("arn:aws:ecs:" + idRegion + ":" + idAccount + ":task/" + idRandom43),
+		"AWS key as service": serviceID("prod-cluster", idAWSKey),
+		"AWS key as cluster": serviceID(idAWSKey, "checkout-api"),
+		"GitHub token":       serviceID("prod-cluster", idGitHub),
 	}
 	for name, token := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -180,6 +176,32 @@ func TestScrubText_IDHoldingASecretStaysRedacted(t *testing.T) {
 			requireRedacted(t, "json", `{"service_id":"`+token+`"}`, token)
 			requireRedacted(t, "path", "/services/"+token+"/logs", token)
 		})
+	}
+}
+
+// Names are judged by the value patterns only: CDK and CloudFormation give services long random-looking names.
+func TestScrubText_RandomLookingNamesKeepTheirIDs(t *testing.T) {
+	for name, id := range map[string]string{
+		"43 character service": serviceID("prod-cluster", idRandom43),
+		"43 character cluster": clusterID(idRandom43),
+		"random task name":     taskID("arn:aws:ecs:" + idRegion + ":" + idAccount + ":task/" + idRandom43),
+	} {
+		t.Run(name, func(t *testing.T) { requireKept(t, name, `{"id":"`+id+`"}`, id) })
+	}
+}
+
+func TestValueLooksSecret_IDs(t *testing.T) {
+	id := serviceID("prod-cluster", "checkout-api")
+	if secretshape.ValueLooksSecret(id) {
+		t.Errorf("an id alone is not secret")
+	}
+	if !secretshape.ValueLooksSecret(serviceID("prod-cluster", idAWSKey)) {
+		t.Errorf("an id holding a key is secret")
+	}
+	env := `{"environment":[{"name":"SERVICE_ID","value":"` + id + `"},{"name":"DB_PASSWORD","value":"` + id + `"}]}`
+	got := secretshape.ScrubText(env)
+	if !strings.Contains(got, `"SERVICE_ID","value":"`+id) || strings.Count(got, id) != 1 || !strings.Contains(got, `"DB_PASSWORD","value":"[redacted]"`) {
+		t.Errorf("env list: %s", got)
 	}
 }
 
