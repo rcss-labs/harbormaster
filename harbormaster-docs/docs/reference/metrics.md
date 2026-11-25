@@ -109,7 +109,7 @@ These three are exported only when `HM_KV_URL` is set.
 
 | Name | Type | Labels | Meaning | Role |
 | --- | --- | --- | --- | --- |
-| `harbormaster_investigation_step_errors_total` | counter | none | Errors and panics in the notification dispatcher's investigation step: recording investigation requests, planning or claiming Diagnosis messages, a Diagnosis worker that panicked, and the investigator job hook when it panics or is skipped because its previous call has not returned. Alert messages are not affected, so a rising value is the only sign that investigations or Diagnosis messages are not being requested or sent. The coordinator log has a matching `notify: investigation step` line for each. `0` while the AI agent is off. | coordinator |
+| `harbormaster_investigation_step_errors_total` | counter | none | Errors and panics in the notification dispatcher's investigation step: recording investigation requests, planning or claiming Diagnosis messages, a Diagnosis worker that panicked, and the investigator job hook when it panics or is skipped because its previous call has not returned. Alert messages are not affected, so a rising value is the only sign that investigations or Diagnosis messages are not being requested or sent. The coordinator log has a matching line for each: `notify: investigation step` for an error, `notify: investigation step panicked` for a panic of the step, and `notify: follow-up worker panicked` for a send worker that panicked (it covers review messages too). `0` while the AI agent is off. | coordinator |
 
 ## Series that are not exported
 
