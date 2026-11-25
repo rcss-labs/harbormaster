@@ -217,7 +217,8 @@ export function AgentSettings() {
         unredacted_providers: draft.unredacted,
         role_models: {
           ...(draft.provider !== '' && draft.model !== '' ? { chat: { provider: draft.provider, model: draft.model } } : {}),
-          ...(draft.investigatorProvider !== '' && draft.investigatorModel !== '' ? { investigator: { provider: draft.investigatorProvider, model: draft.investigatorModel } } : {}),
+          // Always stated: the server keeps a stored model when the key is absent, so clearing needs an explicit null.
+          investigator: draft.investigatorProvider !== '' && draft.investigatorModel !== '' ? { provider: draft.investigatorProvider, model: draft.investigatorModel } : null,
         },
       },
       {

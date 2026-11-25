@@ -15,6 +15,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/agentclient"
 	"github.com/rcss-labs/harbormaster/internal/config"
 	"github.com/rcss-labs/harbormaster/internal/store"
+	"github.com/rcss-labs/harbormaster/internal/store/storetest"
 )
 
 // settingsAgent is a fake agent for the settings page: a catalogue, and /v1/test answering from a script.
@@ -834,6 +835,7 @@ func TestAgentSettings_BodyIsStrictAndComplete(t *testing.T) {
 var agentSettingsRoutes = []struct{ method, path string }{
 	{"GET", "/api/agent/settings"}, {"PUT", "/api/agent/settings"}, {"POST", "/api/agent/settings/test"},
 	{"GET", "/api/agent/usage"}, {"POST", "/api/users/2/ai-chat"},
+	{"PUT", "/api/agent/identity"}, {"GET", "/api/agent/investigations"},
 }
 
 func TestAgentSettingsRoutes_AbsentWhenDisabled(t *testing.T) {
@@ -1159,4 +1161,154 @@ func getSettings0(t *testing.T, c *apiClient) map[string]any {
 	var out map[string]any
 	decode(t, c.get("/api/agent/settings"), &out)
 	return out
+}
+
+// putSettingsRoles saves with the current version and the roles as given.
+func putSettingsRoles(c *apiClient, budget string, roles map[string]any) *http.Response {
+	var current struct {
+		Version int64 `json:"version"`
+	}
+	decode(c.t, c.get("/api/agent/settings"), &current)
+	return c.do(http.MethodPut, "/api/agent/settings", map[string]any{
+		"monthly_budget_usd": budget, "unredacted_providers": []string{}, "role_models": roles, "version": current.Version}, nil)
+}
+
+func TestAgentSettings_InvestigatorModelRoundTrip(t *testing.T) {
+	env := newSettingsEnv(t, false)
+	env.api.Cfg.AgentInvestigationWindow = 15 * time.Minute
+	env.api.Cfg.AgentInvestigationsPerHour = 20
+	env.api.Cfg.AgentInvestigationsConcurrent = 2
+	env.api.Cfg.AgentInvestigationMaxWait = 10 * time.Minute
+
+	// Before any choice: no investigator entry; the identity block is present from the first read; limits come from configuration.
+	first := getSettings0(t, env.sam)
+	if _, ok := first["role_models"].(map[string]any)["investigator"]; ok {
+		t.Errorf("an investigator model before one was chosen: %v", first["role_models"])
+	}
+	if id, _ := first["identity"].(map[string]any); id["username"] != "harbormaster-agent" || fmt.Sprint(id["permissions"]) != "[]" {
+		t.Errorf("identity = %v, want harbormaster-agent with an empty list", first["identity"])
+	}
+	if got := fmt.Sprint(first["investigator"]); got != "map[concurrent:2 max_wait_minutes:10 per_hour:20 window_minutes:15]" {
+		t.Errorf("investigator limits = %s", got)
+	}
+
+	resp := putSettingsRoles(env.sam, "30", map[string]any{"chat": fakeChat(), "investigator": fakeChat()})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT: status %d", resp.StatusCode)
+	}
+	var saved settingsBody
+	decode(t, resp, &saved)
+	for _, s := range []settingsBody{saved, getSettings(t, env.sam)} {
+		inv := s.RoleModels["investigator"]
+		if inv["provider"] != "fake" || inv["model"] != "fake-1" || inv["available"] != true || inv["max_question_usd"] != "0.60" {
+			t.Errorf("investigator = %v", inv)
+		}
+	}
+	stored, err := env.st.GetAgentSettings(t.Context())
+	if err != nil || stored.RoleModels["investigator"].Model != "fake-1" || stored.RoleModels["chat"].Model != "fake-1" {
+		t.Errorf("stored roles = %v, %v", stored.RoleModels, err)
+	}
+	rows := settingsAuditRows(t, env.st, "agent_settings_update")
+	if len(rows) != 1 || rows[0].Details["old_investigator_model"] != "" || rows[0].Details["new_investigator_model"] != "fake/fake-1" {
+		t.Errorf("audit = %+v", rows)
+	}
+
+	// A model that is not offered is refused for this role as for chat; an unknown role still is.
+	resp = putSettingsRoles(env.sam, "30", map[string]any{"chat": fakeChat(), "investigator": map[string]string{"provider": "fake", "model": "nope"}})
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("investigator not in the catalogue: status %d, want 422", resp.StatusCode)
+	}
+	resp.Body.Close()
+	resp = putSettingsRoles(env.sam, "30", map[string]any{"chat": fakeChat(), "reviewer": fakeChat()})
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("unknown role: status %d, want 422", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// A body without the key (an older bundle) keeps it; an explicit null clears it.
+	resp = putSettingsRoles(env.sam, "31", map[string]any{"chat": fakeChat()})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT without the investigator: status %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	kept := getSettings(t, env.sam)
+	if kept.Budget != "31.00" || kept.RoleModels["investigator"]["model"] != "fake-1" {
+		t.Errorf("after a save without the key: %+v, want the investigator kept", kept)
+	}
+	if rows := settingsAuditRows(t, env.st, "agent_settings_update"); rows[0].Details["new_investigator_model"] != "fake/fake-1" {
+		t.Errorf("audit of a kept model = %v", rows[0].Details)
+	}
+	resp = putSettingsRoles(env.sam, "31", map[string]any{"chat": fakeChat(), "investigator": nil})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT with a null investigator: status %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	if _, ok := getSettings(t, env.sam).RoleModels["investigator"]; ok {
+		t.Error("investigator model still set after null")
+	}
+	// A null chat is still refused, as before.
+	resp = putSettingsRoles(env.sam, "31", map[string]any{"chat": nil})
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("null chat: status %d, want 422", resp.StatusCode)
+	}
+	resp.Body.Close()
+}
+
+func TestAgentSettings_InvestigatorChangeIsRefusedWhileTheAgentIsDown(t *testing.T) {
+	env := newSettingsEnv(t, true)
+	resp := putSettingsRoles(env.sam, "10", map[string]any{"chat": fakeChat(), "investigator": fakeChat()})
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("adding an investigator model with the agent down: status %d, want 503 (R24)", resp.StatusCode)
+	}
+	resp.Body.Close()
+	// Saving what is stored goes through, and so does dropping the model.
+	stored, _ := env.st.GetAgentSettings(t.Context())
+	stored.RoleModels["investigator"] = store.AgentModelRef{Provider: "fake", Model: "fake-1"}
+	if err := storetest.PutAgentSettings(t.Context(), env.st, stored); err != nil {
+		t.Fatal(err)
+	}
+	resp = putSettingsRoles(env.sam, "11", map[string]any{"chat": fakeChat(), "investigator": fakeChat()})
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("unchanged investigator with the agent down: status %d, want 200", resp.StatusCode)
+	}
+	resp.Body.Close()
+	resp = putSettingsRoles(env.sam, "11", map[string]any{"chat": fakeChat(), "investigator": nil})
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("dropping the investigator with the agent down: status %d, want 200", resp.StatusCode)
+	}
+	resp.Body.Close()
+}
+
+func TestAgentSettings_StaleInvestigatorModelIsFlaggedAndSavable(t *testing.T) {
+	env := newSettingsEnv(t, false)
+	stored, _ := env.st.GetAgentSettings(t.Context())
+	stored.RoleModels["investigator"] = store.AgentModelRef{Provider: "fake", Model: "retired-1"}
+	if err := storetest.PutAgentSettings(t.Context(), env.st, stored); err != nil {
+		t.Fatal(err)
+	}
+	inv := getSettings(t, env.sam).RoleModels["investigator"]
+	if inv["model"] != "retired-1" || inv["available"] != false || inv["max_question_usd"] != "" {
+		t.Errorf("investigator = %v, want retired-1 flagged unavailable with nothing reserved", inv)
+	}
+	// R42: resubmitting it unchanged is accepted, so the allowance can still be changed.
+	resp := putSettingsRoles(env.sam, "12", map[string]any{"chat": fakeChat(), "investigator": map[string]string{"provider": "fake", "model": "retired-1"}})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("unchanged stale investigator model: status %d, want 200", resp.StatusCode)
+	}
+	resp.Body.Close()
+	got := getSettings(t, env.sam)
+	if got.Budget != "12.00" || got.RoleModels["investigator"]["available"] != false {
+		t.Errorf("after saving = %+v", got)
+	}
+	// A changed one must be offered, even when it replaces a stale one.
+	resp = putSettingsRoles(env.sam, "12", map[string]any{"chat": fakeChat(), "investigator": map[string]string{"provider": "fake", "model": "other-gone"}})
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("changed to a model not offered: status %d, want 422", resp.StatusCode)
+	}
+	resp.Body.Close()
+	resp = putSettingsRoles(env.sam, "12", map[string]any{"chat": fakeChat(), "investigator": fakeChat()})
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("changed to an offered model: status %d, want 200", resp.StatusCode)
+	}
+	resp.Body.Close()
 }

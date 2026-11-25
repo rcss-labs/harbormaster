@@ -189,6 +189,9 @@ func contractShapes() map[string]any {
 		"agentSettings":   shapeOf(reflect.TypeFor[AgentSettingsDTO]()),
 		"agentUsage":      shapeOf(reflect.TypeFor[AgentUsageDTO]()),
 		"agentTestResult": shapeOf(reflect.TypeFor[AgentTestResultDTO]()),
+		"agentIdentity":   shapeOf(reflect.TypeFor[AgentIdentityDTO]()),
+		// investigations: the list of past ones that sits with the agent settings
+		"agentInvestigations": shapeOf(reflect.TypeFor[AgentInvestigationsDTO]()),
 	}
 }
 

@@ -266,6 +266,7 @@ export interface AgentInvestigationDTO {
   provider: string
   model: string
   attempts: number
+  /** Empty when there is no run row. After a retry it covers the last attempt only. */
   cost_usd: string
 }
 export interface AgentInvestigationsPage {
@@ -277,7 +278,7 @@ export interface AgentSettingsUpdate {
   version: number
   monthly_budget_usd: string
   unredacted_providers: string[]
-  role_models: { chat?: { provider: string; model: string }; investigator?: { provider: string; model: string } }
+  role_models: { chat?: { provider: string; model: string }; investigator: { provider: string; model: string } | null }
 }
 export interface AgentTestResult {
   ok: boolean

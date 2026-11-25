@@ -121,6 +121,24 @@ func (s *Store) SetAgentIdentityPermissions(ctx context.Context, perms map[authz
 		}
 		return fmt.Errorf("lock agent identity: %w", err)
 	}
+	before := map[string][]string{}
+	rows, err := tx.Query(ctx, `select tag_id, actions from permissions where user_id = $1 order by tag_id`, identityID)
+	if err != nil {
+		return fmt.Errorf("read agent identity permissions: %w", err)
+	}
+	for rows.Next() {
+		var tag int64
+		var actions int16
+		if err := rows.Scan(&tag, &actions); err != nil {
+			rows.Close()
+			return fmt.Errorf("read agent identity permissions: %w", err)
+		}
+		before[fmt.Sprint(tag)] = agentActionNames(authz.ActionSet(actions))
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("read agent identity permissions: %w", err)
+	}
 	if _, err := tx.Exec(ctx, `delete from permissions where user_id = $1`, identityID); err != nil {
 		return fmt.Errorf("clear agent identity permissions: %w", err)
 	}
@@ -138,7 +156,7 @@ func (s *Store) SetAgentIdentityPermissions(ctx context.Context, perms map[authz
 	entry := AuditEntry{
 		ActorUserID: &by, ActorUsername: actorUsername, Action: "agent_identity_update", Target: fmt.Sprintf("user:%d", identityID),
 		Summary: fmt.Sprintf("Set the access of the agent identity to %d tags.", len(tags)),
-		Details: map[string]any{"tags": granted},
+		Details: map[string]any{"before": before, "tags": granted},
 	}
 	if err := insertAudit(ctx, tx, entry); err != nil {
 		return err
@@ -146,14 +164,14 @@ func (s *Store) SetAgentIdentityPermissions(ctx context.Context, perms map[authz
 	return tx.Commit(ctx)
 }
 
-// agentActionNames lists the actions of a set the identity may hold, as the audit log names them.
+// agentActionNames lists the actions of a set the identity may hold, as the permission_set audit rows name them (View, Logs).
 func agentActionNames(set authz.ActionSet) []string {
 	var names []string
 	if set.Has(authz.View) {
-		names = append(names, "view")
+		names = append(names, "View")
 	}
 	if set.Has(authz.Logs) {
-		names = append(names, "logs")
+		names = append(names, "Logs")
 	}
 	return names
 }

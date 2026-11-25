@@ -191,6 +191,11 @@ type Config struct {
 	AgentURL         string        // HM_AGENT_URL: the agent service's private base URL
 	AgentCAPEM       string        // HM_AGENT_CA_PEM: an extra root certificate for the agent's TLS certificate
 	AgentRunTokenTTL time.Duration // HM_AGENT_RUN_TOKEN_TTL: lifetime of a run token
+	// Automatic investigations (phase 2); the settings page shows them read-only.
+	AgentInvestigationWindow      time.Duration // HM_AGENT_INVESTIGATION_WINDOW: one investigation per subject in this window
+	AgentInvestigationsConcurrent int           // HM_AGENT_INVESTIGATIONS_CONCURRENT
+	AgentInvestigationsPerHour    int           // HM_AGENT_INVESTIGATIONS_PER_HOUR: 0 turns the investigator off
+	AgentInvestigationMaxWait     time.Duration // HM_AGENT_INVESTIGATION_MAX_WAIT: a queued request older than this is dropped
 
 	// KV selects the shared Valkey or Redis store; an empty URL means none
 	KV KVConfig
@@ -441,6 +446,11 @@ func Load(getenv func(string) string) (Config, error) {
 		AgentURL:         strings.TrimSpace(reader.text("HM_AGENT_URL", "")),
 		AgentCAPEM:       strings.TrimSpace(reader.text("HM_AGENT_CA_PEM", "")),
 		AgentRunTokenTTL: reader.duration("HM_AGENT_RUN_TOKEN_TTL", 15*time.Minute),
+
+		AgentInvestigationWindow:      reader.duration("HM_AGENT_INVESTIGATION_WINDOW", 15*time.Minute),
+		AgentInvestigationsConcurrent: reader.integer("HM_AGENT_INVESTIGATIONS_CONCURRENT", 2),
+		AgentInvestigationsPerHour:    reader.integer("HM_AGENT_INVESTIGATIONS_PER_HOUR", 20),
+		AgentInvestigationMaxWait:     reader.duration("HM_AGENT_INVESTIGATION_MAX_WAIT", 15*time.Minute),
 
 		KV: KVConfig{
 			URL:    strings.TrimSpace(reader.text("HM_KV_URL", "")),

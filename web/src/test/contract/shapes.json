@@ -37,6 +37,52 @@
       "service": "string"
     }
   },
+  "agentIdentity": {
+    "permissions": [
+      {
+        "logs": "boolean",
+        "tag_id": "number",
+        "tag_name": "string"
+      }
+    ],
+    "username": "string"
+  },
+  "agentInvestigations": {
+    "items": [
+      {
+        "alert": {
+          "kind": "string",
+          "title": "string"
+        },
+        "attempts": "number",
+        "cost_usd": "string",
+        "finished_at": {
+          "$null": "time"
+        },
+        "id": "number",
+        "model": "string",
+        "provider": "string",
+        "reason": "string",
+        "requested_at": "time",
+        "started_at": {
+          "$null": "time"
+        },
+        "state": "string",
+        "subject": {
+          "account_id": "string",
+          "cluster": "string",
+          "cluster_id": "string",
+          "kind": "string",
+          "region": "string",
+          "service": "string",
+          "service_id": "string"
+        },
+        "summary": "string",
+        "summary_replaced": "boolean"
+      }
+    ],
+    "next_cursor": "string"
+  },
   "agentSettings": {
     "agent_reachable": "boolean",
     "catalogue": {
@@ -54,9 +100,36 @@
         }
       ]
     },
+    "identity": {
+      "permissions": [
+        {
+          "logs": "boolean",
+          "tag_id": "number",
+          "tag_name": "string"
+        }
+      ],
+      "username": "string"
+    },
+    "investigator": {
+      "concurrent": "number",
+      "max_wait_minutes": "number",
+      "per_hour": "number",
+      "window_minutes": "number"
+    },
     "monthly_budget_usd": "string",
     "role_models": {
       "chat": {
+        "$optional": {
+          "$null": {
+            "allowance_below_question": "boolean",
+            "available": "boolean",
+            "max_question_usd": "string",
+            "model": "string",
+            "provider": "string"
+          }
+        }
+      },
+      "investigator": {
         "$optional": {
           "$null": {
             "allowance_below_question": "boolean",
@@ -1952,6 +2025,12 @@
     "target": "string"
   },
   "notificationPreview": {
+    "agent": {
+      "$null": {
+        "services_total": "number",
+        "services_unseen": "number"
+      }
+    },
     "body": "string",
     "destination": "string",
     "groups": [
@@ -1994,6 +2073,7 @@
     "failing": "boolean",
     "fallback": "boolean",
     "id": "number",
+    "investigate": "boolean",
     "kinds": [
       "string"
     ],
@@ -2049,6 +2129,7 @@
         "failing": "boolean",
         "fallback": "boolean",
         "id": "number",
+        "investigate": "boolean",
         "kinds": [
           "string"
         ],

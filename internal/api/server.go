@@ -471,6 +471,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	}
 	if s.Cfg.AgentEnabled() {
 		s.agentRoutes(mux) // the AI chat: absent (404) while HM_AGENT_URL is unset
+		s.agentIdentityRoutes(mux)
 	}
 	if s.oauthOn() {
 		s.oauthRoutes(mux) // OAuth for MCP connectors: absent (404) while HM_OAUTH is off
