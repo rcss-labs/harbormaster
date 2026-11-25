@@ -547,7 +547,7 @@ func (f *fixture) plan() int {
 	f.t.Helper()
 	f.exec(`update notification_routes set enabled = true`)
 	n, err := f.st.PlanReviewDeliveries(context.Background(), f.clock.now(),
-		func(store.NotificationRoute, string) (time.Time, bool) { return time.Time{}, false }, 100)
+		func(store.NotificationRoute, string) (time.Time, bool) { return time.Time{}, false }, true, 100)
 	if err != nil {
 		f.t.Fatal(err)
 	}

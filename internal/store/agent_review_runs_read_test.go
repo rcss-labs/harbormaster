@@ -15,9 +15,9 @@ func seedReadableRun(t *testing.T, s *store.Store, typ, state string, test bool,
 	t.Helper()
 	var id int64
 	if err := s.Pool.QueryRow(context.Background(), `insert into agent_review_runs
-		(review_name, review_type, period_key, period_label, scheduled_for, manual, state, requested_at, finished_at, covered_tags, test)
+		(review_name, review_type, period_key, period_label, scheduled_for, manual, state, requested_at, finished_at, covered_tags, test, delivery_planned_at)
 		values ('r', $1, 'x:' || gen_random_uuid()::text, 'l', $4::timestamptz, $3, $2, $4::timestamptz,
-		 case when $2::text in ('done', 'failed', 'skipped') then $4::timestamptz end, '{7}', $3)
+		 case when $2::text in ('done', 'failed', 'skipped') then $4::timestamptz end, '{7}', $3, case when $3 then $4::timestamptz end)
 		returning id`, typ, state, test, at).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
@@ -76,6 +76,11 @@ func TestReadableReviewRuns_EveryKnownTypeAndStateIsListed(t *testing.T) {
 // Test runs are for admins only even when the row holds covered tags (a row StartReviewRun did not write).
 func TestReadableReviewRuns_TestRunsAreForAdminsOnly(t *testing.T) {
 	s := storetest.Open(t)
+	// The schema now forbids a test row that holds covered tags (agent_review_runs_test_no_tags), so a row like this one
+	// cannot exist in production. The predicate is still tested: it is the second line of defence if a row slips in.
+	if _, err := s.Pool.Exec(context.Background(), `alter table agent_review_runs drop constraint agent_review_runs_test_no_tags`); err != nil {
+		t.Fatal(err)
+	}
 	normal := seedReadableRun(t, s, "custom", "done", false, revNow)
 	test := seedReadableRun(t, s, "cost", "done", true, revNow.Add(time.Minute))
 	if got := readableRunIDs(t, s, false); !slices.Equal(got, []int64{normal}) {

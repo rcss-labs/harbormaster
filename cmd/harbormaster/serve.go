@@ -637,6 +637,7 @@ func newReviewer(cfg config.Config, st *store.Store, agent *agentclient.Client, 
 func wireReviews(d *notify.Dispatcher, reviewer *review.Runner) {
 	if d != nil {
 		d.Reviews = reviewer != nil
+		d.CustomReviews = reviewer != nil && reviewer.CustomReviews
 	}
 }
 

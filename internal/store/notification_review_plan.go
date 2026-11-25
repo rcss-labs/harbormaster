@@ -18,10 +18,11 @@ const ReviewMessageMaxAge = 24 * time.Hour
 // review that is enabled and not PagerDuty it inserts a review row, due at now or at the end of quiet hours when
 // heldUntil says severity info is held for that route, and then it sets delivery_planned_at. A run whose review is
 // gone, or that finished more than 24 hours ago, is marked with no rows, and so is a scheduled run whose review is off
-// now; a manual run of it is planned. A run another planner holds is left to it.
+// now; a manual run of it is planned. While customReviews (the operator switch) is off a custom run is marked with no
+// rows, a manual one too; it is not planned when the switch comes on again. A run another planner holds is left to it.
 // It handles at most limit runs, on one connection at a time, and returns how many rows it inserted; a run that fails
 // leaves nothing behind, is tried again by the next call, and does not stop the others.
-func (s *Store) PlanReviewDeliveries(ctx context.Context, now time.Time, heldUntil func(r NotificationRoute, severity string) (time.Time, bool), limit int) (int, error) {
+func (s *Store) PlanReviewDeliveries(ctx context.Context, now time.Time, heldUntil func(r NotificationRoute, severity string) (time.Time, bool), customReviews bool, limit int) (int, error) {
 	if limit <= 0 {
 		return 0, nil
 	}
@@ -40,7 +41,7 @@ func (s *Store) PlanReviewDeliveries(ctx context.Context, now time.Time, heldUnt
 		inserted := 0
 		err := s.InTx(ctx, func(t Tx) error {
 			var err error
-			inserted, err = t.planReviewRun(ctx, runID, now, heldUntil)
+			inserted, err = t.planReviewRun(ctx, runID, now, heldUntil, customReviews)
 			return err
 		})
 		if err != nil {
@@ -55,14 +56,14 @@ func (s *Store) PlanReviewDeliveries(ctx context.Context, now time.Time, heldUnt
 	return planned, errors.Join(errs...)
 }
 
-func (t Tx) planReviewRun(ctx context.Context, runID int64, now time.Time, heldUntil func(r NotificationRoute, severity string) (time.Time, bool)) (int, error) {
+func (t Tx) planReviewRun(ctx context.Context, runID int64, now time.Time, heldUntil func(r NotificationRoute, severity string) (time.Time, bool), customReviews bool) (int, error) {
 	var reviewID *int64
-	var name string
+	var name, reviewType string
 	var manual bool
 	var finishedAt *time.Time
-	err := t.tx.QueryRow(ctx, `select review_id, review_name, manual, finished_at from agent_review_runs
+	err := t.tx.QueryRow(ctx, `select review_id, review_name, review_type, manual, finished_at from agent_review_runs
 		where id = $1 and state = 'done' and summary <> '' and delivery_planned_at is null
-		for update skip locked`, runID).Scan(&reviewID, &name, &manual, &finishedAt)
+		for update skip locked`, runID).Scan(&reviewID, &name, &reviewType, &manual, &finishedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, nil // another planner has it, or had it
 	}
@@ -70,7 +71,8 @@ func (t Tx) planReviewRun(ctx context.Context, runID int64, now time.Time, heldU
 		return 0, err
 	}
 	var routes []NotificationRoute
-	if reviewID != nil && finishedAt != nil && now.Sub(*finishedAt) <= ReviewMessageMaxAge {
+	customOff := reviewType == ReviewTypeCustom && !customReviews
+	if reviewID != nil && finishedAt != nil && now.Sub(*finishedAt) <= ReviewMessageMaxAge && !customOff {
 		rows, err := t.tx.Query(ctx, `select `+prefixColumns("r", notificationRouteColumns)+` from notification_routes r
 			join agent_review_routes l on l.route_id = r.id join agent_reviews v on v.id = l.review_id
 			where v.id = $1 and (v.enabled or $2) and r.enabled and r.destination <> 'pagerduty' order by r.id`, *reviewID, manual)

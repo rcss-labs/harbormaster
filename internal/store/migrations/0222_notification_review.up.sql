@@ -6,8 +6,9 @@
 -- <= now), the older diagnosis claim (event = 'diagnosis'), the older held-row release (status held) and the older
 -- cancel (event list, by incident) all skip it; it would otherwise be rendered as an Opened message. An older task's
 -- manual retry of a failed review row writes next_attempt_at and is refused by the check below. After a rollback the
--- leftover rows are inert and age out with the notification log. review_run_id has no foreign key: the log outlives
--- the run rows it reports.
+-- leftover rows are not sent by an older release. After rolling forward the new release sends one whose result
+-- finished within 48 hours and cancels an older one; the rest age out with the notification log. review_run_id has no
+-- foreign key: the log outlives the run rows it reports.
 --
 -- The alter takes an exclusive lock on a table older tasks keep writing to, and every statement that arrives while
 -- it waits queues behind it. The 2 seconds must stay well below the dispatcher's 5 second writeTimeout: otherwise

@@ -29,3 +29,6 @@ alter table agent_review_runs add constraint agent_review_runs_test_manual check
 -- A test run covers no tags (readers decide by tags and know no test runs). A phase 3 task that claims a test row
 -- during a rolling deploy writes tags at start; this check refuses that start before any model call is made.
 alter table agent_review_runs add constraint agent_review_runs_test_no_tags check (not test or covered_tags = '{}');
+-- A test run is never sent: it is marked planned when it is made, and the planner reads only rows that are not.
+-- The check keeps a row that bypasses RequestManualReviewRun from being planned and sent.
+alter table agent_review_runs add constraint agent_review_runs_test_planned check (not test or delivery_planned_at is not null);

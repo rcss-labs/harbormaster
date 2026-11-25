@@ -41,9 +41,9 @@ func (e *invEnv) seedRun(t *testing.T, s reviewSeed) int64 {
 	var id int64
 	err := e.st.Pool.QueryRow(t.Context(), `insert into agent_review_runs
 		(review_name, review_type, period_key, period_label, scheduled_for, state, summary, summary_replaced, covered_tags,
-		 services_total, scope_label, requested_at, finished_at, manual, test, instructions)
+		 services_total, scope_label, requested_at, finished_at, manual, test, instructions, delivery_planned_at)
 		values ('Weekly cost', $1, 'x:' || gen_random_uuid()::text, 'Week 47', $2::timestamptz, $3::text, $4, $5, $6, 3, 'Everything',
-		 $2::timestamptz, case when $3::text in ('done', 'failed', 'skipped') then $2::timestamptz else null end, $7, $7, $8)
+		 $2::timestamptz, case when $3::text in ('done', 'failed', 'skipped') then $2::timestamptz else null end, $7, $7, $8, case when $7 then $2::timestamptz end)
 		returning id`, s.typ, s.requested, s.state, s.summary, s.replaced, covered, s.test, s.instructions).Scan(&id)
 	if err != nil {
 		t.Fatal(err)
@@ -57,6 +57,15 @@ func (e *invEnv) seedRunEvidence(t *testing.T, id int64, ordinal int, action str
 		(review_run_id, ordinal, tool, action, account_id, region, cluster_name, service_name, note, excerpt)
 		values ($1, $2, 'describe_service', $3, $4, $5, $6, $7, $8, $9)`,
 		id, ordinal, action, key.AccountID, key.Region, key.Cluster, key.Service, note, excerpt); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// dropTestNoTagsCheck lifts the schema's refusal of a test run that holds covered tags. Such a row cannot exist in
+// production; the read predicates are still tested against it as the second line of defence.
+func (e *invEnv) dropTestNoTagsCheck(t *testing.T) {
+	t.Helper()
+	if _, err := e.st.Pool.Exec(t.Context(), `alter table agent_review_runs drop constraint agent_review_runs_test_no_tags`); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -589,6 +598,7 @@ func TestReviewRun_CustomTypeIsReadableByTheReaderRule(t *testing.T) {
 
 func TestReviewRun_TestRunIsAdminOnly(t *testing.T) {
 	e := newInvEnv(t)
+	e.dropTestNoTagsCheck(t)
 	dev := []authz.TagID{e.tagID(t, "Dev")}
 	// The rows hold the covered tag, so nothing but the test mark keeps the reader out.
 	test := e.seedRun(t, reviewSeed{summary: "Findings.", covered: dev, test: true})
@@ -615,6 +625,7 @@ func TestReviewRun_TestRunIsAdminOnly(t *testing.T) {
 
 func TestReviewRun_ReadBodiesNeverHoldInstructions(t *testing.T) {
 	e := newInvEnv(t)
+	e.dropTestNoTagsCheck(t)
 	dev := []authz.TagID{e.tagID(t, "Dev")}
 	id := e.seedRun(t, reviewSeed{typ: "custom", summary: "Findings.", covered: dev, instructions: "ZEBRAMARKER look here"})
 	test := e.seedRun(t, reviewSeed{typ: "custom", summary: "Findings.", covered: dev, test: true, instructions: "ZEBRAMARKER look here"})
