@@ -62,7 +62,7 @@ export function ReviewEditor({ review, info, onCreated }: ReviewEditorProps) {
     setDraft((current) => ({ ...current, ...change }))
   }
 
-  const problem = validateDraft(draft, info, otherNames)
+  const problem = validateDraft(draft, info, otherNames, saved ?? undefined)
   const dirty = isDirty(draft, saved ?? undefined)
   const saving = create.isPending || update.isPending
 

@@ -1219,7 +1219,7 @@ func TestAgentSettings_InvestigatorModelRoundTrip(t *testing.T) {
 		t.Errorf("investigator not in the catalogue: status %d, want 422", resp.StatusCode)
 	}
 	resp.Body.Close()
-	resp = putSettingsRoles(env.sam, "30", map[string]any{"chat": fakeChat(), "reviewer": fakeChat()})
+	resp = putSettingsRoles(env.sam, "30", map[string]any{"chat": fakeChat(), "planner": fakeChat()})
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Errorf("unknown role: status %d, want 422", resp.StatusCode)
 	}
