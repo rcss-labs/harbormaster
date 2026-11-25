@@ -11,17 +11,20 @@ import { LIVE_REFETCH_MS } from './polling'
 
 let fetches = 0
 let rows = [OFFHOURS_PRODUCTION]
+let gone = false
 let visibility: 'visible' | 'hidden' = 'visible'
 
 beforeEach(() => {
   fetches = 0
   rows = [OFFHOURS_PRODUCTION]
+  gone = false
   visibility = 'visible'
   Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => visibility })
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
   server.use(
     http.get('/api/offhours/schedules/1', () => {
       fetches++
+      if (gone) return HttpResponse.json({ error: { code: 'not_found', message: 'Not found.' } }, { status: 404 })
       return HttpResponse.json({ ...OFFHOURS_STAGING_DETAIL, services: rows })
     }),
   )
@@ -55,6 +58,31 @@ describe('useOffHoursSchedule polling', () => {
     rows = [{ ...OFFHOURS_ASLEEP, service_id: OFFHOURS_PRODUCTION.service_id }]
     await tick(LIVE_REFETCH_MS)
     expect(result.current.data?.services[0].state).toBe('asleep')
+
+    // Settled: the page goes quiet.
+    const settledAt = fetches
+    await tick(LIVE_REFETCH_MS * 4)
+    expect(fetches).toBe(settledAt)
+  })
+
+  it('does not poll for a row that stays pending because it needs attention', async () => {
+    rows = [{ ...OFFHOURS_PRODUCTION, reason: 'Needs attention: asleep with no wake action. Check its scheduled actions.' }]
+    renderHook(() => useOffHoursSchedule(1), { wrapper })
+    await tick(100)
+    expect(fetches).toBe(1)
+    await tick(LIVE_REFETCH_MS * 4)
+    expect(fetches).toBe(1)
+  })
+
+  it('stops polling when the schedule has been deleted elsewhere', async () => {
+    renderHook(() => useOffHoursSchedule(1), { wrapper })
+    await tick(100)
+    gone = true
+    await tick(LIVE_REFETCH_MS)
+    const afterNotFound = fetches
+    expect(afterNotFound).toBe(2)
+    await tick(LIVE_REFETCH_MS * 4)
+    expect(fetches).toBe(afterNotFound)
   })
 
   it('stops polling once no row is pending', async () => {
