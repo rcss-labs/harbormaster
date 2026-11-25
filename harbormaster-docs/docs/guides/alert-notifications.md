@@ -15,8 +15,11 @@ Notifications are under **Settings > Notifications** (`/settings/notifications`,
 | Repeat | While it stays open, at the route's repeat interval (`Do not repeat`, `Every 30 minutes` or `Every 2 hours`). A repeat lists the current services. |
 | Resolved | It has been gone for 2 minutes (a shorter flap is one incident), if the route has **Notify when resolved** and its opened message was delivered. |
 | Diagnosis | Only on a route with **Investigate with AI** on. An AI investigation of the alert finished with a summary, the alert is still open and the Opened message was delivered. Sent once for each route and alert. Never for PagerDuty. |
+| Review | Only on a route that a [scheduled AI review](ai-agent-reviews.md) sends to. A review run finished with a summary. Sent once for each route and run. Not an alert. Never for PagerDuty. |
 
 With **Investigate with AI** on, a route also gets a [Diagnosis](#diagnosis-messages) after the Opened message. See [Automatic AI investigations](ai-agent-investigator.md).
+
+A route can also be chosen by a scheduled review, and then gets a [Review](#review-messages) message when the review finishes. That is set on the review, not on the route. See [Scheduled AI reviews](ai-agent-reviews.md).
 
 A route can choose from seven alert types: service failing, service degraded, restart loop, unhealthy tasks or targets, deployment failed, cannot place tasks, and account unreachable. `info` alerts are never sent.
 
@@ -97,9 +100,64 @@ A diagnosis has the fields of every webhook message, a link in `url` to the inve
 
 The `title` and `text` are the alert's, as in the Opened message. The signature header, if you set a signing secret, covers this body as for every event. Delivery is at least once: dedupe on `X-Harbormaster-Delivery`.
 
+## Review messages
+
+A [scheduled AI review](ai-agent-reviews.md) names the routes that get its result, 1 to 5 of them, in **Settings > AI agent > Reviews**. A route needs no switch. A review message is not an alert: it has no incident, it is sent once, and it never changes how alerts are sent. A review message is sent when all of these hold:
+
+- the review run finished with a summary;
+- the route is on and is not PagerDuty;
+- the route is still one of the review's routes, and the review still exists;
+- the message is planned within 24 hours of the run finishing.
+
+A review message is planned once for each run and route. If the route is switched off, deleted, or taken off the review before the send, the row is cancelled with a note in the delivery log. Other routes are unaffected. A route is never sent a review that is not on it.
+
+A route's quiet hours apply. With **Hold warnings** on, a review that finishes between 22:00 and 08:00 in the route's time zone is held and sent at 08:00. A review message has the severity `info`, which is held like a warning. It appears in the delivery log as **Review**, is retried like other messages, and does not count toward the route's "last three deliveries failed" warning. Its link opens the result: `/reviews/runs/<id>`.
+
+Every review message carries "Written by AI. Check it before acting." ahead of the text. The text is the model's summary, cleaned again at send time as for a diagnosis: a summary that fails the checks is replaced by a fixed sentence, and every link that is not to your Harbormaster address is replaced by `[link removed]`. See [what the summary check does and does not catch](ai-agent-reviews.md#what-the-summary-check-does-and-does-not-catch). The summary is plain text in every destination.
+
+| Destination | What the review looks like |
+| --- | --- |
+| Slack | A message headed `<type label> review: <review name>` (for example `Cost review: Weekly spend`), the period, the notice line, the summary as plain text (up to 3000 characters) and an **Open the review** link. Link previews are off. |
+| Telegram | A bold `<type label> review: <review name>` headline, the period, the notice line, the summary in a preformatted block (so Telegram makes no mention, command, hashtag or link of it) and an **Open the review** link. Link previews are off. |
+| Email | Subject `[Harbormaster] <type label> review: <review name>`. Plain text: the notice line, the period, the summary and the link. |
+| Webhook | A JSON object with `"event": "review"`, described below. |
+| PagerDuty | Nothing is sent. A review cannot be sent to a PagerDuty route. |
+
+The type labels are Cost, Security findings, Reliability and Capacity. The review name is written by an admin, so it is cleaned to one line and cut.
+
+### Review webhook event
+
+A review has the common fields of a webhook message, with `scope` set to `review` and `severity` to `info`. The alert fields (`text`, `service`, `cluster`, `account_id` and `region`) are empty. `title` is the headline above. `url` links to the result. Six more fields come with it: `summary`, `ai_generated` (always `true`), `review_run_id`, `review_name`, `review_type` (`cost`, `security`, `reliability` or `capacity`) and `period`. `event` is `review`, not in the `alert.*` family, so a receiver that rejects unknown event names needs a change before a review sends to it.
+
+```json
+{
+  "event": "review",
+  "delivery_id": 4290,
+  "scope": "review",
+  "kind": "review",
+  "severity": "info",
+  "title": "Cost review: Weekly spend",
+  "text": "",
+  "service": "",
+  "cluster": "",
+  "account_id": "",
+  "region": "",
+  "at": "2026-11-25T08:02:41Z",
+  "url": "https://harbormaster.internal.example.com/reviews/runs/312",
+  "summary": "The estimated run rate is flat at about $4,800 a month. The largest cost is the checkout cluster. Lowering the memory of orders-api is the largest saving.",
+  "ai_generated": true,
+  "review_run_id": 312,
+  "review_name": "Weekly spend",
+  "review_type": "cost",
+  "period": "Week 48, 2026"
+}
+```
+
+The signature header, if you set a signing secret, covers this body as for every event. Delivery is at least once: dedupe on `X-Harbormaster-Delivery`.
+
 ## Quiet hours, delivery log and retries
 
-- **Hold warnings 22:00–08:00** holds warnings in the route's time zone and sends them at 08:00 if the alert is still open. Critical alerts are never held. A warning that resolves overnight is never sent.
+- **Hold warnings 22:00–08:00** holds warnings in the route's time zone and sends them at 08:00 if the alert is still open. Critical alerts are never held. A warning that resolves overnight is never sent. [Review messages](#review-messages) are held the same way and sent at 08:00.
 - **Send matching alerts** can be `Warning and critical` or `Critical only`.
 - The **Delivery log** records every delivery for 30 days (`HM_RETENTION_NOTIFICATION_LOG`). Each is tried three times (at once, after 30 seconds, after 2 minutes, honouring `Retry-After`), then marked `Failed`. You can retry a failed delivery from the log.
 - **Send test** sends one message from the task serving the request. Save the route first.
@@ -132,5 +190,6 @@ Check it worked: the test message arrives in Slack and the **Delivery log** show
 
 - [Configuration reference](../reference/configuration.md)
 - [Automatic AI investigations](ai-agent-investigator.md)
+- [Scheduled AI reviews](ai-agent-reviews.md)
 - [Overview and clusters](overview-and-clusters.md)
 - [Audit log](audit-log.md)

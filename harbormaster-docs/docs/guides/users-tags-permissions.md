@@ -74,11 +74,11 @@ When the AI agent is switched on, each user has an **AI chat** setting. It is of
 
 ## The agent identity
 
-When the AI agent is switched on, a built-in user called `harbormaster-agent` exists. It is not a person: it does not appear in the Users list, cannot sign in, and cannot be edited or deleted here. Automatic AI investigations read your estate as this user, so what it may read is a permission decision like any other.
+When the AI agent is switched on, a built-in user called `harbormaster-agent` exists. It is not a person: it does not appear in the Users list, cannot sign in, and cannot be edited or deleted here. Automatic AI investigations and scheduled AI reviews read your estate as this user, so what it may read is a permission decision like any other.
 
-Set its access in **Settings > AI agent**, under **Agent identity**: for each tag choose **No access**, **View** or **View and logs**, then **Save access**. It starts with no access, and with no access every investigation is skipped as `not_visible`. It can never hold more than View and Logs. A change is audited as `agent_identity_update`.
+Set its access in **Settings > AI agent**, under **Agent identity**: for each tag choose **No access**, **View** or **View and logs**, then **Save access**. It starts with no access, and with no access every investigation and every review is skipped as `not_visible`. A review never reads logs, so it needs no Logs. It can never hold more than View and Logs. A change is audited as `agent_identity_update`.
 
-Deleting a tag removes the identity's access to it too, and the tag impact view lists the identity among those who lose access. See [Automatic AI investigations](ai-agent-investigator.md) and the [Permissions reference](../reference/permissions.md#the-agent-identity).
+Deleting a tag removes the identity's access to it too, and the tag impact view lists the identity among those who lose access. See [Automatic AI investigations](ai-agent-investigator.md), [Scheduled AI reviews](ai-agent-reviews.md) and the [Permissions reference](../reference/permissions.md#the-agent-identity).
 
 You cannot create a user whose name starts with `harbormaster-agent`: that prefix is reserved.
 
@@ -89,3 +89,4 @@ You cannot create a user whose name starts with `harbormaster-agent`: that prefi
 - [Audit log](audit-log.md)
 - [AI chat](ai-agent-chat.md)
 - [Automatic AI investigations](ai-agent-investigator.md)
+- [Scheduled AI reviews](ai-agent-reviews.md)

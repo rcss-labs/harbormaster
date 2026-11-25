@@ -1,0 +1,42 @@
+package main
+
+import (
+	"io"
+	"log/slog"
+	"testing"
+	"time"
+
+	"github.com/rcss-labs/harbormaster/internal/config"
+	"github.com/rcss-labs/harbormaster/internal/notify"
+	"github.com/rcss-labs/harbormaster/internal/store/storetest"
+)
+
+// The review job exists, and review messages are sent, only with the agent on and a daily cap above 0.
+func TestServe_ReviewJobNeedsTheAgentAndACap(t *testing.T) {
+	st := storetest.Open(t)
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	on := config.Config{AgentURL: "https://agent.internal:8484", AgentReviewsPerDay: 7, AgentReviewMaxLate: 90 * time.Minute, AgentInvestigationMaxWait: 5 * time.Minute}
+	off, zero := on, on
+	off.AgentURL, zero.AgentReviewsPerDay = "", 0
+	for name, cfg := range map[string]config.Config{"agent off": off, "cap of 0": zero} {
+		d := &notify.Dispatcher{}
+		r := newReviewer(cfg, st, nil, nil, log)
+		wireReviews(d, r)
+		if r != nil || d.Reviews {
+			t.Errorf("%s: job %+v, dispatcher reviews %v; want neither", name, r, d.Reviews)
+		}
+	}
+	kicked := false
+	r := newReviewer(on, st, nil, func() { kicked = true }, log)
+	if r == nil || r.PerDay != 7 || r.MaxLate != 90*time.Minute || r.InvestigationMaxWait != 5*time.Minute || r.Store != st || r.Scopes == nil ||
+		r.Driver == nil || r.Driver.Store == nil || r.Driver.Auth == nil || r.Driver.Guard != nil || r.Now == nil {
+		t.Fatalf("job = %+v", r)
+	}
+	r.KickNotify()
+	d := &notify.Dispatcher{}
+	wireReviews(d, r)
+	if !kicked || !d.Reviews || d.Investigate {
+		t.Errorf("kicked %v, dispatcher reviews %v, investigate %v", kicked, d.Reviews, d.Investigate)
+	}
+	wireReviews(nil, r) // a task without a dispatcher
+}

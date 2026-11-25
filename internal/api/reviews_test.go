@@ -407,6 +407,13 @@ func TestMe_ReviewsEnabled(t *testing.T) {
 		t.Error("agent off: reviews_enabled true, want false")
 	}
 	e := newInvEnv(t)
+	e.api.Cfg.AgentReviewsPerDay = 0
+	var none MeDTO
+	decode(t, e.sam.get("/api/me"), &none)
+	if none.ReviewsEnabled || !none.AgentEnabled {
+		t.Errorf("HM_AGENT_REVIEWS_PER_DAY=0: reviews_enabled %v agent_enabled %v, want false and true", none.ReviewsEnabled, none.AgentEnabled)
+	}
+	e.api.Cfg.AgentReviewsPerDay = 24
 	var on MeDTO
 	decode(t, e.sam.get("/api/me"), &on)
 	if !on.ReviewsEnabled || !on.AgentEnabled {
