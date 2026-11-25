@@ -69,3 +69,14 @@ func TestJob_TheDriversLogLinesCarryTheInvestigationID(t *testing.T) {
 		}
 	}
 }
+
+// An agent that does not offer the role ends the request as not configured, like a missing model.
+func TestJob_ARoleTheAgentDoesNotOfferIsNotConfigured(t *testing.T) {
+	f := newFixture(t)
+	f.agent.roles = []string{"chat"}
+	id := f.request("checkout-api")
+	f.want(f.runTo(id, "skipped"), "skipped", "not_configured")
+	if f.agent.count() != 0 || len(f.runs()) != 0 {
+		t.Errorf("%d agent calls, %d runs, want none", f.agent.count(), len(f.runs()))
+	}
+}

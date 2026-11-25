@@ -287,7 +287,7 @@ func TestDriver_PrepareKinds(t *testing.T) {
 		"no model for the role":  {prepare: func(f *fixture) { f.settings(func(s *store.AgentSettings) { s.RoleModels = nil }) }, want: NotConfigured},
 		"model not in catalogue": {prepare: func(f *fixture) { f.agent.models = []string{"claude-opus-4-5-20251101"} }, want: ModelUnavailable},
 		"model without a price":  {prepare: func(f *fixture) { f.agent.free = true }, want: ModelUnavailable},
-		"role not offered":       {prepare: func(f *fixture) { f.agent.roles = []string{"chat"} }, want: NotConfigured},
+		"role not offered":       {prepare: func(f *fixture) { f.agent.roles = []string{"chat"} }, want: RoleNotOffered},
 		"no catalogue":           {prepare: func(f *fixture) { f.agent.catalogueStatus = http.StatusServiceUnavailable }, want: AgentUnavailable},
 		"no model at all":        {prepare: func(f *fixture) { f.agent.models = nil }, want: ModelUnavailable},
 		"ready":                  {prepare: func(*fixture) {}, want: Ready},

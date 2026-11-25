@@ -217,7 +217,7 @@ func (j *job) prepare(ctx context.Context) *ending {
 	prepared, kind := j.drv.PrepareWith(ctx, identity, roleName)
 	switch kind {
 	case agentjob.Ready:
-	case agentjob.NotConfigured, agentjob.ModelUnavailable:
+	case agentjob.NotConfigured, agentjob.RoleNotOffered, agentjob.ModelUnavailable:
 		return skip(reasonNotConfigured)
 	case agentjob.AgentUnavailable:
 		end := j.notStarted()
@@ -277,7 +277,7 @@ func (j *job) endOf(out agentjob.Outcome) ending {
 		return ending{kind: endDone, word: "done"}
 	case agentjob.Budget:
 		return skipped(reasonBudget)
-	case agentjob.NotConfigured, agentjob.ModelUnavailable:
+	case agentjob.NotConfigured, agentjob.RoleNotOffered, agentjob.ModelUnavailable:
 		return skipped(reasonNotConfigured)
 	case agentjob.LimitReached:
 		return failed(reasonLimitReached)

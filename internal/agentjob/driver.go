@@ -32,7 +32,8 @@ const (
 	NoResult                     // the agent finished without one and said so
 	LimitReached                 // the agent finished without a result, having hit a limit
 	Budget                       // the reservation was refused: nothing was spent
-	NotConfigured                // no model for the role, or the agent does not offer the role
+	NotConfigured                // no model is chosen for the role
+	RoleNotOffered               // the agent does not offer the role
 	ModelUnavailable             // the chosen model is not in the catalogue, or no run of it can be priced
 	AgentBusy                    // the agent refused the run before it did anything
 	AgentUnavailable             // the agent could not be reached, or its stream broke
@@ -151,8 +152,8 @@ type Outcome struct {
 }
 
 // Prepare spends nothing: it finds the agent's identity, what it may see, the model chosen for the role and the
-// agent's catalogue. Kinds: Ready; NotConfigured (no model is chosen for the role, or the agent does not offer the
-// role); ModelUnavailable (the chosen model is not in the catalogue, or no run of it can be priced); AgentUnavailable
+// agent's catalogue. Kinds: Ready; NotConfigured (no model is chosen for the role); RoleNotOffered (the agent does not
+// offer the role); ModelUnavailable (the chosen model is not in the catalogue, or no run of it can be priced); AgentUnavailable
 // (no catalogue); Failed (a read failed); Cancelled (a step failed because ctx had ended).
 func (d *Driver) Prepare(ctx context.Context, role string) (Prepared, Kind) {
 	identity, kind := d.Identify(ctx)
@@ -198,7 +199,7 @@ func (d *Driver) PrepareWith(ctx context.Context, identity store.User, role stri
 		return Prepared{}, failedKind(ctx, AgentUnavailable)
 	}
 	if !cat.Supports(role) {
-		return Prepared{}, NotConfigured
+		return Prepared{}, RoleNotOffered
 	}
 	chosenModel, offered := cat.Find(ref.Provider, ref.Model)
 	if _, known := worstCase(chosenModel, cat.MaxRunTokens); !offered || !known {
