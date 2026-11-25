@@ -49,10 +49,15 @@ func (r *session) cleanResult(tool, text string) (*toolResult, string) {
 		text = strings.TrimSuffix(text, answerTooLargeNote)
 		res.readCap = true
 	}
+	return res, r.cleanText(text)
+}
+
+// cleanText is text from outside the run, scrubbed and without the run's codes.
+func (r *session) cleanText(text string) string {
 	// An invalid byte travels as a three-byte replacement, so it is replaced
 	// before anything is counted.
 	text = secretshape.ScrubText(strings.ToValidUTF8(text, "\uFFFD"))
-	return res, r.codes.ReplaceAllString(text, "[removed]")
+	return r.codes.ReplaceAllString(text, "[removed]")
 }
 
 // keep stores clean text, cut to limit bytes.

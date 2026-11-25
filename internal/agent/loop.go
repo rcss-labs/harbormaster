@@ -53,6 +53,8 @@ type TaskReview struct {
 	Type   string `json:"type"`
 	Range  string `json:"range"`
 	Period string `json:"period"`
+	// Instructions is what an admin asks of a custom review. Every other type has none.
+	Instructions string `json:"instructions,omitempty"`
 }
 
 // TaskScope is where a review looks. It is a focus, not an access rule. No
@@ -178,6 +180,7 @@ type session struct {
 	reminded  bool               // the reminder turn was used
 	reminder  []provider.Message // extra messages of the next gathering call
 	toolCalls int                // how many the model made, submit_result apart
+	request   string             // an admin's request as the model is shown it, "" without one
 	result    *agentresult.Result
 }
 
@@ -201,7 +204,7 @@ func (l *Loop) Run(ctx context.Context, in RunInput, emit func(Event)) error {
 		r.fail("invalid_request", "This kind of run is not supported.")
 		return nil
 	}
-	system, ok := systemText(in.Role, in.Page, r.tagCode, r.loopCode)
+	system, ok := systemText(in.Role, r.customReview(), in.Page, r.tagCode, r.loopCode)
 	if !ok {
 		r.fail("invalid_request", "This kind of run is not supported.")
 		return nil
@@ -209,6 +212,9 @@ func (l *Loop) Run(ctx context.Context, in RunInput, emit func(Event)) error {
 	r.system = system
 	if r.found != nil {
 		defer r.logFindings()
+		if r.customReview() {
+			r.request = r.cleanRequest(in.Task.Review.Instructions)
+		}
 		r.messages = []provider.Message{r.taskMessage(*in.Task)}
 	} else {
 		r.messages = textOnly(in.Messages)

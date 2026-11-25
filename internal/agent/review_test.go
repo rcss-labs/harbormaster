@@ -96,12 +96,16 @@ func TestReviewerFrame_Properties(t *testing.T) {
 func TestReviewInstructions_EveryTypeHasItsToolPartsAndNoForbiddenText(t *testing.T) {
 	want := map[string]struct {
 		label, first string
-		parts        []string
+		parts        []string // nil: the summary has no fixed parts
 	}{
 		"cost":        {"Cost", "get_cost_analytics", []string{"spend", "largest costs", "savings"}},
 		"security":    {"Security findings", "list_security", []string{"exposure", "worst images", "what to fix first"}},
 		"reliability": {"Reliability", "get_reliability_analytics", []string{"availability", "services at risk", "what to check"}},
 		"capacity":    {"Capacity", "get_capacity_analytics", []string{"headroom", "at their limit", "over-reserved"}},
+		"custom":      {"Custom", "the totals that fit the request", nil},
+	}
+	ofTheRequest := []string{
+		"Open single services only for the worst few", "admin_request", "within 1200 characters", "your own words", "do not repeat the request",
 	}
 	forbidden := map[string]*regexp.Regexp{
 		"a URL":               regexp.MustCompile(`(?i)://|www\.|\.(com|io|net|org|dev)\b`),
@@ -131,10 +135,19 @@ func TestReviewInstructions_EveryTypeHasItsToolPartsAndNoForbiddenText(t *testin
 		if rt.label != expected.label || strings.TrimSpace(rt.instructions) == "" {
 			t.Errorf("%s: label %q, %d bytes of instructions", rt.id, rt.label, len(rt.instructions))
 		}
-		if !strings.HasPrefix(rt.instructions, "Read "+expected.first+" first.") || !offered[expected.first] {
-			t.Errorf("%s: the instructions do not name %s as the tool to read first", rt.id, expected.first)
+		phrases := []string{"the range", "the scope's filters", "Cite the rows of single services"}
+		if expected.parts == nil {
+			if !strings.HasPrefix(rt.instructions, "Read "+expected.first+" first") || strings.Contains(rt.instructions, "three parts") {
+				t.Errorf("%s: the instructions do not begin with what to read first, or fix the parts of the summary", rt.id)
+			}
+			phrases = append(phrases, ofTheRequest...)
+		} else {
+			if !strings.HasPrefix(rt.instructions, "Read "+expected.first+" first.") || !offered[expected.first] {
+				t.Errorf("%s: the instructions do not name %s as the tool to read first", rt.id, expected.first)
+			}
+			phrases = append(phrases, "three parts, in this order")
 		}
-		for _, phrase := range []string{"the range", "the scope's filters", "Cite the rows of single services", "three parts, in this order"} {
+		for _, phrase := range phrases {
 			if !strings.Contains(rt.instructions, phrase) {
 				t.Errorf("%s: the instructions lack %q", rt.id, phrase)
 			}
@@ -156,7 +169,7 @@ func TestReviewInstructions_EveryTypeHasItsToolPartsAndNoForbiddenText(t *testin
 		}
 		// A tool the instructions name is one the role has.
 		for _, name := range regexp.MustCompile(`\b[a-z]+(_[a-z0-9]+)+\b`).FindAllString(rt.instructions, -1) {
-			if !offered[name] {
+			if !offered[name] && (name != "admin_request" || expected.parts != nil) {
 				t.Errorf("%s: the instructions name %s, which a reviewer is not offered", rt.id, name)
 			}
 		}

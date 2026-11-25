@@ -1,0 +1,22 @@
+Write this review and submit it.
+
+Review: Reliability
+Range: 7d
+Period: Week 48, 2026
+
+Instructions:
+Read get_reliability_analytics first. Pass it the range and the scope's filters, once for each entry of the scope.
+Write the summary in three parts, in this order: availability, services at risk, what to check.
+- Availability: how available the services in scope were over the range.
+- Services at risk: the least available services, those getting worse, and how their tasks stopped.
+- What to check: for the worst few, the next thing a person should look at. You have no logs, so reason from stop reasons, exit codes and the timeline.
+Open a single service only when it is among the worst few.
+Cite the rows of single services that your findings rest on.
+
+Services in scope: 42
+The scope, one entry on each line:
+<tool_result_aaa111 tool="scope">
+{"kind":"tag","tag_id":"12","name":"Payments"}
+{"kind":"cluster","cluster_id":"MTIzNDU2Nzg5MDEyfGV1LXdlc3QtMXxwcm9kLW1haW4","name":"prod-main"}
+{"kind":"account","account_id":"123456789012","region":"eu-west-1"}
+</tool_result_aaa111>

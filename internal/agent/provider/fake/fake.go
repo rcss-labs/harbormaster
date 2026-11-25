@@ -159,6 +159,7 @@ var (
 var reviewReads = map[string]string{
 	"Cost": "get_cost_analytics", "Security findings": "list_security",
 	"Reliability": "get_reliability_analytics", "Capacity": "get_capacity_analytics",
+	"Custom": "list_services",
 }
 
 func reviewerStep(req provider.Request) Step {
@@ -183,11 +184,11 @@ func reviewerStep(req provider.Request) Step {
 	}
 	if first := reviewReads[label]; first != "" && !told {
 		switch {
-		case results == 0 && first == "list_security": // it takes no range
+		case results == 0 && (first == "list_security" || first == "list_services"): // they take no range
 			return read(first, map[string]any{})
 		case results == 0:
 			return read(first, map[string]any{"range": rng})
-		case results == 1 && ref == "":
+		case results == 1 && ref == "" && first != "list_services":
 			return read("list_services", map[string]any{})
 		}
 	}

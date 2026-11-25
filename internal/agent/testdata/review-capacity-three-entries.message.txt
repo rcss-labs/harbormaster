@@ -1,0 +1,22 @@
+Write this review and submit it.
+
+Review: Capacity
+Range: 7d
+Period: Week 48, 2026
+
+Instructions:
+Read get_capacity_analytics first. Pass it the range and the scope's filters, once for each entry of the scope. It shows the latest poll and recent history whatever the range is.
+Write the summary in three parts, in this order: headroom, at their limit, over-reserved.
+- Headroom: how much is reserved, and which subnets or clusters are close to full.
+- At their limit: the services that run at their scaling maximum.
+- Over-reserved: the services that reserve far more than they use, and what to lower first.
+Open a single service only when it is among the worst few.
+Cite the rows of single services that your findings rest on.
+
+Services in scope: 42
+The scope, one entry on each line:
+<tool_result_aaa111 tool="scope">
+{"kind":"tag","tag_id":"12","name":"Payments"}
+{"kind":"cluster","cluster_id":"MTIzNDU2Nzg5MDEyfGV1LXdlc3QtMXxwcm9kLW1haW4","name":"prod-main"}
+{"kind":"account","account_id":"123456789012","region":"eu-west-1"}
+</tool_result_aaa111>

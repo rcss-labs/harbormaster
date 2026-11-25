@@ -15,6 +15,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -286,8 +287,8 @@ func unauthenticated(w http.ResponseWriter) {
 	writeError(w, http.StatusUnauthorized, "unauthenticated", "A valid run token is required.")
 }
 
-// decodeBody reads one JSON object of at most 1 MiB into v. On refusal it has already answered.
-func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
+// decodeBody reads one JSON object of at most 1 MiB into v and returns it as it came. On refusal it has already answered.
+func decodeBody(w http.ResponseWriter, r *http.Request, v any) (raw []byte, ok bool) {
 	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxRequestBodyBytes))
 	if err != nil {
 		var tooLarge *http.MaxBytesError
@@ -296,15 +297,15 @@ func decodeBody(w http.ResponseWriter, r *http.Request, v any) bool {
 		} else {
 			writeError(w, http.StatusBadRequest, "invalid_request", "The request body could not be read.")
 		}
-		return false
+		return nil, false
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(v); err != nil || decoder.More() {
 		writeError(w, http.StatusBadRequest, "invalid_request", "The request body is not one JSON object.")
-		return false
+		return nil, false
 	}
-	return true
+	return raw, true
 }
 
 // acquire takes a concurrency slot or answers 429.
@@ -347,6 +348,8 @@ type runRequest struct {
 	} `json:"page"`
 	MaxCostMicroUSD int64 `json:"max_cost_micro_usd"`
 	Task            *Task `json:"task"`
+
+	validUTF8 bool // the body as it came, before decoding replaced any byte
 }
 
 // wireEvent is Event as it travels: flat, with empty fields left out. Only a
@@ -384,9 +387,11 @@ func (s *server) serveRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req runRequest
-	if !decodeBody(w, r, &req) {
+	raw, ok := decodeBody(w, r, &req)
+	if !ok {
 		return
 	}
+	req.validUTF8 = utf8.Valid(raw)
 	if message := validateRun(&req); message != "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", message)
 		return
@@ -610,7 +615,7 @@ func (s *server) serveTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req testRequest
-	if !decodeBody(w, r, &req) {
+	if _, ok := decodeBody(w, r, &req); !ok {
 		return
 	}
 	prov, model, found := s.lookup(req.Provider, req.Model)

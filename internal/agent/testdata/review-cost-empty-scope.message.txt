@@ -1,0 +1,17 @@
+Write this review and submit it.
+
+Review: Cost
+Range: 7d
+Period: Week 48, 2026
+
+Instructions:
+Read get_cost_analytics first. Pass it the range and the scope's filters, once for each entry of the scope.
+Write the summary in three parts, in this order: spend, largest costs, savings.
+- Spend: the total for the range and what makes it up.
+- Largest costs: the clusters, accounts, tags or services that cost most.
+- Savings: the largest savings the answer lists and which to take first. Say which are estimates.
+Open a single service only to explain one of the largest costs or savings.
+Cite the rows of single services that your findings rest on.
+
+Services in scope: 42
+The scope is everything you can see.
