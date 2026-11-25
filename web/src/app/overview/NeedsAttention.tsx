@@ -14,6 +14,8 @@ import { statusLabel } from '../../components/status'
 import { StatusDot } from '../../components/StatusDot'
 import { needsAttention } from '../services/list/filterServices'
 import { useAuth } from '../auth/AuthProvider'
+import { InvestigationDrawer } from '../investigations/InvestigationDrawer'
+import { stateText } from '../investigations/stateText'
 import { useFilters } from '../shell/useFilters'
 import { ActionsSheet, type ActionsTarget } from './ActionsSheet'
 import { RestartButton } from './RestartButton'
@@ -82,6 +84,27 @@ function statusRow(service: ServiceListItemDTO, at: string): AlertDTO {
   }
 }
 
+/** The investigation's state as a link: a plain click opens the drawer, a new-tab click goes to the page. Nothing for an alert without one. */
+function InvestigationLink({ alert, enabled, onOpen }: { alert: AlertDTO; enabled: boolean; onOpen: (id: number) => void }) {
+  const investigation = alert.investigation
+  if (!enabled || !investigation) return null
+  return (
+    <span className={styles.context}>
+      <Link
+        to={`/investigations/${investigation.id}`}
+        className={styles.contextLink}
+        onClick={(event) => {
+          if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return
+          event.preventDefault()
+          onOpen(investigation.id)
+        }}
+      >
+        {stateText(investigation.state, investigation.reason)}
+      </Link>
+    </span>
+  )
+}
+
 export function NeedsAttention() {
   const { filters } = useFilters()
   const { me } = useAuth()
@@ -91,6 +114,8 @@ export function NeedsAttention() {
   const [showAll, setShowAll] = useState(false)
   const phone = usePhone()
   const [sheet, setSheet] = useState<ActionsTarget | null>(null)
+  const [investigationId, setInvestigationId] = useState<number | null>(null)
+  const agentEnabled = Boolean(me?.agent_enabled)
 
   const rows = useMemo(() => {
     const alerted = onePerService(alerts?.items ?? [])
@@ -174,6 +199,7 @@ export function NeedsAttention() {
                     )}
                     {alert.cluster !== '' && <span className={styles.where}>{alert.cluster}</span>}
                     <span className={styles.cause}>{alert.cause || alert.text}</span>
+                    <InvestigationLink alert={alert} enabled={agentEnabled} onOpen={setInvestigationId} />
                     {hasNextStep && (
                       <span className={styles.context}>
                         Next step:{' '}
@@ -221,6 +247,7 @@ export function NeedsAttention() {
                 </div>
                 <div className={styles.detail}>
                   <span className={styles.cause}>{alert.cause || alert.text}</span>
+                  <InvestigationLink alert={alert} enabled={agentEnabled} onOpen={setInvestigationId} />
                   {hasNextStep && (
                     <span className={styles.context}>
                       Next step:{' '}
@@ -263,6 +290,7 @@ export function NeedsAttention() {
           </button>
         )}
       </div>
+      {investigationId !== null && <InvestigationDrawer id={investigationId} onClose={() => setInvestigationId(null)} />}
       {sheet && <ActionsSheet target={sheet} isAdmin={me?.admin ?? false} onClose={() => setSheet(null)} />}
     </Panel>
   )

@@ -9,6 +9,7 @@ import (
 
 	"github.com/rcss-labs/harbormaster/internal/agent/provider"
 	"github.com/rcss-labs/harbormaster/internal/agent/provider/fake"
+	"github.com/rcss-labs/harbormaster/internal/model"
 )
 
 func TestFake_PlaysScriptInOrderAndStreamsText(t *testing.T) {
@@ -154,5 +155,47 @@ func TestFake_RecordedRequestsAreDeepCopies(t *testing.T) {
 	if got.Messages[0].ToolCalls[0].Arguments["nested"].(map[string]any)["k"] != "v" || got.Messages[0].ToolCalls[0].Name != "" ||
 		got.Messages[0].ToolCalls[1].ArgError != "arguments were not a JSON object" || got.Tools[0].InputSchema["type"] != "object" || string(got.Messages[0].Opaque) != `{"a":1}` {
 		t.Fatalf("recorded request was mutated through the caller's data: %+v", got)
+	}
+}
+
+func TestDemoInvestigator_ReadsTheServiceThenCitesOneUnit(t *testing.T) {
+	serviceID := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: "123456789012", Region: "eu-west-1", Cluster: "prod-main"}, Service: "checkout-api"}.ID()
+	for name, p := range map[string]*fake.Provider{"investigator": fake.DemoInvestigator(), "either role": fake.Demo()} {
+		msgs := []provider.Message{{Role: provider.RoleUser, Text: `Subject: {"kind":"service","service_ids":["` + serviceID + `"]}`}}
+		next := func() provider.ToolCall {
+			t.Helper()
+			resp, err := p.Generate(context.Background(), provider.Request{Messages: msgs, Tools: []provider.ToolDef{{Name: "submit_result"}}}, nil)
+			if err != nil || len(resp.ToolCalls) != 1 || resp.Usage.InputTokens == 0 {
+				t.Fatalf("%s: %+v, %v", name, resp, err)
+			}
+			call := resp.ToolCalls[0]
+			msgs = append(msgs, provider.Message{Role: provider.RoleAssistant, ToolCalls: resp.ToolCalls},
+				provider.Message{Role: provider.RoleTool, ToolCallID: call.ID, ToolName: call.Name, Text: "<tool_result_x>\n[e1] running: 0\n[e2] desired: 3\n</tool_result_x>"})
+			return call
+		}
+		for _, want := range []string{"get_service", "get_service_timeline"} {
+			if call := next(); call.Name != want || call.Arguments["service_id"] != serviceID {
+				t.Fatalf("%s: call = %+v, want %s", name, call, want)
+			}
+		}
+		call := next()
+		evidence, _ := call.Arguments["evidence"].([]any)
+		if call.Name != "submit_result" || call.Arguments["summary"] == "" || len(evidence) != 1 || evidence[0].(map[string]any)["ref"] != "e1" {
+			t.Fatalf("%s: last call = %+v", name, call)
+		}
+
+		// Told to finish before it has read anything, it submits without evidence.
+		msgs = append(msgs[:1], provider.Message{Role: provider.RoleUser, Text: "Call submit_result now."})
+		if call := next(); call.Name != "submit_result" || len(call.Arguments["evidence"].([]any)) != 0 {
+			t.Fatalf("%s: call = %+v", name, call)
+		}
+	}
+}
+
+func TestFake_FuncAnswersFromTheRequest(t *testing.T) {
+	p := fake.Func(func(req provider.Request) fake.Step { return fake.Text("model "+req.Model, provider.Usage{}) })
+	resp, err := p.Generate(context.Background(), provider.Request{Model: "m1"}, nil)
+	if err != nil || resp.Text != "model m1" || len(p.Requests()) != 1 {
+		t.Fatalf("resp = %+v, %v", resp, err)
 	}
 }

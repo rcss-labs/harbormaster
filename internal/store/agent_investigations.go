@@ -30,9 +30,11 @@ var investigationReasons = map[string]bool{
 }
 
 // Caps that the schema also enforces; checked here first so a refusal is an error, not a constraint failure.
+// MaxInvestigationMembers is exported because a group stored at the cap may have been cut, which the API treats as
+// "members unknown": only admins read it.
 const (
 	maxInvestigationAttempts = 2
-	maxInvestigationMembers  = 50
+	MaxInvestigationMembers  = 50
 	maxInvestigationEvidence = 12
 	maxEvidenceExcerptBytes  = 1500
 	maxEvidenceNoteRunes     = 300
@@ -286,7 +288,7 @@ func investigationMembers(subjectKind string, raw []byte) ([]byte, error) {
 			return nil, fmt.Errorf("decode incident members: %w", err)
 		}
 		for _, m := range incidentMembers {
-			if len(out) == maxInvestigationMembers {
+			if len(out) == MaxInvestigationMembers {
 				break
 			}
 			out = append(out, InvestigationMember{Cluster: m.Cluster, Service: m.Service})

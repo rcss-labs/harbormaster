@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/rcss-labs/harbormaster/internal/agent/provider"
+	"github.com/rcss-labs/harbormaster/internal/agentresult"
 	"github.com/rcss-labs/harbormaster/internal/apitoken"
 	"github.com/rcss-labs/harbormaster/internal/hmtools"
 	"github.com/rcss-labs/harbormaster/internal/secretshape"
@@ -27,6 +28,10 @@ import (
 const (
 	maxRequestBodyBytes = 1 << 20
 	maxMessages         = 500
+	// What a task may hold.
+	maxTaskServices       = 20
+	maxTaskServiceIDBytes = 512
+	maxTaskTextBytes      = 2000
 	// testCallMaxOutputTokens and testCallTimeout bound the settings page's "Test model" call.
 	testCallMaxOutputTokens = 16
 	testCallTimeout         = 45 * time.Second
@@ -176,11 +181,12 @@ func (s *server) serveCatalogue(w http.ResponseWriter, _ *http.Request) {
 	}
 	out := struct {
 		Providers []providerEntry `json:"providers"`
+		Roles     []string        `json:"roles"`
 		Limits    struct {
 			MaxRunTokens int64 `json:"max_run_tokens"`
 			Timeout      int64 `json:"run_timeout_seconds"`
 		} `json:"limits"`
-	}{Providers: []providerEntry{}}
+	}{Providers: []providerEntry{}, Roles: []string{roleChat, roleInvestigator, "test"}}
 	for _, entry := range s.cfg.Catalogue {
 		if _, ok := s.providers[entry.Provider]; !ok {
 			continue
@@ -335,9 +341,11 @@ type runRequest struct {
 		ClusterID string `json:"cluster_id"`
 	} `json:"page"`
 	MaxCostMicroUSD int64 `json:"max_cost_micro_usd"`
+	Task            *Task `json:"task"`
 }
 
-// wireEvent is Event as it travels: flat, with empty fields left out.
+// wireEvent is Event as it travels: flat, with empty fields left out. Only a
+// result event carries the fields of a result, all of them.
 type wireEvent struct {
 	Type         string `json:"type"`
 	Delta        string `json:"delta,omitempty"`
@@ -350,12 +358,14 @@ type wireEvent struct {
 	Notice       string `json:"notice,omitempty"`
 	Code         string `json:"code,omitempty"`
 	Message      string `json:"message,omitempty"`
+	*agentresult.Result
 }
 
 func toWire(ev Event) wireEvent {
 	out := wireEvent{
 		Type: ev.Type, Delta: ev.Delta, Tool: ev.Tool, OK: ev.OK, CostMicroUSD: ev.CostMicroUSD,
 		Provisional: ev.Provisional, Notice: ev.Notice, Code: ev.Code, Message: ev.Message,
+		Result: ev.Result,
 	}
 	if ev.Usage != nil {
 		out.InputTokens, out.OutputTokens = ev.Usage.InputTokens, ev.Usage.OutputTokens
@@ -387,7 +397,7 @@ func (s *server) serveRun(w http.ResponseWriter, r *http.Request) {
 	defer s.release()
 
 	input := RunInput{
-		RunID: req.RunID, Role: req.Role, Model: model, Bearer: bearer, MaxCostMicroUSD: req.MaxCostMicroUSD,
+		RunID: req.RunID, Role: req.Role, Model: model, Bearer: bearer, MaxCostMicroUSD: req.MaxCostMicroUSD, Task: req.Task,
 		Page: PageContext{Path: req.Page.Path, ServiceID: req.Page.ServiceID, ClusterID: req.Page.ClusterID},
 	}
 	for _, m := range req.Messages {
@@ -410,6 +420,12 @@ func validateRun(req *runRequest) string {
 	if req.MaxCostMicroUSD <= 0 {
 		return "max_cost_micro_usd must be positive."
 	}
+	if req.Role == roleInvestigator {
+		return validateInvestigation(req)
+	}
+	if req.Task != nil {
+		return "This kind of run takes no task."
+	}
 	if len(req.Messages) == 0 || len(req.Messages) > maxMessages {
 		return "messages must hold between 1 and 500 entries."
 	}
@@ -421,6 +437,36 @@ func validateRun(req *runRequest) string {
 	last := req.Messages[len(req.Messages)-1]
 	if last.Role != string(provider.RoleUser) || strings.TrimSpace(last.Text) == "" {
 		return "The last message must be a question from the user."
+	}
+	return ""
+}
+
+// validateInvestigation checks what an investigator run needs in place of messages.
+func validateInvestigation(req *runRequest) string {
+	if len(req.Messages) != 0 || req.Page.Path != "" || req.Page.ServiceID != "" || req.Page.ClusterID != "" {
+		return "This kind of run takes a task, and no messages or page."
+	}
+	if req.Task == nil || req.Task.Kind != "investigate" {
+		return "task must be of kind investigate."
+	}
+	subject, alert := req.Task.Subject, req.Task.Alert
+	switch subject.Kind {
+	case "service", "cluster", "account":
+	default:
+		return "subject kind must be service, cluster or account."
+	}
+	if len(subject.ServiceIDs) == 0 || len(subject.ServiceIDs) > maxTaskServices {
+		return "service_ids must hold between 1 and 20 entries."
+	}
+	for _, id := range subject.ServiceIDs {
+		if strings.TrimSpace(id) == "" || len(id) > maxTaskServiceIDBytes {
+			return "Each service id must hold between 1 and 512 bytes."
+		}
+	}
+	for _, text := range []string{subject.ClusterID, subject.AccountID, subject.Region, alert.Kind, alert.Title, alert.Text} {
+		if len(text) > maxTaskTextBytes {
+			return "Each text of a task must be at most 2000 bytes."
+		}
 	}
 	return ""
 }

@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
+import { useAuth } from '../../auth/AuthProvider'
+import { useServiceInvestigations } from '../../../api/investigations'
 import { useTimeline, useTimelineLogErrors, type TimelineEvent, type TimelineLane, type TimelineRange } from '../../../api/timeline'
 import type { ServiceDTO } from '../../../api/types'
 import { EmptyState } from '../../../components/EmptyState'
@@ -10,6 +12,8 @@ import { SegmentedFilter } from '../../../components/Seg'
 import { Table } from '../../../components/Table'
 import { Toggle } from '../../../components/Toggle'
 import { usePhone } from '../../../components/usePhone'
+import { InvestigationDrawer } from '../../investigations/InvestigationDrawer'
+import { InvestigationList, InvestigationListError } from '../../investigations/InvestigationList'
 import { queryPanelError } from '../panelError'
 import { LANES, PHONE_GROUP_DISTANCE_PCT, RANGES, formatEventTime, groupMarkers, logEvents, smallestRangeContaining, type MarkerGroup } from './model'
 import { TimelineBanner } from './TimelineBanner'
@@ -25,6 +29,8 @@ const PARTIAL_LOGS_MESSAGE = 'Some periods could not be read.'
 const TRUNCATED_NOTE = 'Showing the newest 500.'
 
 const pillKind: Record<TimelineEvent['severity'], PillKind> = { bad: 'bad', warn: 'warn', info: 'info', change: 'info' }
+
+const parseInvestigationId = (value: string | null): number | null => (value !== null && /^[0-9]{1,9}$/.test(value) ? Number(value) : null)
 
 const parseRange = (value: string | null): TimelineRange => RANGES.find((range) => range.value === value)?.value ?? DEFAULT_RANGE
 
@@ -51,6 +57,11 @@ export function TimelineTab({ serviceId, service }: { serviceId: string; service
       { replace: true },
     )
 
+  const investigationsQuery = useServiceInvestigations(serviceId)
+  const investigations = investigationsQuery.data?.items ?? []
+  const { me } = useAuth()
+  const openInvestigation = me?.agent_enabled ? parseInvestigationId(searchParams.get('investigation')) : null
+
   const data = timeline.data
   // Without ?event= the incident's trigger is shown, so the first look at a failing service lands on its likely cause.
   const selectedId = searchParams.get('event') ?? data?.incident?.trigger?.id ?? null
@@ -68,6 +79,26 @@ export function TimelineTab({ serviceId, service }: { serviceId: string; service
   const logLaneEvents = hasLogs && lanesOn.logs && data && logErrors.data ? logEvents(logErrors.data, to) : []
   const laneEvents: Record<TimelineLane, TimelineEvent[]> = { change: [], stop: [], alert: [], logs: logLaneEvents, access: [] }
   for (const event of data?.events ?? []) laneEvents[event.lane].push(event)
+
+  // Grouped like the other lanes: the grouping takes events, so each request is shaped as one.
+  const investigationMarkers = investigations
+    .filter((item) => data !== undefined && Date.parse(item.requested_at) >= from && Date.parse(item.requested_at) <= to)
+    .map((item): TimelineEvent => ({
+      id: String(item.id),
+      lane: 'change',
+      severity: 'change',
+      title: 'Investigation',
+      actor: '',
+      detail: '',
+      op: '',
+      task_id: '',
+      at: item.requested_at,
+      evidence_at: null,
+      diff: [],
+      from_revision: null,
+      to_revision: null,
+    }))
+  const investigationGroups = groupMarkers(investigationMarkers, from, to, phone ? PHONE_GROUP_DISTANCE_PCT : undefined)
 
   const groups = Object.fromEntries(LANE_ORDER.map((lane) => [lane, groupMarkers(laneEvents[lane], from, to, phone ? PHONE_GROUP_DISTANCE_PCT : undefined)])) as Record<TimelineLane, MarkerGroup[]>
 
@@ -130,6 +161,9 @@ export function TimelineTab({ serviceId, service }: { serviceId: string; service
     updateParams((params) => params.set('event', id))
   }
 
+  const chooseInvestigation = (id: number) => updateParams((params) => params.set('investigation', String(id)))
+  const closeInvestigation = () => updateParams((params) => params.delete('investigation'))
+
   const toggles = (
     <div className={styles.toggles} data-testid="timeline-toggles">
       {LANE_ORDER.map((lane) =>
@@ -178,6 +212,8 @@ export function TimelineTab({ serviceId, service }: { serviceId: string; service
                 selectedId={selectedId}
                 laneStates={laneStates}
                 onSelect={(group) => select(group.items[0].id, group.items[0].lane)}
+                investigations={investigationGroups}
+                onSelectInvestigation={(group) => chooseInvestigation(Number(group.items[0].id))}
               />
             ) : (
               <>
@@ -193,6 +229,8 @@ export function TimelineTab({ serviceId, service }: { serviceId: string; service
               ))}
             </ul>
           )}
+          {investigationsQuery.isError && investigations.length === 0 && <InvestigationListError onRetry={() => void investigationsQuery.refetch()} />}
+          {investigations.length > 0 && <InvestigationList items={investigations} withDate={withDate} onOpen={chooseInvestigation} />}
           {data && anyLaneOn && (
             <Panel title="Events" sub={<span className={styles.count}>{visibleEvents.length} events in range</span>} flush>
               {visibleEvents.length === 0 ? (
@@ -245,6 +283,7 @@ export function TimelineTab({ serviceId, service }: { serviceId: string; service
           )}
         </div>
       </div>
+      {openInvestigation !== null && <InvestigationDrawer id={openInvestigation} onClose={closeInvestigation} />}
     </>
   )
 }

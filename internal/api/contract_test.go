@@ -93,6 +93,15 @@ func nullableItemField(shape any, key string) any {
 	return shape
 }
 
+// alertsShape is the alerts body with the investigation member typed: it is raw JSON on the Go side because it is
+// absent for tokens and an explicit null for a session caller with no investigation.
+func alertsShape() any {
+	shape := shapeOf(reflect.TypeFor[AlertsDTO]())
+	item := shape.(map[string]any)["items"].([]any)[0].(map[string]any)
+	item["investigation"] = map[string]any{"$optional": map[string]any{"$null": shapeOf(reflect.TypeFor[AlertInvestigationDTO]())}}
+	return shape
+}
+
 // Known drift source: a nil Go slice serialises as null, but the shapes below say array. Handlers must emit
 // empty slices ([]) unless the field is deliberately nullable (see nullableField).
 // contractShapes lists every response body the SPA reads, keyed by the name the Vitest contract test uses.
@@ -125,7 +134,7 @@ func contractShapes() map[string]any {
 		"overviewMetrics":    shapeOf(reflect.TypeFor[OverviewMetricsDTO]()),
 		"targetHealth":       shapeOf(reflect.TypeFor[TargetHealthDTO]()),
 		"scaling":            shapeOf(reflect.TypeFor[ScalingDTO]()),
-		"alerts":             shapeOf(reflect.TypeFor[AlertsDTO]()),
+		"alerts":             alertsShape(),
 		"logs":               shapeOf(reflect.TypeFor[LogsDTO]()),
 		"taskDefinition":     shapeOf(reflect.TypeFor[TaskDefinitionResponse]()),
 		"revisions":          shapeOf(reflect.TypeFor[RevisionsResponse]()),
@@ -189,6 +198,12 @@ func contractShapes() map[string]any {
 		"agentSettings":   shapeOf(reflect.TypeFor[AgentSettingsDTO]()),
 		"agentUsage":      shapeOf(reflect.TypeFor[AgentUsageDTO]()),
 		"agentTestResult": shapeOf(reflect.TypeFor[AgentTestResultDTO]()),
+		"agentIdentity":   shapeOf(reflect.TypeFor[AgentIdentityDTO]()),
+		// investigations: the list of past ones that sits with the agent settings
+		"agentInvestigations": shapeOf(reflect.TypeFor[AgentInvestigationsDTO]()),
+		// AI investigations
+		"investigations": shapeOf(reflect.TypeFor[ItemsResponse[InvestigationDTO]]()),
+		"investigation":  shapeOf(reflect.TypeFor[InvestigationDetailDTO]()),
 	}
 }
 

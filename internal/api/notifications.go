@@ -51,6 +51,10 @@ var (
 	regionPattern    = regexp.MustCompile(`^[a-z0-9-]{1,30}$`)
 )
 
+// errAgentDisabled refuses switching a route to investigate while HM_AGENT_URL is unset.
+var errAgentDisabled = &APIError{Status: http.StatusUnprocessableEntity, Code: "agent_disabled",
+	Message: "The AI agent is not set up on this server, so a route cannot investigate alerts."}
+
 func notifyConflict(message string) *APIError {
 	return &APIError{Status: http.StatusConflict, Code: "conflict", Message: message}
 }
@@ -210,10 +214,20 @@ func (s *Server) buildRoute(ctx context.Context, in NotificationRouteInput, exis
 	if err != nil {
 		return route, false, err
 	}
+	// A request that leaves the switch out (an older browser bundle) keeps what is stored.
+	investigate := existing != nil && existing.Investigate
+	if in.Investigate != nil {
+		investigate = *in.Investigate
+	}
+	// Turning it on needs the agent; a route that already has it on can still be saved while the agent is off, and a
+	// preview ignores it (see previewNotification).
+	if !preview && investigate && !(existing != nil && existing.Investigate) && !s.Cfg.AgentEnabled() {
+		return route, false, errAgentDisabled
+	}
 	route = store.NotificationRoute{
 		Name: name, Enabled: in.Enabled, Destination: in.Destination, MinSeverity: in.MinSeverity, Kinds: kinds,
 		RepeatSeconds: in.RepeatSeconds, QuietEnabled: in.QuietEnabled, QuietTimezone: in.QuietTimezone,
-		NotifyResolved: in.NotifyResolved, Scope: scope, Fallback: in.Fallback,
+		NotifyResolved: in.NotifyResolved, Scope: scope, Fallback: in.Fallback, Investigate: investigate,
 	}
 	if existing != nil {
 		route.ID, route.Version = existing.ID, existing.Version
@@ -382,7 +396,7 @@ func (s *Server) routeDTO(route store.NotificationRoute, scope []notify.Selector
 		SecretSet: len(route.SecretEnc) > 0, Signed: c.Signed, MinSeverity: route.MinSeverity, Kinds: append([]string{}, route.Kinds...),
 		RepeatSeconds: route.RepeatSeconds, QuietEnabled: route.QuietEnabled, QuietTimezone: route.QuietTimezone,
 		NotifyResolved: route.NotifyResolved, Scope: make([]NotificationSelectorDTO, 0, len(scope)), Fallback: route.Fallback,
-		Failing: failing, Version: route.Version, UpdatedAt: route.UpdatedAt,
+		Failing: failing, Version: route.Version, UpdatedAt: route.UpdatedAt, Investigate: route.Investigate,
 	}
 	if c.ThreadID > 0 {
 		thread := c.ThreadID
@@ -449,7 +463,7 @@ func routeAuditView(route store.NotificationRoute) map[string]any {
 		"name": route.Name, "enabled": route.Enabled, "destination": route.Destination, "min_severity": route.MinSeverity,
 		"kinds": route.Kinds, "repeat_seconds": route.RepeatSeconds, "quiet_enabled": route.QuietEnabled,
 		"quiet_timezone": route.QuietTimezone, "notify_resolved": route.NotifyResolved, "fallback": route.Fallback,
-		"scope": scope, "version": route.Version,
+		"investigate": route.Investigate, "scope": scope, "version": route.Version,
 	}
 }
 
@@ -724,6 +738,13 @@ func (s *Server) previewNotification(w http.ResponseWriter, r *http.Request) {
 		out.Groups = append(out.Groups, groupPreviewDTO(g.State, false, names))
 	}
 
+	if draft.Investigate && s.Cfg.AgentEnabled() {
+		if out.Agent, err = s.previewAgent(ctx, scopes[draft.ID], targets); err != nil {
+			s.fail(w, err)
+			return
+		}
+	}
+
 	subject, message := s.previewSubject(draft, matches, openGroups, names, now)
 	out.Sample = message == previewSample
 	rendered, err := notify.RenderPreview(draft.Destination, notify.Message{Event: notify.EventOpened, Subject: subject, BaseURL: s.Cfg.BaseURL, RouteName: draft.Name})
@@ -733,6 +754,40 @@ func (s *Server) previewNotification(w http.ResponseWriter, r *http.Request) {
 	}
 	out.Destination, out.Title, out.Body, out.JSON = rendered.Destination, rendered.Title, rendered.Body, rendered.JSON
 	writeJSON(w, http.StatusOK, out)
+}
+
+// previewAgent counts the services the draft's scope holds and how many of them the agent identity cannot View now.
+// Only ACTIVE services count, as in the scope picker; the identity is created here when it does not exist yet.
+func (s *Server) previewAgent(ctx context.Context, scope notify.Scope, targets store.NotificationTargets) (*NotificationPreviewAgentDTO, error) {
+	identity, err := s.Store.EnsureAgentIdentity(ctx)
+	if err != nil {
+		return nil, err
+	}
+	subject, err := s.Store.LoadSubject(ctx, identity.ID)
+	if err != nil {
+		return nil, err
+	}
+	visible, err := s.Store.ListServices(ctx, store.TargetFilter{}, "", visibilityOf(subject))
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[model.ServiceKey]bool, len(visible))
+	for _, row := range visible {
+		seen[row.Key] = true
+	}
+	out := &NotificationPreviewAgentDTO{}
+	for _, target := range targets.Services {
+		inScope := scope.All || scope.Services[target.Key] ||
+			slices.ContainsFunc(scope.Groups, func(g notify.GroupSelector) bool { return g.Contains(target.Key) })
+		if !inScope {
+			continue
+		}
+		out.ServicesTotal++
+		if !seen[target.Key] {
+			out.ServicesUnseen++
+		}
+	}
+	return out, nil
 }
 
 const (

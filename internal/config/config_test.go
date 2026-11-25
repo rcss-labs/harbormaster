@@ -101,6 +101,7 @@ func TestLoad_Defaults(t *testing.T) {
 		TokenMaxTTL:      2160 * time.Hour, TokenMaxTTLSSO: 168 * time.Hour, TokenMaxPerUser: 10,
 		TokenLogSearchMaxGB: 2, TokenLogSearchDailyGB: 20,
 		OAuthAccessTTL: time.Hour, AgentRunTokenTTL: 15 * time.Minute,
+		AgentIdentityRatePerSecond: 5, AgentIdentityLogSearchMaxGB: 2, AgentIdentityLogSearchDailyGB: 20,
 		AgentInvestigationWindow: 15 * time.Minute, AgentInvestigationsConcurrent: 2, AgentInvestigationsPerHour: 20, AgentInvestigationMaxWait: 15 * time.Minute,
 		OAuthClientHosts: []string{"claude.ai"},
 		OAuthRedirectURIs: []string{
@@ -1075,5 +1076,51 @@ func TestLoad_RetentionAgentRunsRefusesAShortValue(t *testing.T) {
 		if err != nil && !strings.Contains(err.Error(), "HM_RETENTION_AGENT_RUNS") {
 			t.Errorf("HM_RETENTION_AGENT_RUNS=%s: message %q does not name the variable", tc.raw, err)
 		}
+	}
+}
+
+func TestLoad_AgentIdentityLimitsValidation(t *testing.T) {
+	cfg, err := Load(tokenEnv(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AgentIdentityRatePerSecond != 5 || cfg.AgentIdentityLogSearchMaxGB != 2 ||
+		cfg.AgentIdentityLogSearchDailyGB != 20 {
+		t.Errorf("defaults = %d, %d, %d; want 5, 2, 20",
+			cfg.AgentIdentityRatePerSecond, cfg.AgentIdentityLogSearchMaxGB, cfg.AgentIdentityLogSearchDailyGB)
+	}
+
+	cfg, err = Load(tokenEnv(map[string]string{
+		"HM_AGENT_IDENTITY_RATE_PER_SECOND": "50", "HM_AGENT_IDENTITY_LOG_SEARCH_MAX_GB": "0",
+		"HM_AGENT_IDENTITY_LOG_SEARCH_DAILY_GB": "0",
+	}))
+	if err != nil {
+		t.Fatalf("edge values: %v", err)
+	}
+	if cfg.AgentIdentityRatePerSecond != 50 || cfg.AgentIdentityLogSearchMaxGB != 0 ||
+		cfg.AgentIdentityLogSearchDailyGB != 0 {
+		t.Errorf("edge values = %d, %d, %d; want 50, 0, 0",
+			cfg.AgentIdentityRatePerSecond, cfg.AgentIdentityLogSearchMaxGB, cfg.AgentIdentityLogSearchDailyGB)
+	}
+	cfg, err = Load(tokenEnv(map[string]string{"HM_AGENT_IDENTITY_RATE_PER_SECOND": "1"}))
+	if err != nil || cfg.AgentIdentityRatePerSecond != 1 {
+		t.Errorf("rate 1: cfg %d, err %v; want 1 and no error", cfg.AgentIdentityRatePerSecond, err)
+	}
+
+	for name, tc := range map[string]struct{ key, value string }{
+		"rate zero":       {"HM_AGENT_IDENTITY_RATE_PER_SECOND", "0"},
+		"rate above 50":   {"HM_AGENT_IDENTITY_RATE_PER_SECOND", "51"},
+		"rate negative":   {"HM_AGENT_IDENTITY_RATE_PER_SECOND", "-1"},
+		"max negative":    {"HM_AGENT_IDENTITY_LOG_SEARCH_MAX_GB", "-1"},
+		"daily negative":  {"HM_AGENT_IDENTITY_LOG_SEARCH_DAILY_GB", "-1"},
+		"max too large":   {"HM_AGENT_IDENTITY_LOG_SEARCH_MAX_GB", "1000001"},
+		"daily too large": {"HM_AGENT_IDENTITY_LOG_SEARCH_DAILY_GB", "1000001"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := Load(tokenEnv(map[string]string{tc.key: tc.value}))
+			if err == nil || !strings.Contains(err.Error(), tc.key) {
+				t.Fatalf("err = %v, want it to name %s", err, tc.key)
+			}
+		})
 	}
 }
