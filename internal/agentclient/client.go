@@ -16,11 +16,13 @@ import (
 	"net/http"
 	"net/http/httptrace"
 	"net/url"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rcss-labs/harbormaster/internal/agentresult"
 )
 
 var (
@@ -56,6 +58,30 @@ type Page struct {
 	ClusterID string `json:"cluster_id"`
 }
 
+// Task is the investigation an investigator run works on. It mirrors the agent service's wire type.
+type Task struct {
+	Kind    string      `json:"kind"`
+	Subject TaskSubject `json:"subject"`
+	Alert   TaskAlert   `json:"alert"`
+}
+
+// TaskSubject is what an investigation is about.
+type TaskSubject struct {
+	Kind       string   `json:"kind"`
+	ServiceIDs []string `json:"service_ids"`
+	ClusterID  string   `json:"cluster_id"`
+	AccountID  string   `json:"account_id"`
+	Region     string   `json:"region"`
+}
+
+// TaskAlert is the alert that started an investigation.
+type TaskAlert struct {
+	Kind     string    `json:"kind"`
+	Title    string    `json:"title"`
+	Text     string    `json:"text"`
+	OpenedAt time.Time `json:"opened_at"`
+}
+
 // RunRequest is the body of POST /v1/runs.
 type RunRequest struct {
 	RunID           uuid.UUID `json:"run_id"`
@@ -65,22 +91,25 @@ type RunRequest struct {
 	Messages        []Message `json:"messages"`
 	Page            Page      `json:"page"`
 	MaxCostMicroUSD int64     `json:"max_cost_micro_usd"`
+	Task            *Task     `json:"task,omitempty"`
 }
 
 // Event is one NDJSON line of a run stream. Types: text, tool_start,
-// tool_end, usage, notice, done, error.
+// tool_end, usage, notice, result, done, error. A result event carries its
+// fields flat on the line; Run decodes them into Result.
 type Event struct {
-	Type         string `json:"type"`
-	Delta        string `json:"delta,omitempty"`
-	Tool         string `json:"tool,omitempty"`
-	OK           bool   `json:"ok,omitempty"`
-	InputTokens  int64  `json:"input_tokens,omitempty"`
-	OutputTokens int64  `json:"output_tokens,omitempty"`
-	CostMicroUSD int64  `json:"cost_micro_usd,omitempty"`
-	Provisional  bool   `json:"provisional,omitempty"`
-	Notice       string `json:"notice,omitempty"`
-	Code         string `json:"code,omitempty"`
-	Message      string `json:"message,omitempty"`
+	Type         string              `json:"type"`
+	Delta        string              `json:"delta,omitempty"`
+	Tool         string              `json:"tool,omitempty"`
+	OK           bool                `json:"ok,omitempty"`
+	InputTokens  int64               `json:"input_tokens,omitempty"`
+	OutputTokens int64               `json:"output_tokens,omitempty"`
+	CostMicroUSD int64               `json:"cost_micro_usd,omitempty"`
+	Provisional  bool                `json:"provisional,omitempty"`
+	Notice       string              `json:"notice,omitempty"`
+	Code         string              `json:"code,omitempty"`
+	Message      string              `json:"message,omitempty"`
+	Result       *agentresult.Result `json:"-"`
 }
 
 // Model is one model the agent offers, with its prices in micro-dollars per million tokens.
@@ -110,6 +139,16 @@ type Catalogue struct {
 	Providers    []ProviderModels
 	MaxRunTokens int64
 	RunTimeout   time.Duration
+	Roles        []string
+}
+
+// Supports reports whether the agent offers role.
+// An agent that lists no roles is a phase 1 agent: it offers chat and test only.
+func (c Catalogue) Supports(role string) bool {
+	if c.Roles == nil {
+		return role == "chat" || role == "test"
+	}
+	return slices.Contains(c.Roles, role)
 }
 
 // TestResult is the answer to a "Test model" call.
@@ -250,6 +289,7 @@ type catalogueWire struct {
 			ContextTokens int64  `json:"context_tokens"`
 		} `json:"models"`
 	} `json:"providers"`
+	Roles  []string `json:"roles"`
 	Limits struct {
 		MaxRunTokens      int64 `json:"max_run_tokens"`
 		RunTimeoutSeconds int64 `json:"run_timeout_seconds"`
@@ -294,6 +334,7 @@ func (c *Client) Catalogue(ctx context.Context) (Catalogue, error) {
 	cat := Catalogue{
 		MaxRunTokens: wire.Limits.MaxRunTokens,
 		RunTimeout:   time.Duration(wire.Limits.RunTimeoutSeconds) * time.Second,
+		Roles:        wire.Roles,
 	}
 	for _, p := range wire.Providers {
 		pm := ProviderModels{Provider: p.Provider}
@@ -338,6 +379,13 @@ func (c *Client) Run(ctx context.Context, bearer string, req RunRequest, onEvent
 		var ev Event
 		if err := json.Unmarshal(line, &ev); err != nil {
 			return fmt.Errorf("%w: malformed event", ErrAgentUnavailable)
+		}
+		if ev.Type == "result" {
+			var res agentresult.Result
+			if err := json.Unmarshal(line, &res); err != nil {
+				return fmt.Errorf("%w: malformed result", ErrAgentUnavailable)
+			}
+			ev.Result = &res
 		}
 		onEvent(ev)
 		if ev.Type == "done" || ev.Type == "error" {

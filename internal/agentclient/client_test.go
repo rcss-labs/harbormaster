@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -421,5 +422,163 @@ func TestTest_UsageIsKnownOnlyWhenTheAnswerStatesIt(t *testing.T) {
 			t.Errorf("%s: known %v, %v; want %v", body, res.UsageKnown, err, known)
 		}
 		srv.Close()
+	}
+}
+
+func TestRun_SendsTheTask(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		writeLines(w, `{"type":"done"}`)
+	}))
+	defer srv.Close()
+	c, _ := New(srv.URL, "")
+	const serviceID = "7f3c9a2e-41d0-4b8e-9c15-0a6d2e8f1b73-checkout-service"
+	req := sampleRequest()
+	req.Role = "investigator"
+	req.Task = &Task{
+		Kind:    "investigate",
+		Subject: TaskSubject{Kind: "service", ServiceIDs: []string{serviceID}, ClusterID: "cl-1", AccountID: "123456789012", Region: "eu-west-1"},
+		Alert:   TaskAlert{Kind: "down", Title: "Checkout is failing", Text: "5xx above 10 percent", OpenedAt: time.Date(2026, 11, 24, 10, 0, 0, 0, time.UTC)},
+	}
+	if err := c.Run(context.Background(), "tok", req, func(Event) {}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	task, ok := gotBody["task"].(map[string]any)
+	if !ok {
+		t.Fatalf("body has no task object: %v", gotBody)
+	}
+	subject, _ := task["subject"].(map[string]any)
+	alert, _ := task["alert"].(map[string]any)
+	ids, _ := subject["service_ids"].([]any)
+	if task["kind"] != "investigate" || subject["kind"] != "service" || len(ids) != 1 || ids[0] != serviceID ||
+		subject["cluster_id"] != "cl-1" || subject["account_id"] != "123456789012" || subject["region"] != "eu-west-1" {
+		t.Errorf("subject on the wire = %v", task)
+	}
+	if alert["kind"] != "down" || alert["title"] != "Checkout is failing" || alert["text"] != "5xx above 10 percent" ||
+		alert["opened_at"] != "2026-11-24T10:00:00Z" {
+		t.Errorf("alert on the wire = %v", alert)
+	}
+}
+
+func TestRun_ChatRequestHasNoTaskMember(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		writeLines(w, `{"type":"done"}`)
+	}))
+	defer srv.Close()
+	c, _ := New(srv.URL, "")
+	if err := c.Run(context.Background(), "tok", sampleRequest(), func(Event) {}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if task, ok := gotBody["task"]; ok {
+		t.Errorf("a chat request carries a task member: %v", task)
+	}
+}
+
+func TestRun_DecodesTheResultEvent(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeLines(w,
+			`{"type":"result","summary":"Checkout failed after the deploy.","summary_replaced":true,"evidence":[{"tool":"get_service_timeline","service_id":"7f3c9a2e-41d0-4b8e-9c15-0a6d2e8f1b73-checkout-service","action":"Logs","note":"Pods restarted.","excerpt":"OOMKilled"}],"evidence_dropped":2}`,
+			`{"type":"done"}`,
+		)
+	}))
+	defer srv.Close()
+	c, _ := New(srv.URL, "")
+	var events []Event
+	if err := c.Run(context.Background(), "tok", sampleRequest(), func(e Event) { events = append(events, e) }); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(events) != 2 || events[0].Type != "result" || events[1].Type != "done" {
+		t.Fatalf("events = %+v", events)
+	}
+	if events[1].Result != nil {
+		t.Errorf("done event carries a Result: %+v", events[1].Result)
+	}
+	res := events[0].Result
+	if res == nil {
+		t.Fatal("result event carries no Result")
+	}
+	if res.Summary != "Checkout failed after the deploy." || !res.SummaryReplaced || res.EvidenceDropped != 2 {
+		t.Errorf("result = %+v", res)
+	}
+	if len(res.Evidence) != 1 {
+		t.Fatalf("evidence = %+v", res.Evidence)
+	}
+	ev := res.Evidence[0]
+	if ev.Tool != "get_service_timeline" || ev.ServiceID != "7f3c9a2e-41d0-4b8e-9c15-0a6d2e8f1b73-checkout-service" ||
+		ev.Action != "Logs" || ev.Note != "Pods restarted." || ev.Excerpt != "OOMKilled" {
+		t.Errorf("evidence item = %+v", ev)
+	}
+}
+
+func TestRun_ResultOverTheLineCapIsUnavailable(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"type":"result","summary":"`)
+		fmt.Fprint(w, strings.Repeat("a", maxLineBytes))
+		fmt.Fprintln(w, `","summary_replaced":false,"evidence":[],"evidence_dropped":0}`)
+		fmt.Fprintln(w, `{"type":"done"}`)
+	}))
+	defer srv.Close()
+	c, _ := New(srv.URL, "")
+	var events []Event
+	err := c.Run(context.Background(), "tok", sampleRequest(), func(e Event) { events = append(events, e) })
+	if !errors.Is(err, ErrAgentUnavailable) {
+		t.Errorf("err = %v, want ErrAgentUnavailable", err)
+	}
+	for _, e := range events {
+		if e.Type == "result" {
+			t.Errorf("a result over the line cap was delivered: %+v", e)
+		}
+	}
+}
+
+func TestCatalogue_RolesAndSupports(t *testing.T) {
+	cases := []struct {
+		name     string
+		body     string
+		roles    []string
+		supports map[string]bool
+	}{
+		{
+			name:     "with the investigator member",
+			body:     `{"providers":[],"roles":["chat","investigator","test"],"limits":{"max_run_tokens":1,"run_timeout_seconds":1}}`,
+			roles:    []string{"chat", "investigator", "test"},
+			supports: map[string]bool{"investigator": true, "chat": true, "test": true, "unknown": false},
+		},
+		{
+			name:     "without the investigator member",
+			body:     `{"providers":[],"roles":["chat","test"],"limits":{"max_run_tokens":1,"run_timeout_seconds":1}}`,
+			roles:    []string{"chat", "test"},
+			supports: map[string]bool{"investigator": false, "chat": true, "test": true},
+		},
+		{
+			name:     "from a phase 1 agent with no roles",
+			body:     `{"providers":[],"limits":{"max_run_tokens":1,"run_timeout_seconds":1}}`,
+			roles:    nil,
+			supports: map[string]bool{"investigator": false, "chat": true, "test": true},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+			c, _ := New(srv.URL, "")
+			cat, err := c.Catalogue(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(cat.Roles, tc.roles) {
+				t.Errorf("roles = %v, want %v", cat.Roles, tc.roles)
+			}
+			for role, want := range tc.supports {
+				if got := cat.Supports(role); got != want {
+					t.Errorf("Supports(%q) = %v, want %v", role, got, want)
+				}
+			}
+		})
 	}
 }
