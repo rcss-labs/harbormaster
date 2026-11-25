@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/rcss-labs/harbormaster/internal/agentresult"
 )
@@ -71,7 +72,7 @@ func (m Message) checkMessage() error {
 	case m.isDiagnosis() && (m.Diagnosis == nil || m.Diagnosis.InvestigationID <= 0):
 		return errNoDiagnosis
 	case m.isReview():
-		if m.Review == nil || m.Review.RunID <= 0 || m.reviewLabel() == "" {
+		if m.Review == nil || m.Review.RunID <= 0 || m.reviewLabel() == "" || m.reviewName() == "" {
 			return errNoReview
 		}
 	}
@@ -103,7 +104,27 @@ func (m Message) summary() string {
 }
 
 // reviewTitle is the headline of a review: the fixed type label and the name, which is admin text.
-func (m Message) reviewTitle() string { return m.reviewLabel() + " review: " + m.Review.Name }
+func (m Message) reviewTitle() string { return m.reviewLabel() + " review: " + m.reviewName() }
+
+// reviewName is the admin-written name reduced to one visible line: breaks and other white space become single
+// spaces, and control, format (bidi, zero-width), line and paragraph separator and default-ignorable runes are
+// dropped, so a name cannot start a line of its own above the AI notice or reorder what follows it.
+func (m Message) reviewName() string {
+	if m.Review == nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range m.Review.Name {
+		switch {
+		case unicode.IsSpace(r):
+			b.WriteByte(' ')
+		case unicode.In(r, unicode.Cc, unicode.Cf, unicode.Zl, unicode.Zp, unicode.Variation_Selector, unicode.Other_Default_Ignorable_Code_Point):
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return strings.Join(strings.Fields(b.String()), " ")
+}
 
 // linkText is the label of the link of an AI message.
 func (m Message) linkText() string {

@@ -3,6 +3,7 @@ package notify
 import (
 	"context"
 	"encoding/json"
+	"mime"
 	"strings"
 	"testing"
 	"time"
@@ -143,7 +144,7 @@ func TestReview_Email_SubjectAndLinesStayShort(t *testing.T) {
 	m := reviewMessage("The spend is flat.\nNothing to do.")
 	m.Review.Name = "spend\r\nBcc: evil@example.com"
 	subject, raw := Email(m, "hm@example.com", []string{"ops@example.com"})
-	if want := "[Harbormaster] Cost review: spend  Bcc: evil@example.com"; subject != want {
+	if want := "[Harbormaster] Cost review: spend Bcc: evil@example.com"; subject != want {
 		t.Errorf("subject = %q, want %q", subject, want)
 	}
 	head, body := decodedEmailBody(t, raw)
@@ -383,5 +384,108 @@ func TestReview_PreviewFollowsTheSenders(t *testing.T) {
 	}
 	if hook, err := RenderPreview(DestWebhook, m); err != nil || !strings.Contains(hook.JSON, `"event": "review"`) {
 		t.Errorf("webhook preview = %+v, %v", hook, err)
+	}
+}
+
+func webhookReviewName(t *testing.T, m Message) string {
+	t.Helper()
+	body, err := WebhookBody(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	name, _ := got["review_name"].(string)
+	return name
+}
+
+func TestReview_NameIsOneVisibleLine(t *testing.T) {
+	forged := "x*\nChecked by a person. *Safe"
+	m := reviewMessage("ok")
+	m.Review.Name = forged
+	const flat = "x* Checked by a person. *Safe"
+	head := slackReview(t, m).Blocks[0].Text.Text
+	if want := "*Cost review: " + flat + "*\nNovember 2026\n" + aiNotice; head != want {
+		t.Errorf("slack headline = %q, want %q", head, want)
+	}
+	text := TelegramText(m)
+	if lead, _, _ := strings.Cut(text, "<pre>"); lead != "<b>Cost review: "+flat+"</b>\nNovember 2026\n"+aiNotice+"\n" {
+		t.Errorf("telegram lead = %q", lead)
+	}
+	if got := webhookReviewName(t, m); got != flat {
+		t.Errorf("webhook review_name = %q, want %q", got, flat)
+	}
+	subject, _ := Email(m, "hm@example.com", []string{"ops@example.com"})
+	if subject != "[Harbormaster] Cost review: "+flat {
+		t.Errorf("subject = %q", subject)
+	}
+	if p, err := RenderPreview(DestSlack, m); err != nil || p.Title != "Cost review: "+flat {
+		t.Errorf("preview title = %q, %v", p.Title, err)
+	}
+
+	for name, r := range map[string]string{
+		"vt": "\v", "ff": "\f", "esc": "\x1b", "nel": "\u0085", "ls": "\u2028", "ps": "\u2029", "cr": "\r", "tab": "\t",
+		"bidi override": "\u202e", "bidi isolate": "\u2066", "lrm": "\u200e", "zwsp": "\u200b", "bom": "\ufeff",
+		"soft hyphen": "\u00ad", "cgj": "\u034f", "hangul filler": "\u3164", "variation selector": "\ufe0f", "nul": "\x00", "del": "\x7f",
+	} {
+		m := reviewMessage("ok")
+		m.Review.Name = "a" + r + "b"
+		got := webhookReviewName(t, m)
+		if got != "ab" && got != "a b" {
+			t.Errorf("%s: review_name = %q, want the rune dropped or turned into a space", name, got)
+		}
+		head := slackReview(t, m).Blocks[0].Text.Text
+		if strings.Count(head, "\n") != 2 || strings.ContainsAny(head, "\v\f\x1b\u0085\u2028\u2029\u202e\u2066\u200e\u200b\ufeff\u00ad\u034f\u3164\ufe0f\x00\x7f\r\t") {
+			t.Errorf("%s: slack headline = %q", name, head)
+		}
+		if lead, _, _ := strings.Cut(TelegramText(m), "<pre>"); strings.Count(lead, "\n") != 3 || strings.ContainsAny(lead, "\v\f\x1b\u0085\u2028\u2029\u202e\u2066\u200e\u200b\ufeff\u00ad\u034f\u3164\ufe0f\x00\x7f\r\t") {
+			t.Errorf("%s: telegram lead = %q", name, lead)
+		}
+	}
+	m.Review.Name = "  spaced \u202e out  "
+	if got := webhookReviewName(t, m); got != "spaced out" {
+		t.Errorf("review_name = %q, want trimmed and collapsed", got)
+	}
+}
+
+func TestReview_NameEmptyAfterCleaningIsRefused(t *testing.T) {
+	for _, name := range []string{"", "   ", "\u202e\n\x1b", "\u200b\u200e", "\r\n\t"} {
+		m := reviewMessage("x")
+		m.Review.Name = name
+		if _, err := SlackBody(m); err == nil {
+			t.Errorf("%q: SlackBody built a message", name)
+		}
+		if _, err := WebhookBody(m); err == nil {
+			t.Errorf("%q: WebhookBody built a message", name)
+		}
+		if _, err := TelegramBody(m, "-100123", 0); err == nil {
+			t.Errorf("%q: TelegramBody built a message", name)
+		}
+		if _, err := RenderPreview(DestEmail, m); err == nil {
+			t.Errorf("%q: the email preview was rendered", name)
+		}
+	}
+}
+
+func TestReview_EmailSubjectFoldsEveryHeaderLine(t *testing.T) {
+	for label, name := range map[string]string{
+		"emoji": strings.Repeat("😀", 80), "cjk": strings.Repeat("故", 80), "ascii": strings.Repeat("n", 80), "huge": strings.Repeat("😀", 2000),
+	} {
+		m := reviewMessage("x")
+		m.Review.Name = name
+		subject, raw := Email(m, "hm@example.com", []string{"ops@example.com"})
+		headEnd := strings.Index(string(raw), "\r\n\r\n")
+		for _, line := range strings.Split(string(raw)[:headEnd], "\r\n") {
+			if len(line) > 998 {
+				t.Errorf("%s: a %d-octet header line", label, len(line))
+			}
+		}
+		head, _ := decodedEmailBody(t, raw)
+		decoded, err := new(mime.WordDecoder).DecodeHeader(head.Get("Subject"))
+		if err != nil || decoded != subject {
+			t.Errorf("%s: the folded Subject decodes to %.60q (%v), want %.60q", label, decoded, err, subject)
+		}
 	}
 }

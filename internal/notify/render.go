@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Link is where the message points: the cluster page or the account's overview for a group, the service page for an
@@ -221,7 +222,7 @@ func WebhookBody(m Message) ([]byte, error) {
 		body["scope"], body["title"] = "review", m.plainHeadline()
 		body["summary"], body["ai_generated"] = m.summary(), true
 		body["review_run_id"], body["review_name"], body["review_type"], body["period"] =
-			m.Review.RunID, m.Review.Name, m.Review.Type, m.Review.PeriodLabel
+			m.Review.RunID, m.reviewName(), m.Review.Type, m.Review.PeriodLabel
 	}
 	if s.Scope != "" {
 		services := make([]map[string]any, len(s.Members))
@@ -283,6 +284,45 @@ func emailText(m Message) string {
 	return b.String()
 }
 
+// foldedSubject Q-encodes subject as a run of encoded words of at most 75 characters, folded onto continuation
+// lines, so no header line passes the 998 octets SMTP allows however long the subject is. A short ASCII subject is
+// written as it is.
+func foldedSubject(subject string) string {
+	const maxPlain, maxWordBytes = 900, 21 // 21 bytes encode to at most 63 characters, plus 12 for the word's frame
+	if len(subject) <= maxPlain && mime.QEncoding.Encode("utf-8", subject) == subject {
+		return subject
+	}
+	var words []string
+	start := 0
+	for i := range subject {
+		if i-start > maxWordBytes-utf8.UTFMax {
+			words = append(words, qWord(subject[start:i]))
+			start = i
+		}
+	}
+	words = append(words, qWord(subject[start:]))
+	return strings.Join(words, "\r\n ")
+}
+
+// qWord is one RFC 2047 Q encoded word. Every word is encoded, even an all-ASCII one, because white space between
+// two encoded words is dropped on decoding and white space between a plain word and an encoded one is not.
+func qWord(s string) string {
+	var b strings.Builder
+	b.WriteString("=?utf-8?q?")
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == ' ':
+			b.WriteByte('_')
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+			b.WriteByte(c)
+		default:
+			fmt.Fprintf(&b, "=%02X", c)
+		}
+	}
+	b.WriteString("?=")
+	return b.String()
+}
+
 // Email renders a complete RFC 5322 message (text/plain, UTF-8) and the plain subject. Every header value has its
 // line breaks stripped, and a non-ASCII subject is Q-encoded.
 func Email(m Message, from string, to []string) (subject string, body []byte) {
@@ -294,7 +334,11 @@ func Email(m Message, from string, to []string) (subject string, body []byte) {
 	var b bytes.Buffer
 	fmt.Fprintf(&b, "From: %s\r\n", headerValue(from))
 	fmt.Fprintf(&b, "To: %s\r\n", strings.Join(cleanTo, ", "))
-	fmt.Fprintf(&b, "Subject: %s\r\n", mime.QEncoding.Encode("utf-8", subject))
+	encodedSubject := mime.QEncoding.Encode("utf-8", subject)
+	if m.isReview() {
+		encodedSubject = foldedSubject(subject)
+	}
+	fmt.Fprintf(&b, "Subject: %s\r\n", encodedSubject)
 	fmt.Fprintf(&b, "Date: %s\r\n", m.Subject.At.UTC().Format(time.RFC1123Z))
 	fmt.Fprintf(&b, "Message-ID: <hm-%d-%d@harbormaster.invalid>\r\n", m.DeliveryID, m.Subject.At.Unix())
 	b.WriteString("MIME-Version: 1.0\r\n")
