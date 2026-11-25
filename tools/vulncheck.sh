@@ -10,7 +10,7 @@ set -euo pipefail
 
 GOVULNCHECK_VERSION=v1.10.0
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ACCEPTED_FILE="$HERE/vulncheck-accepted.txt"
+ACCEPTED_FILE="${VULNCHECK_ACCEPTED_FILE:-$HERE/vulncheck-accepted.txt}" # the override is for tools/vulncheck_test.sh
 
 usage() { echo "usage: tools/vulncheck.sh [--json FILE] [--help]" >&2; exit 2; }
 
@@ -38,7 +38,8 @@ fi
 
 # A finding is "called" when the innermost frame of its trace names a function.
 called="$(jq -r 'select(.finding) | select(.finding.trace[0].function != null) | .finding.osv' <<<"$report" | sort -u)"
-accepted="$(grep -v '^\s*#' "$ACCEPTED_FILE" | awk 'NF {print $1}' | sort -u)"
+# grep exits 1 when the list holds only comments, which is the normal state once every advisory is fixed.
+accepted="$({ grep -v '^\s*#' "$ACCEPTED_FILE" || true; } | awk 'NF {print $1}' | sort -u)"
 
 unaccepted="$(comm -23 <(printf '%s\n' "$called" | sed '/^$/d') <(printf '%s\n' "$accepted" | sed '/^$/d'))"
 stale="$(comm -13 <(printf '%s\n' "$called" | sed '/^$/d') <(printf '%s\n' "$accepted" | sed '/^$/d'))"

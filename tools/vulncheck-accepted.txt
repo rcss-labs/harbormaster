@@ -1,3 +1,2 @@
 # Go vulnerability advisories accepted for now, read by tools/vulncheck.sh. One per line: <ID> <reason>.
 # Add an entry only with a reason and a mitigation, and remove it as soon as a fixed release is adopted.
-GO-2026-6909 crewjam/saml has no fixed release; internal/saml reads the assertion fields itself, in the SAML assertion namespace only, from the single verified assertion
