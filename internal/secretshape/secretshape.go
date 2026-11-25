@@ -289,6 +289,11 @@ func ValueLooksSecret(value string) bool {
 
 // valueSpans returns the spans that are secret regardless of any name.
 func valueSpans(text string) [][2]int {
+	return append(patternSpans(text), longRunSpans(text)...)
+}
+
+// patternSpans returns the spans of the value patterns and of URL passwords, without the long-run rule.
+func patternSpans(text string) [][2]int {
 	var spans [][2]int
 	for _, p := range valuePatterns {
 		if !strings.Contains(text, p.hint) {
@@ -305,7 +310,7 @@ func valueSpans(text string) [][2]int {
 			}
 		}
 	}
-	return append(spans, longRunSpans(text)...)
+	return spans
 }
 
 // looksLikePort reports whether the text after "host:" is a port followed by
@@ -322,7 +327,7 @@ func longRunSpans(text string) [][2]int {
 	var spans [][2]int
 	for _, m := range longRun.FindAllStringIndex(text, -1) {
 		run := text[m[0]:m[1]]
-		if !looksLikeRandomRun(run) {
+		if !runIsRandom(run) {
 			continue
 		}
 		if insideAny(arns, m) {
