@@ -139,6 +139,18 @@ func buildResult(sub submission, units map[string]citedUnit, corpus *agentresult
 	return result
 }
 
+// dropEchoes replaces the summary and the notes of a result that repeat request.
+func dropEchoes(result *agentresult.Result, request, replacement string) {
+	if agentresult.Echoes(result.Summary, request) {
+		result.Summary, result.SummaryReplaced = replacement, true
+	}
+	for i := range result.Evidence {
+		if agentresult.Echoes(result.Evidence[i].Note, request) {
+			result.Evidence[i].Note = agentresult.ReplacementNote
+		}
+	}
+}
+
 // submit ends the run with the result of a submit_result call, or returns what
 // is wrong with the call.
 func (r *session) submit(call provider.ToolCall) (problem string) {
@@ -147,6 +159,7 @@ func (r *session) submit(call provider.ToolCall) (problem string) {
 		return problem
 	}
 	result := buildResult(sub, r.found.units, &r.found.corpus, r.replacementSummary())
+	dropEchoes(&result, r.request, r.replacementSummary())
 	r.result = &result
 	r.emit(Event{Type: "result", Result: &result})
 	r.emit(Event{Type: "done"})
@@ -198,6 +211,9 @@ func (r *session) logFindings() {
 		message = "review finished"
 		attrs = append(attrs, "review_type", r.in.Task.Review.Type, "scope_entries", len(r.in.Task.Scope.Entries),
 			"services_total", r.in.Task.Scope.ServicesTotal, "tool_calls", r.toolCalls)
+	}
+	if r.customReview() {
+		attrs = append(attrs, "request_bytes", len(r.in.Task.Review.Instructions))
 	}
 	if r.result != nil {
 		attrs = append(attrs, "evidence", len(r.result.Evidence), "evidence_dropped", r.result.EvidenceDropped, "summary_replaced", r.result.SummaryReplaced)

@@ -18,7 +18,7 @@ import (
 const maxReviewToolCalls = 60
 
 // reviewType is one kind of review. Its type decides what the first message
-// asks for and nothing else.
+// asks for, and whether the frame explains an admin's request, and nothing else.
 type reviewType struct{ id, label, instructions string }
 
 var reviewTypes = []reviewType{
@@ -26,7 +26,11 @@ var reviewTypes = []reviewType{
 	{"security", "Security findings", securityInstructions},
 	{"reliability", "Reliability", reliabilityInstructions},
 	{"capacity", "Capacity", capacityInstructions},
+	{typeCustom, "Custom", customLeadIn},
 }
+
+// typeCustom is the review whose subject and layout an admin describes.
+const typeCustom = "custom"
 
 const (
 	costInstructions = `Read get_cost_analytics first. Pass it the range and the scope's filters, once for each entry of the scope.
@@ -60,6 +64,13 @@ Write the summary in three parts, in this order: headroom, at their limit, over-
 - Over-reserved: the services that reserve far more than they use, and what to lower first.
 Open a single service only when it is among the worst few.
 Cite the rows of single services that your findings rest on.`
+
+	// customLeadIn stands before the admin's request.
+	customLeadIn = `Read the totals that fit the request first: get_overview, get_cost_analytics, list_security, get_reliability_analytics, get_capacity_analytics, get_delivery_analytics or get_operations_analytics. Pass the range to the tools that take it, and the scope's filters, once for each entry of the scope.
+Open single services only for the worst few.
+Cite the rows of single services that your findings rest on.
+Keep the summary within 1200 characters, whatever layout the request asks for. Write it and the notes in your own words: do not repeat the request.
+The request stands between the admin_request tags.`
 )
 
 func reviewTypeOf(id string) (reviewType, bool) {
@@ -131,18 +142,68 @@ func taskFits(role string, task *Task) bool {
 			return false
 		}
 		_, known := reviewTypeOf(task.Review.Type)
-		return known
+		return known && instructionsRefusal(*task.Review) == ""
 	}
 	return task == nil
 }
 
+// customReview reports whether the run is a review that follows an admin's request.
+func (r *session) customReview() bool { return r.reviewing() && r.in.Task.Review.Type == typeCustom }
+
+// instructionsRefusal says in a fixed sentence why a review cannot run with its
+// instructions, or returns "". A secret shape is no reason: the text is scrubbed
+// before it is sent.
+func instructionsRefusal(review TaskReview) string {
+	text := review.Instructions
+	if review.Type != typeCustom {
+		if text != "" {
+			return "Only a custom review takes instructions."
+		}
+		return ""
+	}
+	switch agentresult.CheckInstructions(text) {
+	case agentresult.InstructionsOK, agentresult.InstructionsSecret:
+		if agentresult.CleanInstructions(text) != text {
+			return "instructions must have no white space at either end."
+		}
+		return ""
+	case agentresult.InstructionsNotText:
+		return instructionsNotText
+	case agentresult.InstructionsRequired:
+		return "A custom review needs instructions."
+	case agentresult.InstructionsTooLong:
+		return "instructions must hold at most 2000 characters and 8000 bytes."
+	case agentresult.InstructionsHidden:
+		return "instructions must hold no hidden characters, and only line feeds as line breaks."
+	}
+	return "instructions are not valid."
+}
+
+const instructionsNotText = "instructions must be valid UTF-8 without a NUL character."
+
+// lineSeparators are the line breaks a request may hold that the scrubber does not take for one.
+var lineSeparators = strings.NewReplacer("\u2028", "\n", "\u2029", "\n")
+
+// cleanRequest prepares an admin's request for the model. It is scrubbed as it
+// came and again as it reads by line: either reading may show a secret the other
+// hides.
+func (r *session) cleanRequest(text string) string {
+	return r.cleanText(lineSeparators.Replace(secretshape.ScrubText(text)))
+}
+
 // reviewMessage renders a review as its first message: a fixed template with
-// the type's instructions, which are the loop's own words, then the scope, whose
+// the type's instructions, which are the loop's own words, then an admin's
+// request, if the review has one, in an envelope of its own, then the scope, whose
 // names people chose, as data.
 func (r *session) reviewMessage(task Task) provider.Message {
 	rt, _ := reviewTypeOf(task.Review.Type)
 	text := "Write this review and submit it.\n\nReview: " + rt.label + "\nRange: " + task.Review.Range + "\nPeriod: " + task.Review.Period +
-		"\n\nInstructions:\n" + rt.instructions + "\n\nServices in scope: " + strconv.Itoa(task.Scope.ServicesTotal) + "\n"
+		"\n\nInstructions:\n" + rt.instructions
+	if r.request != "" {
+		tag := "admin_request_" + r.tagCode
+		text += "\n\n<" + tag + ">\n" + r.request + "\n</" + tag + ">"
+	}
+	text += "\n\nServices in scope: " + strconv.Itoa(task.Scope.ServicesTotal) + "\n"
 	if len(task.Scope.Entries) == 0 {
 		return provider.Message{Role: provider.RoleUser, Text: text + "The scope is everything you can see."}
 	}
@@ -250,6 +311,12 @@ func validateReview(req *runRequest) string {
 	}
 	if _, known := reviewTypeOf(review.Type); !known {
 		return "This type of review is not supported."
+	}
+	if review.Type == typeCustom && !req.validUTF8 {
+		return instructionsNotText // decoding has replaced the broken bytes
+	}
+	if message := instructionsRefusal(*review); message != "" {
+		return message
 	}
 	if !slices.Contains(reviewRanges, review.Range) {
 		return "range must be 24h, 7d or 30d."

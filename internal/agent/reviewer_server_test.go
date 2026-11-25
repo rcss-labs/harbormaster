@@ -73,7 +73,7 @@ func TestRuns_ReviewerNeedsAReviewTaskAndNothingElse(t *testing.T) {
 		"other kind":               edit(func(task, _, _ map[string]any) { task["kind"] = "investigate" }),
 		"no kind":                  edit(func(task, _, _ map[string]any) { delete(task, "kind") }),
 		"unknown task member":      edit(func(task, _, _ map[string]any) { task["instructions"] = "x" }),
-		"unknown review member":    edit(func(_, review, _ map[string]any) { review["instructions"] = "x" }),
+		"unknown review member":    edit(func(_, review, _ map[string]any) { review["name"] = "x" }),
 		"a subject":                edit(func(task, _, _ map[string]any) { task["subject"] = subject }),
 		"a subject's region":       edit(func(task, _, _ map[string]any) { task["subject"] = map[string]any{"region": "eu-west-1"} }),
 		"a subject's account":      edit(func(task, _, _ map[string]any) { task["subject"] = map[string]any{"account_id": "1"} }),
@@ -177,7 +177,7 @@ func TestRuns_ReviewOfAClusterWithTheLongestNameShowsItWhole(t *testing.T) {
 }
 
 func TestRuns_UnknownReviewTypeIs400BeforeAnyProviderCall(t *testing.T) {
-	for _, id := range []string{"", "custom", "Cost", "cost ", "delivery"} {
+	for _, id := range []string{"", "Custom", "Cost", "cost ", "delivery"} {
 		p := fake.New(calls(submitCall(plainSummary)))
 		h := newHarness(t, harnessOptions{providers: map[string]provider.Provider{"fake": p}})
 		requireRefused(t, "type "+id, h, p, h.reviewBody(func(b map[string]any) {
@@ -229,10 +229,10 @@ func TestCatalogue_ListsReviewerAndReviewTypes(t *testing.T) {
 	if !equalStrings(catalogue.Roles, []string{"chat", "investigator", "reviewer", "test"}) {
 		t.Errorf("roles = %v", catalogue.Roles)
 	}
-	if !equalStrings(catalogue.ReviewTypes, []string{"cost", "security", "reliability", "capacity"}) {
+	if !equalStrings(catalogue.ReviewTypes, []string{"cost", "security", "reliability", "capacity", "custom"}) {
 		t.Errorf("review types = %v", catalogue.ReviewTypes)
 	}
-	if !catalogue.SupportsReview("capacity") || catalogue.SupportsReview("custom") {
+	if !catalogue.SupportsReview("capacity") || catalogue.SupportsReview("delivery") {
 		t.Error("the client reads the types wrongly")
 	}
 }

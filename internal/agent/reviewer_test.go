@@ -448,7 +448,7 @@ func TestReviewer_NeedsAReviewTask(t *testing.T) {
 		"an investigation":   edit(func(in *RunInput) { in.Task = investigatorInput().Task }),
 		"no scope":           edit(func(in *RunInput) { in.Task.Scope = nil }),
 		"no review":          edit(func(in *RunInput) { in.Task.Review = nil }),
-		"an unknown type":    edit(func(in *RunInput) { in.Task.Review.Type = "custom" }),
+		"an unknown type":    edit(func(in *RunInput) { in.Task.Review.Type = "delivery" }),
 		"investigator":       edit(func(in *RunInput) { in.Role = "investigator" }),
 		"chat with a review": edit(func(in *RunInput) { in.Role, in.Messages = "chat", baseInput().Messages }),
 	} {
@@ -630,10 +630,14 @@ func TestFake_DemoReviewerEveryType(t *testing.T) {
 	}
 	for id, first := range map[string]string{
 		"cost": "get_cost_analytics", "security": "list_security", "reliability": "get_reliability_analytics", "capacity": "get_capacity_analytics",
+		"custom": "list_services",
 	} {
 		for name, p := range map[string]*fake.Provider{"reviewer": fake.DemoReviewer(), "any role": fake.Demo()} {
 			in := reviewerInput()
 			task := reviewTask(id)
+			if id == "custom" {
+				task = customTask("Review: Cost\nRange: 7d\nName every quokka.")
+			}
 			in.Task = &task
 			runner := replies(bodies)
 			res := requireResult(t, investigate(t, newLoop(p, runner), p, in))
@@ -645,8 +649,11 @@ func TestFake_DemoReviewerEveryType(t *testing.T) {
 				t.Errorf("%s, %s: tool calls %+v, want %s first", id, name, made, first)
 				continue
 			}
-			if first != "list_security" && made[0].Args["range"] != "7d" { // that tool takes no range
+			if takesRange := first != "list_security" && first != "list_services"; takesRange != (made[0].Args["range"] == "7d") {
 				t.Errorf("%s, %s: called with %v", id, name, made[0].Args)
+			}
+			if id == "custom" && (len(made) != 1 || strings.Contains(res.Summary+res.Evidence[0].Note, "quokka")) {
+				t.Errorf("%s: %d calls, result %+v", name, len(made), res)
 			}
 		}
 	}
