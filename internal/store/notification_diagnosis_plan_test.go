@@ -314,3 +314,109 @@ func TestPlanDiagnosis_LimitBoundsOneCall(t *testing.T) {
 		t.Fatalf("the next call planned %d, want the remaining 1", n)
 	}
 }
+
+// A delivered repeat does not stand in for an opened row that failed.
+func TestPlanDiagnosis_ADeliveredRepeatIsNotAnOpened(t *testing.T) {
+	f, _ := newPlanFixture(t)
+	route := f.addRoute("r", "failed", f.incident)
+	invDelivery(t, f.s, route, f.incident, "repeat", "delivered", notifyT0)
+	f.finish()
+	if n := f.plan(never); n != 0 || f.diagnosisRows() != 0 {
+		t.Fatalf("planned %d after a failed opened and a delivered repeat, want none", n)
+	}
+}
+
+// Pairs that already have their row must not fill the limit and keep new ones out.
+func TestPlanDiagnosis_PlannedRowsDoNotUseUpTheLimit(t *testing.T) {
+	f, _ := newPlanFixture(t)
+	for _, name := range []string{"a", "b", "c"} {
+		f.addRoute(name, "delivered", f.incident)
+	}
+	f.finish()
+	for i := range 3 {
+		n, err := f.s.PlanDiagnosisDeliveries(context.Background(), invNow, never, 1)
+		if err != nil || n != 1 {
+			t.Fatalf("call %d with limit 1 planned %d, %v, want 1: earlier rows use up the limit", i+1, n, err)
+		}
+	}
+	if f.diagnosisRows() != 3 {
+		t.Fatalf("diagnosis rows = %d, want 3", f.diagnosisRows())
+	}
+}
+
+func TestPlanDiagnosis_OneFailingInsertDoesNotStopTheRest(t *testing.T) {
+	f, _ := newPlanFixture(t)
+	a := f.addRoute("a", "delivered", f.incident)
+	bad := f.addRoute("bad", "delivered", f.incident)
+	c := f.addRoute("c", "delivered", f.incident)
+	f.finish()
+	f.exec(`create function refuse_bad() returns trigger language plpgsql as $$ begin raise exception 'refused'; end $$`)
+	f.exec(`create trigger refuse_bad before insert on notification_deliveries for each row
+		when (new.event = 'diagnosis' and new.route_name = 'bad') execute function refuse_bad()`)
+	n, err := f.s.PlanDiagnosisDeliveries(context.Background(), invNow, never, 100)
+	if err == nil || n != 2 {
+		t.Fatalf("planned %d, err %v, want 2 and the failed insert's error", n, err)
+	}
+	if !f.hasDiagnosis(a, f.incident) || f.hasDiagnosis(bad, f.incident) || !f.hasDiagnosis(c, f.incident) {
+		t.Fatal("the rows around the failing one were not planned")
+	}
+}
+
+func TestPlanDiagnosis_StopsOnACancelledContext(t *testing.T) {
+	f, _ := newPlanFixture(t)
+	for _, name := range []string{"a", "b", "c"} {
+		f.addRoute(name, "delivered", f.incident)
+	}
+	f.finish()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	asked := 0
+	n, err := f.s.PlanDiagnosisDeliveries(ctx, invNow, func(store.NotificationRoute, string) (time.Time, bool) {
+		asked++
+		cancel()
+		return time.Time{}, false
+	}, 100)
+	if err == nil || n != 0 || asked != 1 {
+		t.Fatalf("planned %d, err %v, rows tried %d, want an error after the first row", n, err, asked)
+	}
+}
+
+// The row is the route's message of today: name, destination and target label follow an edit made after the opened.
+func TestPlanDiagnosis_CarriesTheRoutesCurrentNameDestinationAndTarget(t *testing.T) {
+	f, _ := newPlanFixture(t)
+	route := f.addRoute("old name", "delivered", f.incident)
+	f.finish()
+	f.exec(`update notification_routes set name = 'new name', destination = 'slack', config = '{"label": "#new", "url_host": "hooks.other"}' where id = $1`, route.ID)
+	f.plan(never)
+	got := f.diagnosisDelivery()
+	if got.RouteName != "new name" || got.Destination != "slack" || got.Target != "#new" {
+		t.Fatalf("row = %q %q %q, want the route's current name, destination and target", got.RouteName, got.Destination, got.Target)
+	}
+}
+
+// created_at is when the diagnosis was planned: it is the message's Date and the webhook's "at", and must not be the
+// opened row's, which can be hours old after quiet hours.
+func TestPlanDiagnosis_CreatedAtIsThePlanTime(t *testing.T) {
+	f, _ := newPlanFixture(t)
+	f.addRoute("r", "delivered", f.incident)
+	f.finish()
+	f.plan(never)
+	if got := f.diagnosisDelivery(); !got.CreatedAt.Equal(invNow) || got.CreatedAt.Equal(notifyT0) {
+		t.Fatalf("created_at = %v, want the plan time %v", got.CreatedAt, invNow)
+	}
+}
+
+func (f *planFixture) diagnosisDelivery() store.NotificationDelivery {
+	f.t.Helper()
+	rows, _, err := f.s.ListNotificationDeliveries(context.Background(), store.DeliveryFilter{Limit: 50})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	for _, row := range rows {
+		if row.Event == "diagnosis" {
+			return row
+		}
+	}
+	f.t.Fatal("no diagnosis row")
+	return store.NotificationDelivery{}
+}

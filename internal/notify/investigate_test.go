@@ -1,8 +1,10 @@
 package notify
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -15,6 +17,7 @@ import (
 
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/store"
+	"github.com/rcss-labs/harbormaster/internal/telemetry"
 )
 
 const testSummary = "The api ran out of memory after the last deploy."
@@ -128,8 +131,16 @@ func (e *env) recordMessages() *msgSender {
 // cycleWithin runs one cycle and fails when it does not return in time; it returns the cycle's error.
 func (e *env) cycleWithin(wait time.Duration) error {
 	e.t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	e.t.Cleanup(cancel) // a cycle that is stuck must not hold the store's close
+	return e.cycleWithCtx(ctx, wait)
+}
+
+// cycleWithCtx is cycleWithin under the caller's context.
+func (e *env) cycleWithCtx(ctx context.Context, wait time.Duration) error {
+	e.t.Helper()
 	done := make(chan error, 1)
-	go func() { done <- e.d.Cycle(context.Background()) }()
+	go func() { done <- e.d.Cycle(ctx) }()
 	select {
 	case err := <-done:
 		return err
@@ -749,6 +760,7 @@ func (h *diagnosisHangSender) Send(ctx context.Context, r store.NotificationRout
 	select {
 	case <-ctx.Done():
 	case <-h.release:
+	case <-time.After(20 * time.Second): // a failing test must not hang on its own sender
 	}
 	return Result{Retryable: true, Note: "Network error"}
 }
@@ -805,5 +817,652 @@ func TestDispatcher_OneDiagnosisSendPerRouteAtATime(t *testing.T) {
 	}
 	if h.peak.Load() != 1 || h.calls.Load() != 1 {
 		t.Fatalf("diagnosis sends started = %d, peak concurrent = %d, want one while the first still hangs", h.calls.Load(), h.peak.Load())
+	}
+}
+
+// --- fix round 1: bounds, isolation and pins ---
+
+// waitWithin waits for the send workers and fails when they do not end in time.
+func (e *env) waitWithin(wait time.Duration, what string) {
+	e.t.Helper()
+	done := make(chan struct{})
+	go func() { e.d.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(wait):
+		e.t.Fatalf("%s: the workers did not end within %v", what, wait)
+	}
+}
+
+// hold runs sql in a transaction of its own that stays open until the returned func (or the test's end).
+func (e *env) hold(sql string) (release func()) {
+	e.t.Helper()
+	tx, err := e.st.Pool.Begin(context.Background())
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	release = func() { tx.Rollback(context.Background()) } //nolint:errcheck
+	e.t.Cleanup(release)
+	if _, err := tx.Exec(context.Background(), sql); err != nil {
+		e.t.Fatal(err)
+	}
+	return release
+}
+
+const recordingLock = `select pg_advisory_xact_lock(hashtext('agent_investigations'))`
+
+func isDiagnosisClaim(sql string) bool {
+	return strings.Contains(sql, "update notification_deliveries") && strings.Contains(sql, "diagnosis_due_at <= $1")
+}
+
+type claimTracer struct {
+	before, after func() // around every diagnosis claim statement
+}
+
+type claimKey struct{}
+
+func (c *claimTracer) TraceQueryStart(ctx context.Context, _ *pgx.Conn, d pgx.TraceQueryStartData) context.Context {
+	claim := isDiagnosisClaim(d.SQL)
+	if claim && c.before != nil {
+		c.before()
+	}
+	return context.WithValue(ctx, claimKey{}, claim)
+}
+
+func (c *claimTracer) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, _ pgx.TraceQueryEndData) {
+	if claim, _ := ctx.Value(claimKey{}).(bool); claim && c.after != nil {
+		c.after()
+	}
+}
+
+// tracedStore gives the dispatcher a pool of its own with a tracer; maxConns 0 keeps the default size.
+func (e *env) tracedStore(tracer pgx.QueryTracer, maxConns int32) {
+	e.t.Helper()
+	cfg := e.st.Pool.Config()
+	cfg.ConnConfig.Tracer = tracer
+	if maxConns > 0 {
+		cfg.MaxConns = maxConns
+	}
+	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	e.t.Cleanup(pool.Close)
+	e.d.Store = &store.Store{Pool: pool}
+}
+
+func TestDispatcher_OpenedIsUnchangedUnlessAgentAndSwitchAreOn(t *testing.T) {
+	for name, tc := range map[string]struct{ agent, route, want bool }{
+		"agent off, switch on": {false, true, false},
+		"agent on, switch off": {true, false, false},
+		"both on":              {true, true, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newInvEnv(t)
+			e.d.Investigate = tc.agent
+			msgs := e.recordMessages()
+			e.route("pd", func(r *store.NotificationRoute) { r.Destination, r.Investigate = DestPagerDuty, tc.route })
+			e.setAlerts(alert(svcX, "service_failing", model.AlertDanger))
+			e.cycle()
+			opened := msgs.of(EventOpened)
+			if len(opened) != 1 {
+				t.Fatalf("opened messages = %d, want 1", len(opened))
+			}
+			got, err := PagerDutyBody(opened[0], "fake-routing-key")
+			if err != nil {
+				t.Fatal(err)
+			}
+			base := opened[0]
+			base.Investigate, base.IncidentID = false, 0
+			want, err := PagerDutyBody(base, "fake-routing-key")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if same := bytes.Equal(got, want); same == tc.want {
+				t.Fatalf("body equals the one without the agent = %v, want %v\n%s", same, !tc.want, got)
+			}
+			if opened[0].Investigate != tc.want {
+				t.Fatalf("Investigate = %v, want %v", opened[0].Investigate, tc.want)
+			}
+		})
+	}
+}
+
+// Eight due diagnosis rows whose lookups all block must leave connections of a pool of four for a new alert.
+func TestDispatcher_BlockedDiagnosisLookupsLeaveThePoolToAlerts(t *testing.T) {
+	e := newInvEnv(t)
+	for i := range 8 {
+		e.switched(fmt.Sprintf("r%d", i))
+	}
+	e.setAlerts(alert(svcX, "service_failing", model.AlertDanger))
+	e.stageDiagnosis()
+
+	e.d.InvestigateTimeout = time.Minute // the cap alone must protect the pool
+	lock, err := e.st.Pool.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	var once sync.Once
+	e.tracedStore(&claimTracer{before: func() {
+		once.Do(func() {
+			if _, err := lock.Exec(context.Background(), `lock table agent_investigations in access exclusive mode`); err != nil {
+				t.Error(err)
+			}
+		})
+	}}, 4)
+	cycleB := make(chan struct{})
+	t.Cleanup(func() {
+		cancel()
+		lock.Rollback(context.Background()) //nolint:errcheck
+		<-cycleB
+		e.d.Wait()
+	})
+	e.advance(time.Second)
+	if err := e.cycleWithCtx(ctx, 10*time.Second); err != nil {
+		close(cycleB)
+		t.Fatal(err)
+	}
+	blocked := func() bool {
+		return e.count(`pg_locks where relation = 'agent_investigations'::regclass and not granted`) >= 2
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for !blocked() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	e.setAlerts(alert(svcX, "service_failing", model.AlertDanger), alert(svcY, "service_failing", model.AlertDanger))
+	go func() { defer close(cycleB); e.d.Cycle(ctx) }() //nolint:errcheck
+	e.eventually(5*time.Second, "the new opened message while diagnosis lookups block", func() bool { return e.sender.count("r0", EventOpened) == 2 })
+}
+
+func TestDispatcher_AtMostTwoDiagnosisSendsAcrossCycles(t *testing.T) {
+	e := newInvEnv(t)
+	for i := range 6 {
+		e.switched(fmt.Sprintf("r%d", i))
+	}
+	h := e.hangDiagnoses()
+	e.setAlerts(alert(svcX, "service_failing", model.AlertDanger))
+	e.cycle()
+	e.finishInvestigations(testSummary)
+	for range 4 {
+		e.advance(time.Second)
+		if err := e.cycleWithin(10 * time.Second); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e.eventually(5*time.Second, "two diagnosis sends", func() bool { return h.calls.Load() >= 2 })
+	time.Sleep(200 * time.Millisecond)
+	if h.calls.Load() != 2 || h.peak.Load() != 2 {
+		t.Fatalf("diagnosis sends started = %d, peak = %d, want 2 across every cycle", h.calls.Load(), h.peak.Load())
+	}
+	if e.sender.count("r0", EventOpened) != 1 || e.sender.count("r5", EventOpened) != 1 {
+		t.Fatal("an opened message is missing")
+	}
+}
+
+// A row whose route is gone holds a connection too, so it counts towards the same cap.
+func TestDispatcher_RoutelessDiagnosisRowsCountTowardsTheCap(t *testing.T) {
+	e := newInvEnv(t)
+	for i := range 4 {
+		e.switched(fmt.Sprintf("r%d", i))
+	}
+	e.setAlerts(alert(svcX, "service_failing", model.AlertDanger))
+	e.stageDiagnosis()
+	e.exec(`update notification_deliveries set route_id = null where event = 'diagnosis'`)
+
+	// The claimed rows are locked right after their claim, so their workers stay busy writing.
+	lock, err := e.st.Pool.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var once sync.Once
+	e.tracedStore(&claimTracer{after: func() {
+		once.Do(func() {
+			if _, err := lock.Exec(context.Background(), `select id from notification_deliveries
+				where event = 'diagnosis' and claimed_until is not null for update`); err != nil {
+				t.Error(err)
+			}
+		})
+	}}, 0)
+	t.Cleanup(func() { lock.Rollback(context.Background()); e.d.Wait() }) //nolint:errcheck
+	for range 2 {
+		e.advance(time.Second)
+		if err := e.cycleWithin(4 * time.Second); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := e.count(`notification_deliveries where event = 'diagnosis' and claimed_until is not null`); n != 2 {
+		t.Fatalf("%d routeless rows claimed by two cycles, want 2 while the first two are busy", n)
+	}
+}
+
+func TestDispatcher_InvestigationLookupHasItsOwnTimeout(t *testing.T) {
+	e := newInvEnv(t)
+	e.switched("one")
+	e.setAlerts(alert(svcX, "service_failing", model.AlertDanger))
+	e.stageDiagnosis()
+	e.d.InvestigateTimeout = 400 * time.Millisecond
+	release := e.hold(`lock table agent_investigations in access exclusive mode`)
+	e.advance(time.Second)
+	if err := e.cycleWithin(5 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	e.waitWithin(5*time.Second, "a blocked investigation lookup")
+	if row := e.diagnosisRow(); row.Status != "pending" || row.Attempts != 0 || row.ClaimedUntil != nil || e.sender.count("one", EventDiagnosis) != 0 {
+		t.Fatalf("row = %+v, want it given back unsent with no attempt counted", row)
+	}
+	release()
+	e.advance(time.Second)
+	e.cycle()
+	if e.sender.count("one", EventDiagnosis) != 1 {
+		t.Fatalf("diagnosis sent %d times after the lookup worked again, want once", e.sender.count("one", EventDiagnosis))
+	}
+}
+
+func TestDispatcher_AStuckHookStartsOnceAndHoldsNoCycle(t *testing.T) {
+	e := newInvEnv(t)
+	e.d.InvestigateTimeout = 10 * time.Second
+	e.switched("one")
+	var calls atomic.Int32
+	release := make(chan struct{})
+	closeOnce := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(closeOnce)
+	e.d.OnInvestigationRequested = func() { calls.Add(1); <-release }
+	var alerts []model.Alert
+	newAlert := func() {
+		alerts = append(alerts, alert(key(acctA, "us-east-1", "core", fmt.Sprintf("s%d", len(alerts))), "service_failing", model.AlertDanger))
+		e.setAlerts(alerts...)
+		e.advance(time.Second)
+	}
+	const cycles = 5
+	for range cycles {
+		newAlert()
+		if err := e.cycleWithin(5 * time.Second); err != nil { // well under one InvestigateTimeout
+			t.Fatal(err)
+		}
+		e.waitWithin(5*time.Second, "alert sends")
+	}
+	if calls.Load() != 1 || e.sender.count("one", EventOpened) != cycles {
+		t.Fatalf("hook started %d times, opened sent %d; want 1 and %d", calls.Load(), e.sender.count("one", EventOpened), cycles)
+	}
+	if got := e.d.InvestigationErrors(); got != cycles-1 {
+		t.Fatalf("investigation errors = %d, want %d, one per skipped call", got, cycles-1)
+	}
+	closeOnce()
+	e.eventually(5*time.Second, "the hook to be called again once it returned", func() bool {
+		newAlert()
+		e.cycle()
+		return calls.Load() > 1
+	})
+}
+
+func TestDispatcher_APanickedHookIsCalledAgain(t *testing.T) {
+	e := newInvEnv(t)
+	e.switched("one")
+	var calls atomic.Int32
+	e.d.OnInvestigationRequested = func() { calls.Add(1); panic("hook") }
+	e.setAlerts(alert(svcX, "service_failing", model.AlertDanger))
+	e.cycle()
+	e.eventually(2*time.Second, "the panic to be counted", func() bool { return e.d.InvestigationErrors() == 1 })
+	time.Sleep(20 * time.Millisecond) // the flag is cleared right after the panic is counted
+	e.setAlerts(alert(svcX, "service_failing", model.AlertDanger), alert(svcY, "service_failing", model.AlertDanger))
+	e.cycle()
+	e.eventually(2*time.Second, "the second call", func() bool { return calls.Load() == 2 })
+}
+
+// Every statement of the step blocks: recording on its advisory lock, planning and claiming on the table.
+func TestDispatcher_AfterSendIsBoundedByTwoTimeouts(t *testing.T) {
+	e := newInvEnv(t)
+	e.d.InvestigateTimeout = 1500 * time.Millisecond
+	e.switched("one")
+	e.setAlerts(alert(svcX, "service_failing", model.AlertDanger))
+	tx, err := e.st.Pool.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(func() { cancel(); tx.Rollback(context.Background()) }) //nolint:errcheck
+	if _, err := tx.Exec(ctx, recordingLock); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	done := make(chan error, 1)
+	go func() { done <- e.d.Cycle(ctx) }()
+	e.eventually(time.Second, "the opened message to be recorded as delivered", func() bool {
+		return e.count(`notification_deliveries where event = 'opened' and status = 'delivered'`) == 1
+	})
+	if _, err := tx.Exec(ctx, `lock table notification_deliveries in access exclusive mode`); err != nil {
+		t.Fatal(err)
+	}
+	limit := 2*e.d.InvestigateTimeout + 800*time.Millisecond
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("cycle returned %v, want the step's errors kept out of it", err)
+		}
+	case <-time.After(limit - time.Since(start)):
+		t.Fatalf("the cycle was held for more than %v, want at most two timeouts", limit)
+	}
+	if got := e.d.InvestigationErrors(); got != 3 {
+		t.Fatalf("investigation errors = %d, want 3: recording, planning and claiming each timed out", got)
+	}
+}
+
+func TestDispatcher_ASlowPlanDoesNotStopDueDiagnoses(t *testing.T) {
+	e := newInvEnv(t)
+	e.d.InvestigateTimeout = time.Second
+	e.switched("one")
+	e.setAlerts(alert(svcX, "service_failing", model.AlertDanger))
+	e.stageDiagnosis()
+	e.hold(`lock table agent_investigation_incidents in access exclusive mode`)
+	e.advance(time.Second)
+	if err := e.cycleWithin(5 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	e.waitWithin(5*time.Second, "the diagnosis send")
+	if e.sender.count("one", EventDiagnosis) != 1 {
+		t.Fatalf("diagnosis sent %d times while planning is blocked, want the due row sent", e.sender.count("one", EventDiagnosis))
+	}
+}
+
+func TestDispatcher_ARecordErrorDoesNotSkipTheLaterSteps(t *testing.T) {
+	e := newInvEnv(t)
+	e.switched("one")
+	e.setAlerts(alert(svcX, "service_failing", model.AlertDanger))
+	e.cycle()
+	e.finishInvestigations(testSummary)
+	e.d.InvestigateTimeout = 800 * time.Millisecond
+	e.hold(recordingLock)
+	e.advance(time.Second)
+	if err := e.cycleWithin(5 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	e.waitWithin(5*time.Second, "the diagnosis send")
+	if e.sender.count("one", EventDiagnosis) != 1 || e.d.InvestigationErrors() != 1 {
+		t.Fatalf("diagnosis sent %d times, errors %d; want it planned and sent although recording failed", e.sender.count("one", EventDiagnosis), e.d.InvestigationErrors())
+	}
+}
+
+func TestDispatcher_InvestigateOffRunsNoInvestigationStatement(t *testing.T) {
+	e := newEnv(t) // Investigate false
+	e.switched("one")
+	e.setAlerts(alert(svcX, "service_failing", model.AlertDanger))
+	tracer := &stmtTracer{}
+	e.tracedStore(tracer, 0)
+	e.cycle()
+	tracer.mu.Lock()
+	defer tracer.mu.Unlock()
+	if len(tracer.sql) == 0 {
+		t.Fatal("the tracer saw no statement")
+	}
+	for _, sql := range tracer.sql {
+		if strings.Contains(sql, "agent_investigation") || strings.Contains(sql, "diagnosis_due_at <=") {
+			t.Errorf("with the agent off a cycle ran %q", sql)
+		}
+	}
+}
+
+type panickingDiagnosisSender struct {
+	inner Sender
+	calls atomic.Int32
+	first func()
+}
+
+func (p *panickingDiagnosisSender) Send(ctx context.Context, r store.NotificationRoute, s Secret, m Message) Result {
+	if m.Event == EventDiagnosis {
+		p.calls.Add(1)
+		if p.first != nil {
+			p.first()
+		}
+		panic("render")
+	}
+	return p.inner.Send(ctx, r, s, m)
+}
+
+func TestDispatcher_APanickingDiagnosisSendFailsTheRowOnce(t *testing.T) {
+	e := newInvEnv(t)
+	p := &panickingDiagnosisSender{inner: e.d.Senders}
+	e.d.Senders = p
+	e.switched("one")
+	e.setAlerts(alert(svcX, "service_failing", model.AlertDanger))
+	e.cycle()
+	e.finishInvestigations(testSummary)
+	for range 4 {
+		e.advance(3 * time.Minute)
+		e.cycle()
+	}
+	row := e.diagnosisRow()
+	if p.calls.Load() != 1 || row.Status != "failed" || row.Attempts != 1 || row.Note == "" || row.ClaimedUntil != nil {
+		t.Fatalf("sends = %d, row = %+v, want one send and a failed row with a note", p.calls.Load(), row)
+	}
+	if e.d.InvestigationErrors() != 1 {
+		t.Fatalf("investigation errors = %d, want 1", e.d.InvestigationErrors())
+	}
+	if _, err := e.st.RetryNotificationDelivery(context.Background(), row.ID, e.clock); err != nil {
+		t.Fatalf("the failed row cannot be retried by hand: %v", err)
+	}
+}
+
+func TestDispatcher_APanicDuringShutdownStillFailsTheRow(t *testing.T) {
+	e := newInvEnv(t)
+	e.switched("one")
+	e.setAlerts(alert(svcX, "service_failing", model.AlertDanger))
+	e.cycle()
+	e.finishInvestigations(testSummary)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	e.d.Senders = &panickingDiagnosisSender{inner: e.d.Senders, first: cancel}
+	e.advance(time.Second)
+	if err := e.cycleWithCtx(ctx, 5*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	e.waitWithin(5*time.Second, "the panicked worker")
+	if row := e.diagnosisRow(); row == nil || row.Status != "failed" {
+		t.Fatalf("row = %+v, want failed although the cycle's context ended", row)
+	}
+}
+
+type openedHangSender struct {
+	inner   Sender
+	release chan struct{}
+}
+
+func (h *openedHangSender) Send(ctx context.Context, r store.NotificationRoute, s Secret, m Message) Result {
+	if m.Event == EventOpened {
+		select {
+		case <-h.release:
+		case <-ctx.Done():
+		case <-time.After(20 * time.Second):
+		}
+	}
+	return h.inner.Send(ctx, r, s, m)
+}
+
+func TestDispatcher_ADiagnosisWaitsForTheRoutesAlertSend(t *testing.T) {
+	e := newInvEnv(t)
+	e.switched("one")
+	e.setAlerts(alert(svcX, "service_failing", model.AlertDanger))
+	e.stageDiagnosis()
+	h := &openedHangSender{inner: e.d.Senders, release: make(chan struct{})}
+	release := sync.OnceFunc(func() { close(h.release) })
+	t.Cleanup(func() { release(); e.d.Wait() })
+	e.d.Senders = h
+	e.setAlerts(alert(svcX, "service_failing", model.AlertDanger), alert(svcY, "service_failing", model.AlertDanger))
+	e.advance(time.Second)
+	if err := e.cycleWithin(5 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	if e.sender.count("one", EventDiagnosis) != 0 {
+		t.Fatal("a diagnosis was sent while an alert send of the same route was running")
+	}
+	release()
+	e.waitWithin(5*time.Second, "the alert send")
+	e.advance(time.Second)
+	e.cycle()
+	if e.sender.count("one", EventDiagnosis) != 1 || e.sender.count("one", EventOpened) != 2 {
+		t.Fatalf("sent %v, want both opened messages and then the diagnosis", e.sender.to("one"))
+	}
+}
+
+func TestDispatcher_InvestigationErrorsAreCountedAndWarned(t *testing.T) {
+	e := newInvEnv(t)
+	e.switched("one")
+	var log bytes.Buffer
+	e.d.Log = slog.New(slog.NewTextHandler(&log, nil))
+	e.exec(`alter table agent_investigations rename to agent_investigations_gone`)
+	e.setAlerts(alert(svcX, "service_failing", model.AlertDanger))
+	e.cycle()
+	if got := e.d.InvestigationErrors(); got != 2 {
+		t.Fatalf("investigation errors = %d, want 2: recording and planning", got)
+	}
+	for _, want := range []string{`level=WARN`, `step="record requests"`, `step="plan diagnosis"`, `count=1`, `count=2`} {
+		if !strings.Contains(log.String(), want) {
+			t.Errorf("the log has no %s:\n%s", want, log.String())
+		}
+	}
+}
+
+func TestDispatcher_APanicInAfterSendIsCounted(t *testing.T) {
+	e := newInvEnv(t)
+	e.switched("one")
+	h := &panickingHandler{Handler: slog.NewTextHandler(&strings.Builder{}, nil)}
+	h.armed.Store(true)
+	e.d.Log = slog.New(h)
+	e.exec(`alter table agent_investigations rename to agent_investigations_gone`)
+	e.setAlerts(alert(svcX, "service_failing", model.AlertDanger))
+	e.cycle()
+	if got := e.d.InvestigationErrors(); got != 2 {
+		t.Fatalf("investigation errors = %d, want 2: the failed recording and the panic", got)
+	}
+}
+
+func TestDispatcher_DiagnosisResultsAreNotInTheAlertSeries(t *testing.T) {
+	e := newInvEnv(t)
+	e.d.Telemetry = telemetry.New()
+	e.switched("one")
+	replies := []Result{{Retryable: true, StatusCode: 500, Note: "HTTP 500"}, {Delivered: true, StatusCode: 200}, {StatusCode: 400, Note: "HTTP 400"}}
+	var n atomic.Int32
+	e.sender.reply = func(_ string, event Event, _ int) Result {
+		if event == EventDiagnosis {
+			return replies[(n.Add(1)-1)%3]
+		}
+		return Result{Delivered: true, StatusCode: 200}
+	}
+	e.setAlerts(alert(svcX, "service_failing", model.AlertDanger), alert(svcY, "service_failing", model.AlertDanger))
+	e.cycle()
+	e.finishInvestigations(testSummary)
+	for range 4 {
+		e.advance(time.Minute)
+		e.cycle()
+	}
+	if n.Load() != 3 {
+		t.Fatalf("diagnosis sends = %d, want 3: a retry, a delivery and a failure", n.Load())
+	}
+	e.exec(`update notification_deliveries set status = 'pending', attempts = 0, finished_at = null, diagnosis_due_at = $1 where event = 'diagnosis'`, e.clock)
+	e.exec(`update notification_routes set secret_enc = '\x00'`)
+	e.cycle() // fails before the send: the destination's secret cannot be read
+	var out bytes.Buffer
+	if err := e.d.Telemetry.WritePrometheus(&out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `harbormaster_notification_deliveries_total{destination="webhook",result="delivered"} 2`) {
+		t.Errorf("the two opened messages are not counted exactly:\n%s", grepLines(out.String(), "notification_deliveries_total{"))
+	}
+	for _, result := range []string{"failed", "retried"} {
+		if strings.Contains(out.String(), `harbormaster_notification_deliveries_total{destination="webhook",result="`+result+`"}`) {
+			t.Errorf("a diagnosis was counted as %s in the alert series", result)
+		}
+	}
+}
+
+func grepLines(text, part string) string {
+	var out []string
+	for line := range strings.Lines(text) {
+		if strings.Contains(line, part) {
+			out = append(out, line)
+		}
+	}
+	return strings.Join(out, "")
+}
+
+func TestDispatcher_ACancelledCycleReportsNoInvestigationError(t *testing.T) {
+	t.Run("before the step", func(t *testing.T) {
+		e := newInvEnv(t)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		e.d.Cycle(ctx) //nolint:errcheck // a cancelled cycle reports its own errors
+		if got := e.d.InvestigationErrors(); got != 0 {
+			t.Fatalf("investigation errors = %d, want 0", got)
+		}
+	})
+	t.Run("during the step", func(t *testing.T) {
+		e := newInvEnv(t)
+		e.d.InvestigateTimeout = time.Minute
+		e.switched("one")
+		e.setAlerts(alert(svcX, "service_failing", model.AlertDanger))
+		e.hold(recordingLock)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		done := make(chan struct{})
+		go func() { defer close(done); e.d.Cycle(ctx) }() //nolint:errcheck
+		e.eventually(5*time.Second, "the opened message", func() bool { return e.openedSent("one") })
+		time.Sleep(200 * time.Millisecond) // recording is now waiting for the lock
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the cycle did not stop")
+		}
+		if got := e.d.InvestigationErrors(); got != 0 {
+			t.Fatalf("investigation errors = %d, want 0 for a shutdown", got)
+		}
+	})
+}
+
+func TestDispatcher_OnlyOpenedCarriesInvestigate(t *testing.T) {
+	e := newInvEnv(t)
+	msgs := e.recordMessages()
+	e.switched("one", func(r *store.NotificationRoute) { r.RepeatSeconds = 1800 })
+	e.setAlerts(alert(svcX, "service_failing", model.AlertDanger))
+	e.cycle()
+	e.finishInvestigations(testSummary)
+	e.advance(time.Second)
+	e.cycle() // diagnosis
+	e.advance(31 * time.Minute)
+	e.cycle() // repeat
+	e.setAlerts()
+	e.advance(30 * time.Second)
+	e.cycle()
+	e.advance(3 * time.Minute)
+	e.cycle() // resolved
+	for _, event := range []Event{EventDiagnosis, EventRepeat, EventResolved} {
+		got := msgs.of(event)
+		if len(got) != 1 || got[0].Investigate || got[0].IncidentID != 0 {
+			t.Errorf("%s messages = %+v, want one without the investigation fields", event, got)
+		}
+	}
+	if got := msgs.of(EventOpened); len(got) != 1 || !got[0].Investigate || got[0].IncidentID == 0 {
+		t.Errorf("opened messages = %+v, want one with the investigation fields", got)
+	}
+}
+
+func TestDispatcher_TheStoredSummaryIsPassedUncleaned(t *testing.T) {
+	const raw = "The api is down, see https://elsewhere.example/page for more."
+	if CleanSummary(raw, "https://hm.example.com") == raw {
+		t.Fatal("the fixture is not changed by cleaning")
+	}
+	e := newInvEnv(t)
+	msgs := e.recordMessages()
+	e.switched("one")
+	e.setAlerts(alert(svcX, "service_failing", model.AlertDanger))
+	e.cycle()
+	e.finishInvestigations(testSummary)
+	e.exec(`update agent_investigations set summary = $1`, raw)
+	e.advance(time.Second)
+	e.cycle()
+	if got := msgs.of(EventDiagnosis); len(got) != 1 || got[0].Diagnosis.Summary != raw {
+		t.Fatalf("diagnosis messages = %+v, want the stored summary as it is", got)
 	}
 }

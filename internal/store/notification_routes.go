@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -65,6 +66,37 @@ type NotificationRoute struct {
 	Version        int
 	UpdatedAt      time.Time
 	UpdatedBy      *int64
+}
+
+// TargetLabel is what the delivery log and the route list show as the route's destination. It never includes a URL
+// path, a routing key or a token.
+func (r NotificationRoute) TargetLabel() string {
+	c := r.Config
+	switch r.Destination {
+	case "slack":
+		if c.Label != "" {
+			return c.Label
+		}
+		if c.URLHost != "" {
+			return c.URLHost
+		}
+		return "Slack"
+	case "pagerduty":
+		if c.Label != "" {
+			return c.Label
+		}
+		return "PagerDuty"
+	case "webhook":
+		return c.URLHost
+	case "telegram":
+		if c.Label != "" {
+			return c.Label
+		}
+		return c.ChatID
+	case "email":
+		return strings.Join(c.Recipients, ", ")
+	}
+	return ""
 }
 
 const MaxNotificationRoutes = 50

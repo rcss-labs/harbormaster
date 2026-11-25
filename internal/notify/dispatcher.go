@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -70,8 +69,10 @@ type Dispatcher struct {
 	Guard lease.Guard
 
 	// Investigate turns on the end-of-cycle step that records investigation requests and sends diagnosis messages.
-	// InvestigationWindow is the dedup window of a request; InvestigateTimeout bounds each statement group of the step
-	// (default 5 s). OnInvestigationRequested is called after a cycle created at least one investigation.
+	// InvestigationWindow is the dedup window of a request; InvestigateTimeout (default 5 s) bounds the recording, the
+	// planning and claiming together, and the lookup of a diagnosis send. OnInvestigationRequested is called after a
+	// cycle created at least one investigation. It must not block: it runs on its own goroutine, no cycle waits for it,
+	// and while one call has not returned no other is started.
 	Investigate              bool
 	InvestigationWindow      time.Duration
 	InvestigateTimeout       time.Duration
@@ -87,6 +88,8 @@ type Dispatcher struct {
 
 	// diagnosisBusy is busy for diagnosis sends only (guarded by busyMu); the alert path never reads it.
 	diagnosisBusy       map[int64]bool
+	diagnosisRunning    int // claimed diagnosis rows being worked on (guarded by busyMu)
+	hookRunning         atomic.Bool
 	investigationErrors atomic.Int64
 }
 
@@ -563,8 +566,14 @@ func (d *Dispatcher) deliver(sendCtx, parent context.Context, row store.Notifica
 		defer cancel()
 		return d.Store.FinishNotificationDelivery(writeCtx, row.ID, row.ClaimedUntil, attempts, o, d.now())
 	}
+	isDiagnosis := row.Event == string(EventDiagnosis)
+	count := func(result string) {
+		if !isDiagnosis { // the series is about alerts; a diagnosis that fails must not look like one
+			d.registry().CountNotification(row.Destination, result)
+		}
+	}
 	fail := func(note string) error {
-		d.registry().CountNotification(row.Destination, "failed")
+		count("failed")
 		return finish(store.DeliveryOutcome{Note: note})
 	}
 	cancelRow := func(note string) error { return finish(store.DeliveryOutcome{Cancelled: true, Note: note}) }
@@ -582,7 +591,6 @@ func (d *Dispatcher) deliver(sendCtx, parent context.Context, row store.Notifica
 	if !route.Enabled && row.Event != string(EventTest) {
 		return cancelRow(noteRouteOff)
 	}
-	isDiagnosis := row.Event == string(EventDiagnosis)
 	if isDiagnosis && !route.Investigate {
 		return cancelRow(noteInvestigateOff)
 	}
@@ -628,7 +636,9 @@ func (d *Dispatcher) deliver(sendCtx, parent context.Context, row store.Notifica
 
 	var diagnosis *Diagnosis
 	if isDiagnosis {
-		investigation, err := d.Store.GetInvestigation(sendCtx, row.Details.InvestigationID)
+		lookupCtx, cancel := context.WithTimeout(sendCtx, d.investigateTimeout())
+		investigation, err := d.Store.GetInvestigation(lookupCtx, row.Details.InvestigationID)
+		cancel()
 		if errors.Is(err, store.ErrNotFound) || err == nil && (investigation.State != "done" || investigation.Summary == "") {
 			return cancelRow(noteInvestigationGone)
 		}
@@ -655,8 +665,8 @@ func (d *Dispatcher) deliver(sendCtx, parent context.Context, row store.Notifica
 	}
 	subject.AccountName = name
 	message := Message{Event: Event(row.Event), DeliveryID: row.ID, BaseURL: d.BaseURL, RouteName: row.RouteName, Subject: subject, Diagnosis: diagnosis}
-	if row.Event == string(EventOpened) && row.IncidentID != nil {
-		message.Investigate, message.IncidentID = route.Investigate, *row.IncidentID
+	if d.Investigate && route.Investigate && row.Event == string(EventOpened) && row.IncidentID != nil {
+		message.Investigate, message.IncidentID = true, *row.IncidentID
 	}
 	if d.Guard != nil {
 		// The lease may have been lost while this row waited, rendered or slept between sends. The unique delivery key
@@ -681,16 +691,16 @@ func (d *Dispatcher) deliver(sendCtx, parent context.Context, row store.Notifica
 		if row.Retries > 0 {
 			outcome.Note = fmt.Sprintf("Delivered on retry in %d ms", result.Duration.Milliseconds())
 		}
-		d.registry().CountNotification(row.Destination, "delivered")
+		count("delivered")
 	case result.Retryable && attempts < maxAttempts:
 		outcome.Retryable = true
 		outcome.RetryAt = d.now().Add(max(d.backoff(attempts), result.RetryAfter))
-		d.registry().CountNotification(row.Destination, "retried")
+		count("retried")
 	default:
 		if result.Retryable {
 			outcome.Note = fmt.Sprintf("%s after %d attempts", result.Note, attempts)
 		}
-		d.registry().CountNotification(row.Destination, "failed")
+		count("failed")
 	}
 	return finish(outcome)
 }
@@ -704,33 +714,5 @@ func (d *Dispatcher) backoff(attempt int) time.Duration {
 	return base + time.Duration(float64(base)*0.1*d.jitter())
 }
 
-// TargetLabel is what the delivery log and the route list show as a route's destination. It never includes a URL
-// path, a routing key or a token.
-func TargetLabel(r store.NotificationRoute) string {
-	c := r.Config
-	switch r.Destination {
-	case DestSlack:
-		if c.Label != "" {
-			return c.Label
-		}
-		if c.URLHost != "" {
-			return c.URLHost
-		}
-		return "Slack"
-	case DestPagerDuty:
-		if c.Label != "" {
-			return c.Label
-		}
-		return "PagerDuty"
-	case DestWebhook:
-		return c.URLHost
-	case DestTelegram:
-		if c.Label != "" {
-			return c.Label
-		}
-		return c.ChatID
-	case DestEmail:
-		return strings.Join(c.Recipients, ", ")
-	}
-	return ""
-}
+// TargetLabel is what the delivery log and the route list show as a route's destination.
+func TargetLabel(r store.NotificationRoute) string { return r.TargetLabel() }
