@@ -21,7 +21,7 @@ import (
 
 // reviewCatalogue offers fake-1 (a run reserves 0.60 USD) and the reviewer role for three of the four types, listed
 // out of order on purpose.
-const reviewCatalogue = `{"providers":[{"provider":"fake","models":[{"id":"fake-1","input_per_mtok_micro_usd":1000000,"output_per_mtok_micro_usd":3000000,"context_tokens":8000}]}],` +
+const reviewCatalogue = `{"providers":[{"provider":"fake","models":[{"id":"fake-1","input_per_mtok_micro_usd":1000000,"output_per_mtok_micro_usd":3000000,"context_tokens":8000},{"id":"fake-2","input_per_mtok_micro_usd":2000000,"output_per_mtok_micro_usd":6000000,"context_tokens":8000}]}],` +
 	`"roles":["chat","investigator","reviewer","test"],"review_types":["reliability","cost","security"],"limits":{"max_run_tokens":200000,"run_timeout_seconds":300}}`
 
 // reviewsEnv is the notification test server with the agent on, reviews on (24 a day) and a fake agent that serves the
@@ -78,6 +78,18 @@ func (e *reviewsEnv) setReviewerModel() {
 	ref := store.AgentModelRef{Provider: "fake", Model: "fake-1"}
 	if err := storetest.PutAgentSettings(e.t.Context(), e.st, store.AgentSettings{MonthlyBudgetMicroUSD: 10_000_000,
 		RoleModels: map[string]store.AgentModelRef{"chat": ref, "reviewer": ref}}); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+// setModels stores the chat and, when it is not empty, the reviewer model; both are of provider fake.
+func (e *reviewsEnv) setModels(chat, reviewer string) {
+	e.t.Helper()
+	roles := map[string]store.AgentModelRef{"chat": {Provider: "fake", Model: chat}}
+	if reviewer != "" {
+		roles["reviewer"] = store.AgentModelRef{Provider: "fake", Model: reviewer}
+	}
+	if err := storetest.PutAgentSettings(e.t.Context(), e.st, store.AgentSettings{MonthlyBudgetMicroUSD: 10_000_000, RoleModels: roles}); err != nil {
 		e.t.Fatal(err)
 	}
 }
@@ -1099,5 +1111,246 @@ func TestNotificationDeliveries_CarryTheReviewRunOfAReviewRow(t *testing.T) {
 	}
 	if reviewRows != 1 || other != 1 {
 		t.Errorf("delivery log: %d rows with the review run, %d without; want 1 and 1", reviewRows, other)
+	}
+}
+
+// ---- fix round 1 ----
+
+func TestAgentReviews_AGoneTagStaysOnPreviewAndUpdate(t *testing.T) {
+	e := newReviewsEnv(t, false)
+	tag, err := e.st.CreateTag(t.Context(), "Temp", "red", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tagScope := []any{map[string]any{"kind": "harbormaster", "tag_id": int64(tag.ID)}}
+	review := e.create(e.input(with("scope", tagScope)))
+	if err := e.st.DeleteTag(t.Context(), tag.ID); err != nil {
+		t.Fatal(err)
+	}
+	// The draft's own tag entry is kept as stored: it matches no service and shows as missing.
+	preview := e.admin.post("/api/agent/reviews/preview", e.input(with("scope", tagScope)))
+	if preview.StatusCode != http.StatusOK {
+		code, msg := errorCode(t, preview)
+		t.Fatalf("preview with a deleted tag: status %d %s %s, want 200", preview.StatusCode, code, msg)
+	}
+	var counts ReviewPreviewDTO
+	decode(t, preview, &counts)
+	if counts.ServicesTotal != 0 {
+		t.Errorf("a gone tag matched %d services", counts.ServicesTotal)
+	}
+	resp := e.update(review.ID, e.input(with("version", review.Version), with("scope", tagScope), with("name", "Kept")))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("update keeping a deleted tag: status %d, want 200", resp.StatusCode)
+	}
+	var updated ReviewDTO
+	decode(t, resp, &updated)
+	if len(updated.Scope) != 1 || !updated.Scope[0].Missing || updated.Scope[0].TagID != int64(tag.ID) {
+		t.Errorf("scope = %+v, want the deleted tag shown as missing", updated.Scope)
+	}
+	// A save refuses a tag the review never held, and so does a create. (A preview cannot tell a gone tag from an unknown one.)
+	other := []any{map[string]any{"kind": "harbormaster", "tag_id": int64(tag.ID) + 1000}}
+	if resp := e.update(review.ID, e.input(with("version", updated.Version), with("scope", other))); resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("update with an unknown tag: status %d, want 422", resp.StatusCode)
+	}
+	if resp := e.admin.post("/api/agent/reviews", e.input(with("name", "Fresh"), with("scope", tagScope))); resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("create with a deleted tag: status %d, want 422", resp.StatusCode)
+	}
+}
+
+func TestAgentReviews_AnAdminCanAlwaysTurnAReviewOff(t *testing.T) {
+	e := newReviewsEnv(t, false) // no reviewer model is set: turning off needs none
+	tag, err := e.st.CreateTag(t.Context(), "Temp", "red", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tagScope := []any{map[string]any{"kind": "harbormaster", "tag_id": int64(tag.ID)}}
+	good := e.emailRoute("Good", "email")
+	pager := e.emailRoute("Soon pager", "email")
+	setup := func(name string) ReviewDTO {
+		t.Helper()
+		return e.create(e.input(with("name", name), with("scope", tagScope), with("route_ids", []int64{good.ID, pager.ID})))
+	}
+	storedRoutes := func(id int64) []int64 {
+		r, err := e.st.GetReview(t.Context(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r.RouteIDs
+	}
+	off := func(review ReviewDTO, routes []int64, change ...func(map[string]any)) *http.Response {
+		in := e.input(append([]func(map[string]any){with("version", review.Version), with("name", review.Name), with("enabled", false),
+			with("scope", tagScope), with("route_ids", routes)}, change...)...)
+		return e.update(review.ID, in)
+	}
+
+	// A route became PagerDuty and the tag is gone; the web sends the routes that are still allowed.
+	review := setup("Pager later")
+	if _, err := e.st.Pool.Exec(t.Context(), `update notification_routes set destination = 'pagerduty' where id = $1`, pager.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.st.DeleteTag(t.Context(), tag.ID); err != nil {
+		t.Fatal(err)
+	}
+	// Enabled and unchanged it is still refused, and so is a change of anything beside the switch.
+	if resp := e.update(review.ID, e.input(with("version", review.Version), with("name", review.Name), with("scope", tagScope), with("route_ids", []int64{good.ID, pager.ID}))); resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("saving it still on with a PagerDuty route: status %d, want 422", resp.StatusCode)
+	}
+	if resp := off(review, []int64{good.ID, pager.ID}, with("name", "Renamed")); resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("turning off and renaming with a PagerDuty route stored: status %d, want 422 (not the exception)", resp.StatusCode)
+	}
+	if resp := off(review, []int64{}); resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("turning off and dropping an allowed route: status %d, want 422 (only a not-allowed route may be dropped)", resp.StatusCode)
+	}
+	resp := off(review, []int64{good.ID})
+	if resp.StatusCode != http.StatusOK {
+		code, msg := errorCode(t, resp)
+		t.Fatalf("turn off: status %d %s %s, want 200", resp.StatusCode, code, msg)
+	}
+	var offDTO ReviewDTO
+	decode(t, resp, &offDTO)
+	if offDTO.Enabled || offDTO.Version != review.Version+1 || len(offDTO.Routes) != 2 || len(offDTO.Scope) != 1 {
+		t.Errorf("after turning off = %+v, want off with the stored routes and scope untouched", offDTO)
+	}
+	if got := storedRoutes(review.ID); len(got) != 2 {
+		t.Errorf("stored routes = %v, want both kept", got)
+	}
+	// Turning it back on is a full save and is refused while a route is PagerDuty.
+	if resp := e.update(review.ID, e.input(with("version", offDTO.Version), with("name", review.Name), with("scope", tagScope), with("route_ids", []int64{good.ID, pager.ID}))); resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("turning on with a PagerDuty route: status %d, want 422", resp.StatusCode)
+	}
+
+	// Every route deleted: the stored review has none, and can still be turned off.
+	bare := e.create(e.input(with("name", "Bare"), with("route_ids", []int64{good.ID})))
+	if err := e.st.DeleteNotificationRoute(t.Context(), good.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.st.DeleteNotificationRoute(t.Context(), pager.ID); err != nil {
+		t.Fatal(err)
+	}
+	if resp := e.update(bare.ID, e.input(with("version", bare.Version), with("name", "Bare"), with("enabled", false), with("route_ids", []int64{}))); resp.StatusCode != http.StatusOK {
+		code, msg := errorCode(t, resp)
+		t.Errorf("turn off with no routes left: status %d %s %s, want 200", resp.StatusCode, code, msg)
+	}
+	if got := storedRoutes(bare.ID); len(got) != 0 {
+		t.Errorf("stored routes = %v, want none", got)
+	}
+	// An off review that is saved again off with no routes is a full save: refused.
+	again, _ := e.st.GetReview(t.Context(), bare.ID)
+	if resp := e.update(bare.ID, e.input(with("version", again.Version), with("name", "Bare"), with("enabled", false), with("route_ids", []int64{}))); resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("saving an off review with no routes: status %d, want 422", resp.StatusCode)
+	}
+}
+
+func TestAgentReviews_ReviewerModelIsNotTheChatModel(t *testing.T) {
+	e := newReviewsEnv(t, false)
+	review := e.create(e.input())
+	cost := func() (preview, saved, block, run string) {
+		t.Helper()
+		str := func(p *string) string {
+			if p == nil {
+				return "null"
+			}
+			return *p
+		}
+		preview = str(e.preview(e.input()).WorstCaseMonthUSD)
+		saved = str(e.firstReview().WorstCaseMonthUSD)
+		var settings struct {
+			Reviews AgentReviewsDTO `json:"reviews"`
+		}
+		decode(t, e.admin.get("/api/agent/settings"), &settings)
+		block = str(settings.Reviews.WorstCaseRunUSD)
+		resp := e.runNow(review.ID)
+		code := ""
+		if resp.StatusCode != http.StatusAccepted {
+			code, _ = refused(t, resp)
+		} else {
+			resp.Body.Close()
+			code = "accepted"
+		}
+		return preview, saved, block, code
+	}
+	// A chat model alone gives a review no model: no money, and run now says so.
+	e.setModels("fake-1", "")
+	if preview, saved, block, run := cost(); preview != "null" || saved != "null" || block != "null" || run != "no_model" {
+		t.Errorf("chat only: preview %s, saved %s, block %s, run now %s; want null, null, null and no_model", preview, saved, block, run)
+	}
+	// Two differently priced models: the reviewer's price counts (fake-2 reserves 1.20, fake-1 0.60), weekly is five runs.
+	e.setModels("fake-1", "fake-2")
+	if preview, saved, block, run := cost(); preview != "6.00" || saved != "6.00" || block != "1.20" || run != "accepted" {
+		t.Errorf("reviewer fake-2: preview %s, saved %s, block %s, run now %s; want 6.00, 6.00, 1.20 and accepted", preview, saved, block, run)
+	}
+	e.setModels("fake-2", "fake-1")
+	if preview, saved, block, _ := cost(); preview != "3.00" || saved != "3.00" || block != "0.60" {
+		t.Errorf("reviewer fake-1 with chat fake-2: preview %s, saved %s, block %s; want 3.00, 3.00, 0.60", preview, saved, block)
+	}
+}
+
+func TestAgentReviews_UpdateKeepsOnlyTheStoredTags(t *testing.T) {
+	// The stored scope is what lets an update keep a tag that is gone; with another tag in the request it is refused.
+	e := newReviewsEnv(t, false)
+	keep, _ := e.st.CreateTag(t.Context(), "Keep", "red", false)
+	drop, _ := e.st.CreateTag(t.Context(), "Drop", "red", false)
+	review := e.create(e.input(with("scope", []any{map[string]any{"kind": "harbormaster", "tag_id": int64(keep.ID)}, map[string]any{"kind": "harbormaster", "tag_id": int64(drop.ID)}})))
+	if err := e.st.DeleteTag(t.Context(), drop.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.st.DeleteTag(t.Context(), keep.ID); err != nil {
+		t.Fatal(err)
+	}
+	// Both stay, but a tag id the review never held does not.
+	both := []any{map[string]any{"kind": "harbormaster", "tag_id": int64(keep.ID)}, map[string]any{"kind": "harbormaster", "tag_id": int64(drop.ID)}}
+	if resp := e.update(review.ID, e.input(with("version", review.Version), with("scope", both))); resp.StatusCode != http.StatusOK {
+		t.Errorf("keeping both deleted tags: status %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestAgentReviews_ScopeTextMatchesTheAppPatterns(t *testing.T) {
+	e := newReviewsEnv(t, false)
+	cluster := func(account, region, name string) map[string]any {
+		return map[string]any{"kind": "cluster", "cluster_id": model.ClusterKey{AccountID: account, Region: region, Cluster: name}.ID()}
+	}
+	account := func(id, region string) map[string]any {
+		return map[string]any{"kind": "account", "account_id": id, "region": region}
+	}
+	bad := map[string]map[string]any{
+		"cluster: account of 11 digits":    cluster("12345678901", "us-east-1", "core"),
+		"cluster: account with a letter":   cluster("12345678901a", "us-east-1", "core"),
+		"cluster: region in capitals":      cluster(sandboxAccountID, "US-EAST-1", "core"),
+		"cluster: region of 31 characters": cluster(sandboxAccountID, strings.Repeat("a", 31), "core"),
+		"cluster: no region":               cluster(sandboxAccountID, "", "core"),
+		"cluster: name with a space":       cluster(sandboxAccountID, "us-east-1", "core services"),
+		"cluster: name with a dot":         cluster(sandboxAccountID, "us-east-1", "core.services"),
+		"cluster: name with a slash":       cluster(sandboxAccountID, "us-east-1", "core/services"),
+		"cluster: name of 256 characters":  cluster(sandboxAccountID, "us-east-1", strings.Repeat("c", 256)),
+		"cluster: empty name":              cluster(sandboxAccountID, "us-east-1", ""),
+		"cluster: name with a newline":     cluster(sandboxAccountID, "us-east-1", "core\nservices"),
+		"account: 13 digits":               account("1234567890123", ""),
+		"account: region in capitals":      account(sandboxAccountID, "EU-WEST-1"),
+		"account: region with a space":     account(sandboxAccountID, "eu west"),
+	}
+	for name, entry := range bad {
+		for _, route := range []string{"create", "preview"} {
+			var resp *http.Response
+			if route == "create" {
+				resp = e.admin.post("/api/agent/reviews", e.input(with("scope", []any{entry})))
+			} else {
+				resp = e.admin.post("/api/agent/reviews/preview", e.input(with("scope", []any{entry})))
+			}
+			if code, field := refused(t, resp); resp.StatusCode != http.StatusUnprocessableEntity || code != "invalid" || field != "scope" {
+				t.Errorf("%s (%s): status %d code %q field %q, want 422 invalid scope", name, route, resp.StatusCode, code, field)
+			}
+		}
+	}
+	if n := len(e.stored()); n != 0 {
+		t.Errorf("%d reviews were written", n)
+	}
+	for name, entry := range map[string]map[string]any{
+		"cluster name of 255 characters": cluster(sandboxAccountID, "us-east-1", strings.Repeat("c", 255)),
+		"cluster name with - and _":      cluster(sandboxAccountID, "eu-central-1", "Core_services-2"),
+		"account with a region":          account(sandboxAccountID, "eu-west-1"),
+	} {
+		if resp := e.admin.post("/api/agent/reviews/preview", e.input(with("scope", []any{entry}))); resp.StatusCode != http.StatusOK {
+			t.Errorf("%s: status %d, want 200", name, resp.StatusCode)
+		}
 	}
 }

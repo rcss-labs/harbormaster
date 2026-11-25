@@ -3,7 +3,9 @@ package api
 import (
 	"context"
 	"errors"
+	"maps"
 	"net/http"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -12,6 +14,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/rcss-labs/harbormaster/internal/auth"
+	"github.com/rcss-labs/harbormaster/internal/authz"
+	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/notify"
 	"github.com/rcss-labs/harbormaster/internal/reviewsched"
 	"github.com/rcss-labs/harbormaster/internal/store"
@@ -24,6 +28,9 @@ const (
 	maxReviewZoneLen      = 64
 	maxReviewClusterIDLen = 400
 )
+
+// clusterNamePattern is what an ECS cluster name may hold, the rule the review job reads scope entries by.
+var clusterNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,255}$`)
 
 // reviewTypeOptions are the review types the form offers, in its order, with their fixed labels. The ids are the
 // store's; the agent's catalogue says which of them it supports.
@@ -319,6 +326,14 @@ func (s *Server) reviewScope(ctx context.Context, in []ReviewScopeInput, stored 
 	}
 	for i := range scope {
 		scope[i].Threshold = 0 // a review's scope is a focus, not a count
+		sel := scope[i]
+		switch sel.Kind {
+		case store.NotificationSelectorAccount, store.NotificationSelectorCluster:
+			if !accountIDPattern.MatchString(sel.AccountID) || (sel.Region != "" && !regionPattern.MatchString(sel.Region)) ||
+				(sel.Kind == store.NotificationSelectorCluster && (sel.Region == "" || !clusterNamePattern.MatchString(sel.Cluster))) {
+				return nil, reviewInvalid("scope", invalidScopeMessage)
+			}
+		}
 	}
 	return scope, nil
 }
@@ -381,6 +396,68 @@ func (s *Server) buildReview(ctx context.Context, in ReviewInput, stored *store.
 		review.ID = stored.ID
 	}
 	return review, nil
+}
+
+// scopeInputOf is a stored scope entry as the request states it.
+func scopeInputOf(sel store.NotificationSelector) ReviewScopeInput {
+	switch sel.Kind {
+	case store.NotificationSelectorCluster:
+		return ReviewScopeInput{Kind: sel.Kind, ClusterID: model.ClusterKey{AccountID: sel.AccountID, Region: sel.Region, Cluster: sel.Cluster}.ID()}
+	case store.NotificationSelectorHarbormaster:
+		return ReviewScopeInput{Kind: sel.Kind, TagID: int64(sel.TagID)}
+	}
+	return ReviewScopeInput{Kind: sel.Kind, AccountID: sel.AccountID, Region: sel.Region}
+}
+
+// onlyTurnsOff reports whether the request is the stored, enabled review with nothing changed but the switch turned
+// off, the routes aside: the form does not offer a route that became PagerDuty, so it may leave out such a route (and
+// only such a route) and add none. It checks nothing else; the answer is only that the stored review may be kept.
+func (s *Server) onlyTurnsOff(ctx context.Context, in ReviewInput, stored store.Review) (bool, error) {
+	if !stored.Enabled || in.Enabled {
+		return false, nil
+	}
+	same := strings.TrimSpace(in.Name) == stored.Name && in.Type == stored.Type && in.Schedule.Cadence == stored.Cadence &&
+		in.Schedule.AtMinute == stored.AtMinute && in.Schedule.Timezone == stored.Timezone &&
+		derefInt(in.Schedule.Weekday) == stored.Weekday && derefInt(in.Schedule.MonthDay) == stored.MonthDay
+	if !same {
+		return false, nil
+	}
+	want := map[ReviewScopeInput]bool{}
+	for _, sel := range stored.Scope {
+		want[scopeInputOf(sel)] = true
+	}
+	got := map[ReviewScopeInput]bool{}
+	for _, entry := range in.Scope {
+		got[entry] = true
+	}
+	if !maps.Equal(want, got) {
+		return false, nil
+	}
+	for _, id := range in.RouteIDs {
+		if !slices.Contains(stored.RouteIDs, id) {
+			return false, nil
+		}
+	}
+	for _, id := range stored.RouteIDs {
+		if slices.Contains(in.RouteIDs, id) {
+			continue
+		}
+		route, err := s.Store.GetNotificationRoute(ctx, id)
+		if err != nil {
+			return false, err
+		}
+		if route.Destination != notify.DestPagerDuty {
+			return false, nil // an allowed route was dropped: that is an edit, checked in full
+		}
+	}
+	return true, nil
+}
+
+func derefInt(n *int) int {
+	if n == nil {
+		return 0
+	}
+	return *n
 }
 
 // reviewStoreError maps what the store refuses to the answer the form expects.
@@ -455,8 +532,15 @@ func (s *Server) updateAgentReview(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, errReviewStale) // before anything else is looked at
 		return
 	}
-	review, err := s.buildReview(ctx, in, &before)
-	if err != nil {
+	var review store.Review
+	if only, err := s.onlyTurnsOff(ctx, in, before); err != nil {
+		s.fail(w, err)
+		return
+	} else if only {
+		// An admin can always turn a review off: it keeps its stored routes and scope, whatever they became.
+		review = before
+		review.Enabled = false
+	} else if review, err = s.buildReview(ctx, in, &before); err != nil {
 		s.failReview(w, err)
 		return
 	}
@@ -533,7 +617,14 @@ func (s *Server) previewAgentReview(w http.ResponseWriter, r *http.Request) {
 		s.failReview(w, err)
 		return
 	}
-	scopeEntries, err := s.reviewScope(ctx, in.Scope, nil)
+	// A tag the draft names that is gone is kept, as an update of the review keeps it: it matches no service.
+	var ownTags []store.NotificationSelector
+	for _, entry := range in.Scope {
+		if entry.Kind == store.NotificationSelectorHarbormaster {
+			ownTags = append(ownTags, store.NotificationSelector{Kind: entry.Kind, TagID: authz.TagID(entry.TagID)})
+		}
+	}
+	scopeEntries, err := s.reviewScope(ctx, in.Scope, ownTags)
 	if err != nil {
 		s.failReview(w, err)
 		return
