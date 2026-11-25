@@ -181,7 +181,7 @@ func usageEvents(events []Event) []Event {
 func requireLimitReached(t *testing.T, events []Event) {
 	t.Helper()
 	n := len(events)
-	if n >= 3 && events[n-2].Type == "text" && (events[n-2].Delta == noAnswer || strings.HasPrefix(events[n-2].Delta, "The question is too long")) {
+	if n >= 3 && events[n-2].Type == "text" && (events[n-2].Delta == noAnswer || strings.HasPrefix(events[n-2].Delta, "The question is too long") || events[n-2].Delta == noTimeText) {
 		events = append(slices.Clone(events[:n-2]), events[n-1])
 		n--
 	}
@@ -399,7 +399,7 @@ func TestLoop_StopsAtTimeout(t *testing.T) {
 }
 
 func rateLimited() error {
-	return &provider.Error{Kind: "rate_limited", Retryable: true, RetryAfter: 10 * time.Millisecond, Message: "The model provider is limiting requests."}
+	return &provider.Error{Kind: "rate_limited", Retryable: true, RetryAfter: 10 * time.Millisecond, Message: "VENDOR-WORDS-NOT-FOR-USERS", Status: 429, VendorType: "rate_limit_error"}
 }
 
 func TestLoop_RetriesOnceOnRateLimit(t *testing.T) {
@@ -426,7 +426,7 @@ func TestLoop_RetriesOnceOnRateLimit(t *testing.T) {
 			t.Errorf("%d model calls, want 2: one retry only", n)
 		}
 		last := events[len(events)-1]
-		if last.Type != "error" || last.Code != "rate_limited" || last.Message != "The model provider is limiting requests." {
+		if last.Type != "error" || last.Code != "rate_limited" || last.Message != "The model provider is busy. Try again shortly." {
 			t.Errorf("last event = %+v", last)
 		}
 	})

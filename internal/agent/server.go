@@ -493,7 +493,7 @@ func (s *server) stream(w http.ResponseWriter, r *http.Request, prov provider.Pr
 	}
 
 	loop := &Loop{
-		Provider: prov, Tools: s.tools,
+		Provider: prov, Tools: s.tools, Log: s.log,
 		Limits: Limits{MaxSteps: s.cfg.MaxSteps, MaxRunTokens: s.cfg.MaxRunTokens, Timeout: s.cfg.RunTimeout, MaxResultBytes: s.cfg.MaxResultBytes},
 	}
 	panicked := false
@@ -590,6 +590,7 @@ func (s *server) serveTest(w http.ResponseWriter, r *http.Request) {
 		var perr *provider.Error
 		if errors.As(err, &perr) {
 			answer.Kind = perr.Kind
+			logModelFailure(s.log, "", req.Provider, model.ID, perr)
 			answer.Message = secretshape.ScrubText(providerMessage(perr))
 		} else {
 			answer.Kind = "unavailable"
