@@ -154,18 +154,14 @@ const maxAllowedNames = 10_000
 // maxAllowedNameLength is the longest name AllowNames takes.
 const maxAllowedNameLength = 128
 
-// maskRune stands for an allowed name in a candidate. Normalize never produces it and the corpus never holds it, so no
-// window that contains it can match.
-const maskRune = '\x00'
-
 func isNameByte(b byte) bool {
 	return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9' || b == '_' || b == '-'
 }
 
 // AllowNames lets a summary name the given services and clusters whole, however long the names are: in the copy check
-// of CheckSummary a token that is one of them is not counted as copied text. A name is one token of letters, digits,
+// of CheckSummary a window of characters that lies wholly inside one of them is not counted as copied text. A name is one token of letters, digits,
 // hyphens and underscores, at most 128 characters; anything else is ignored. Names are compared without regard to
-// case. At most 10,000 are kept. The corpus itself is unchanged, so text around a name is still checked.
+// case. At most 10,000 are kept. The corpus itself is unchanged, and a window that takes in a name and text beside it is checked as ever.
 func (c *Corpus) AllowNames(names ...string) {
 	for _, name := range names {
 		if len(c.allowed) >= maxAllowedNames {
@@ -191,49 +187,67 @@ func (c *Corpus) AllowNames(names ...string) {
 	}
 }
 
-// normalizeMasked is Normalize that puts maskRune in place of each whole token (a maximal run of letters, digits,
-// hyphens and underscores) that is an allowed name.
-func (c *Corpus) normalizeMasked(text string) string {
+// normalizeTracked is Normalize that also returns, for each character of its result, the number of the allowed name
+// (a whole token: a maximal run of letters, digits, hyphens and underscores, found in text as given) that the
+// character belongs to, or 0. The space that joins two words of one name belongs to it; a space before or after it does not.
+func (c *Corpus) normalizeTracked(text string) (string, []int32) {
 	var out strings.Builder
 	out.Grow(len(text))
+	owner := make([]int32, 0, len(text))
+	var current, next int32
+	started := false // the current name has written a character
 	pendingSpace := false
 	for i := 0; i < len(text); {
-		if isNameByte(text[i]) {
+		if isNameByte(text[i]) && (i == 0 || !isNameByte(text[i-1])) {
 			end := i + 1
 			for end < len(text) && isNameByte(text[end]) {
 				end++
 			}
+			current, started = 0, false
 			if end-i <= maxAllowedNameLength && c.allowed[strings.ToLower(text[i:end])] {
-				out.WriteRune(maskRune)
-				pendingSpace = false
-				i = end
-				continue
+				next++
+				current = next
 			}
+		} else if !isNameByte(text[i]) {
+			current = 0
 		}
 		r, size := utf8.DecodeRuneInString(text[i:])
 		i += size
 		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			if pendingSpace && out.Len() > 0 && out.String()[out.Len()-1] != byte(maskRune) {
+			if pendingSpace && out.Len() > 0 {
 				out.WriteByte(' ')
+				if started {
+					owner = append(owner, current)
+				} else {
+					owner = append(owner, 0)
+				}
 			}
 			pendingSpace = false
 			out.WriteRune(unicode.ToLower(r))
+			owner = append(owner, current)
+			started = current != 0
 		} else {
 			pendingSpace = true
 		}
 	}
-	return out.String()
+	return out.String(), owner
 }
 
-// hasRunAllowing is HasRunIn with the allowed names masked in the candidate first.
+// hasRunAllowing is HasRunIn that does not count a window lying wholly inside one allowed name: the bare name is no
+// copy, but a window that takes in the name and text beside it is checked as ever.
 func (c *Corpus) hasRunAllowing(candidate string) bool {
 	if len(c.allowed) == 0 {
 		return c.HasRunIn(candidate)
 	}
-	if c.hasRun(c.normalizeMasked(candidate)) {
+	norm, owner := c.normalizeTracked(candidate)
+	if c.hasRunSkipping(norm, owner) {
 		return true
 	}
-	return strings.IndexByte(candidate, '\\') >= 0 && c.hasRun(c.normalizeMasked(unescapeJSON(candidate)))
+	if strings.IndexByte(candidate, '\\') < 0 {
+		return false
+	}
+	norm, owner = c.normalizeTracked(unescapeJSON(candidate))
+	return c.hasRunSkipping(norm, owner)
 }
 
 // Full reports that the corpus passed its cap, so the copy check cannot vouch for anything.
@@ -274,7 +288,23 @@ func (c *Corpus) HasRunIn(candidate string) bool {
 }
 
 // hasRun is HasRunIn for a candidate that is already normalised.
-func (c *Corpus) hasRun(cand string) bool {
+func (c *Corpus) hasRun(cand string) bool { return c.hasRunSkipping(cand, nil) }
+
+// insideOneName reports whether the window runes[first..last] holds nothing but one allowed name: its first and last
+// character that is not a space (the single space at an edge is only a separator) belong to the same name.
+func insideOneName(runes []rune, owner []int32, first, last int) bool {
+	if runes[first] == ' ' {
+		first++
+	}
+	if runes[last] == ' ' {
+		last--
+	}
+	return first <= last && owner[first] != 0 && owner[first] == owner[last]
+}
+
+// hasRunSkipping is hasRun that leaves out the candidate windows that lie wholly inside one allowed name, owner giving
+// each character's name (0 for none).
+func (c *Corpus) hasRunSkipping(cand string, owner []int32) bool {
 	candRunes := []rune(cand)
 	if len(candRunes) < VerbatimRun || len(c.text) < VerbatimRun {
 		return false
@@ -298,6 +328,9 @@ func (c *Corpus) hasRun(cand string) bool {
 			continue
 		}
 		start := i - VerbatimRun + 1
+		if owner != nil && insideOneName(candRunes, owner, start, i) {
+			continue
+		}
 		known := false
 		for _, other := range index[w.hash] {
 			if windowText(other) == windowText(start) {

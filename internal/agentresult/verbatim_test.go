@@ -414,11 +414,11 @@ func TestAllowNames_CaseAndPrefixes(t *testing.T) {
 	if _, replaced := CheckSummary("Look at "+prefix+".", c); !replaced {
 		t.Error("a name allowed its own prefix")
 	}
-	// A token inside a longer token is not masked.
+	// A token inside a longer token is not an allowed name.
 	c = corpusOf(`{"service":"` + longServiceName + `"}`)
 	c.AllowNames(longServiceName)
 	if _, replaced := CheckSummary("Look at x"+longServiceName+"y.", c); !replaced {
-		t.Error("a name inside a longer token was masked")
+		t.Error("a name inside a longer token was allowed")
 	}
 }
 
@@ -506,18 +506,18 @@ func TestAllowNames_LinearWithTenThousandNamesAndAHostileCandidate(t *testing.T)
 	}
 }
 
-func TestAllowNames_AMaskedNameIsNotASeparatorAndEscapesAreMasked(t *testing.T) {
+func TestAllowNames_HalvesAroundAnAllowedNameAndEscapes(t *testing.T) {
 	// The log held "<left> <right>" side by side; a summary with the allowed name between the halves is not that copy.
 	left, right := "connection to the settlement", "ledger replica was refused"
 	c := corpusOf(`{"message":"` + left + " " + right + `"}`)
 	c.AllowNames(longServiceName)
 	if got, replaced := CheckSummary(left+" "+longServiceName+" "+right, c); replaced {
-		t.Errorf("a masked name joined two halves into a run: %q", got)
+		t.Errorf("an allowed name joined two halves into a run: %q", got)
 	}
 	if _, replaced := CheckSummary(left+" "+right, c); !replaced {
-		t.Error("setup: the unmasked copy was not caught")
+		t.Error("setup: the plain copy was not caught")
 	}
-	// A summary with a JSON escape in it is compared unescaped too, and the name is masked there as well.
+	// A summary with a JSON escape in it is compared unescaped too, and the name stands there as well.
 	d := corpusOf(`{"service":"` + longServiceName + `"}`)
 	d.AllowNames(longServiceName)
 	if got, replaced := CheckSummary(`It said \"ok\" for `+longServiceName+".", d); replaced {
@@ -532,5 +532,72 @@ func TestAllowNames_NameBoundsHoldWhereTheyAreTheOnlyGuard(t *testing.T) {
 	c.AllowNames("a.b", "two words", strings.Repeat("x", 129), "")
 	if len(c.allowed) != 0 {
 		t.Errorf("allowed set holds %d invalid names", len(c.allowed))
+	}
+}
+
+func TestAllowNames_OnlyAWindowWhollyInsideANameIsSkipped(t *testing.T) {
+	// The log held "<left> <name> <right>" with under 32 characters each side; copying it with the name in the middle is
+	// a copy, because the windows that overlap the name and the text beside it are checked.
+	left, right := "the pool for the", "refused every call"
+	c := corpusOf(`{"message":"` + left + " " + longServiceName + " " + right + `"}`)
+	c.AllowNames(longServiceName)
+	for name, summary := range map[string]string{
+		"both sides":  left + " " + longServiceName + " " + right,
+		"left only":   left + " " + longServiceName,
+		"right only":  longServiceName + " " + right,
+		"other case":  strings.ToUpper(left + " " + longServiceName + " " + right),
+		"punctuation": left + ", `" + longServiceName + "`; " + right,
+		"escaped":     left + ` \"` + longServiceName + `\" ` + right,
+	} {
+		if got, replaced := CheckSummary(summary, c); !replaced {
+			t.Errorf("%s: kept %q", name, got)
+		}
+	}
+	// The bare name alone, and in a sentence that is not in the log, passes.
+	for _, summary := range []string{longServiceName, "Only " + longServiceName + " is affected.", "`" + longServiceName + "`"} {
+		if got, replaced := CheckSummary(summary, c); replaced {
+			t.Errorf("%q refused: %q", summary, got)
+		}
+	}
+}
+
+func TestAllowNames_NameLengthsAtTheEdges(t *testing.T) {
+	for _, n := range []int{VerbatimRun - 1, VerbatimRun, VerbatimRun + 1, 128} {
+		name := strings.Repeat("svc-alpha-", 13)[:n]
+		name = strings.TrimSuffix(name, "-") + strings.Repeat("z", n-len(strings.TrimSuffix(name, "-")))
+		if len(name) != n {
+			t.Fatalf("setup %d", n)
+		}
+		c := corpusOf(`{"service":"` + name + `"}`)
+		c.AllowNames(name)
+		if got, replaced := CheckSummary("About "+name+" now.", c); replaced {
+			t.Errorf("%d characters: bare name refused: %q", n, got)
+		}
+		// One more character of the log's text beside the name makes a window that is not wholly inside it.
+		d := corpusOf(`{"message":"x ` + name + `"}`)
+		d.AllowNames(name)
+		if n >= VerbatimRun {
+			if _, replaced := CheckSummary("About x "+name+" now.", d); !replaced {
+				t.Errorf("%d characters: a copy with a neighbour passed", n)
+			}
+		}
+	}
+}
+
+func TestAllowNames_TwoLongNamesWithOneSpace(t *testing.T) {
+	second := "billing-invoice-renderer-queue-consumer-eu"
+	pair := longServiceName + " " + second
+	apart := corpusOf(`{"service":"` + longServiceName + `","cluster":"` + second + `"}`)
+	apart.AllowNames(longServiceName, second)
+	if got, replaced := CheckSummary(pair, apart); replaced {
+		t.Errorf("two names the logs held apart: refused %q", got)
+	}
+	joined := corpusOf(`{"message":"` + pair + `"}`)
+	joined.AllowNames(longServiceName, second)
+	if _, replaced := CheckSummary(pair, joined); !replaced {
+		t.Error("two names the logs held joined passed as a pair")
+	}
+	if got, replaced := CheckSummary(longServiceName+" and "+second, joined); replaced {
+		t.Errorf("the names apart in the summary: refused %q", got)
 	}
 }
