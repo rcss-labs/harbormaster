@@ -63,7 +63,7 @@ module "harbormaster_agent" {
   upstream_url       = local.base_url
 
   harbormaster_alb_security_group_id   = module.harbormaster.security_group_ids.alb
-  harbormaster_task_security_group_ids = [module.harbormaster.security_group_ids.web]
+  harbormaster_task_security_group_ids = [module.harbormaster.security_group_ids.web, module.harbormaster.security_group_ids.coordinator]
 
   # Prices and context sizes are the operator's to keep current.
   model_providers = [
