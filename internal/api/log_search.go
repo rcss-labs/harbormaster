@@ -103,9 +103,13 @@ var (
 	errSearchRateLimited = &APIError{Status: http.StatusTooManyRequests, Code: "rate_limited", Message: "You are searching too fast. Try again in a few seconds."}
 	errSearchRunning     = &APIError{Status: http.StatusConflict, Code: "conflict", Message: "You already have a log search running."}
 	errTokenSearchOff    = &APIError{Status: http.StatusForbidden, Code: "forbidden", Message: "Log search is turned off for access tokens."}
+	errAgentSearchOff    = &APIError{Status: http.StatusForbidden, Code: "forbidden", Message: "The AI agent's log search is turned off."}
 )
 
-const budgetExhaustedMessage = "Today's log search budget for access tokens is used up. It resets at 00:00 UTC."
+const (
+	budgetExhaustedMessage      = "Today's log search budget for access tokens is used up. It resets at 00:00 UTC."
+	agentBudgetExhaustedMessage = "The AI agent's log search budget for today is used up. It resets at 00:00 UTC."
+)
 
 // validLogSearchRange reports whether name is a range a log search or a saved search may use.
 // The saved-searches API calls it so both accept exactly the same values.
@@ -470,6 +474,10 @@ func (s *Server) reserveTokenLogScan(w http.ResponseWriter, r *http.Request, use
 		return tokenScanReservation{}, false
 	}
 	if state.DailyBytes == 0 {
+		if user.Kind == store.UserKindAgent {
+			s.fail(w, errAgentSearchOff)
+			return tokenScanReservation{}, false
+		}
 		s.fail(w, errTokenSearchOff)
 		return tokenScanReservation{}, false
 	}
@@ -482,7 +490,11 @@ func (s *Server) reserveTokenLogScan(w http.ResponseWriter, r *http.Request, use
 	if reserved <= 0 {
 		retry := max(int(state.ResetsAt.Sub(s.now()).Seconds()), 1)
 		w.Header().Set("Retry-After", strconv.Itoa(retry))
-		writeError(w, http.StatusTooManyRequests, "log_search_budget_exhausted", budgetExhaustedMessage)
+		message := budgetExhaustedMessage
+		if user.Kind == store.UserKindAgent {
+			message = agentBudgetExhaustedMessage
+		}
+		writeError(w, http.StatusTooManyRequests, "log_search_budget_exhausted", message)
 		return tokenScanReservation{}, false
 	}
 	return tokenScanReservation{bytes: reserved, day: day}, true

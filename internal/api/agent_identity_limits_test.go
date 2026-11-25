@@ -80,7 +80,7 @@ func TestTokenRequests_IdentityHasItsOwnBucket(t *testing.T) {
 	identity, _ := identityRunClient(t, env)
 	person := tokenClient(t, env.srv, env.st, "sam")
 
-	// A person with an empty bucket does not slow the identity.
+	// A person with an empty bucket does not slow the identity. (Holds by user id alone; kept as the pair of the check below.)
 	if drain(person, 300) == 0 {
 		t.Fatal("the person's token was never rate limited")
 	}
@@ -98,6 +98,9 @@ func TestTokenRequests_IdentityHasItsOwnBucket(t *testing.T) {
 	}
 	if resp := tokenClient(t, env.srv, env.st, "omer").get("/api/tokens/current"); resp.StatusCode != http.StatusOK {
 		t.Errorf("person while the identity's bucket is empty: status %d, want 200", resp.StatusCode)
+	}
+	if _, msg := errorCode(t, identity.get("/api/tokens/current")); msg != "Too many requests from the AI agent. Wait a moment and try again." {
+		t.Errorf("message %q, want it to name the AI agent, not access tokens", msg)
 	}
 }
 
@@ -124,6 +127,8 @@ func TestLogSearch_IdentityUsesItsOwnDailyBudget(t *testing.T) {
 	}
 	if r := identity.post("/api/log-search", searchReq(paymentsID())); r.StatusCode != http.StatusTooManyRequests {
 		t.Errorf("second identity search: status %d, want 429 with its day used up", r.StatusCode)
+	} else if _, msg := errorCode(t, r); msg != "The AI agent's log search budget for today is used up. It resets at 00:00 UTC." {
+		t.Errorf("message %q, want it to name the AI agent, not access tokens", msg)
 	}
 	// The identity's budget never changes a person's: sam still has the full cap.
 	var person tokenSearchBody
@@ -151,6 +156,9 @@ func TestLogSearch_IdentityDailyZeroRefuses(t *testing.T) {
 	resp := identity.post("/api/log-search", searchReq(paymentsID()))
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("identity search with its budget at 0: status %d, want 403", resp.StatusCode)
+	}
+	if _, msg := errorCode(t, resp); msg != "The AI agent's log search is turned off." {
+		t.Errorf("message %q, want it to name the AI agent, not access tokens", msg)
 	}
 	if used := usageOf(t, env, row.ID); used != 0 {
 		t.Errorf("identity ledger = %d, want nothing charged", used)
@@ -202,5 +210,73 @@ func TestWhoAmI_IdentityReportsItsBudget(t *testing.T) {
 	decode(t, tokenClient(t, env.srv, env.st, "sam").get("/api/tokens/current"), &person)
 	if person.LogSearch.DailyBytes != 20*gib || person.LogSearch.MaxBytesPerSearch != 2*gib {
 		t.Errorf("person log_search = %+v, want the token limits 20 GiB and 2 GiB", person.LogSearch)
+	}
+}
+
+func TestTokenBucketFor(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		kind      string
+		rate      int
+		bucket    string
+		burst     int
+		perSecond float64
+		ok        bool
+	}{
+		{"human", store.UserKindHuman, 5, rateAPIToken, apiTokenBurst, apiTokenPerSecond, true},
+		{"human ignores the identity's rate", store.UserKindHuman, 50, rateAPIToken, apiTokenBurst, apiTokenPerSecond, true},
+		{"agent rate 1", store.UserKindAgent, 1, rateAgentIdentity, 60, 1, true},
+		{"agent rate 5", store.UserKindAgent, 5, rateAgentIdentity, 300, 5, true},
+		{"agent rate 50", store.UserKindAgent, 50, rateAgentIdentity, 3000, 50, true},
+		{"agent rate unset", store.UserKindAgent, 0, rateAgentIdentity, 300, 5, true},
+		{"unknown kind", "robot", 5, "", 0, 0, false},
+		{"empty kind", "", 5, "", 0, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := config.Config{AgentIdentityRatePerSecond: tc.rate}
+			bucket, burst, perSecond, ok := tokenBucketFor(store.User{Kind: tc.kind}, cfg)
+			if bucket != tc.bucket || burst != tc.burst || perSecond != tc.perSecond || ok != tc.ok {
+				t.Errorf("tokenBucketFor = (%q, %d, %v, %v), want (%q, %d, %v, %v)",
+					bucket, burst, perSecond, ok, tc.bucket, tc.burst, tc.perSecond, tc.ok)
+			}
+		})
+	}
+}
+
+// An unknown kind gets neither the people's budget nor the agent's: no search may run for it.
+func TestTokenLogLimits_UnknownKindGetsNothing(t *testing.T) {
+	s := &Server{Cfg: config.Config{
+		TokenLogSearchMaxGB: 2, TokenLogSearchDailyGB: 20, LogSearchMaxGB: 10,
+		AgentIdentityLogSearchMaxGB: 3, AgentIdentityLogSearchDailyGB: 7,
+	}}
+	robot := store.User{Kind: "robot"}
+	if maxGB, dailyGB := s.tokenLogLimitsGB(robot); maxGB != 0 || dailyGB != 0 {
+		t.Errorf("tokenLogLimitsGB(robot) = %d, %d; want 0, 0", maxGB, dailyGB)
+	}
+	if got := s.tokenCapBytes(robot); got != 10*gib {
+		t.Errorf("tokenCapBytes(robot) = %d, want only the global cap, 10 GiB", got)
+	}
+	if maxGB, dailyGB := s.tokenLogLimitsGB(store.User{Kind: store.UserKindHuman}); maxGB != 2 || dailyGB != 20 {
+		t.Errorf("tokenLogLimitsGB(human) = %d, %d; want 2, 20", maxGB, dailyGB)
+	}
+	if maxGB, dailyGB := s.tokenLogLimitsGB(store.User{Kind: store.UserKindAgent}); maxGB != 3 || dailyGB != 7 {
+		t.Errorf("tokenLogLimitsGB(agent) = %d, %d; want 3, 7", maxGB, dailyGB)
+	}
+}
+
+func TestLogSearchEstimate_IdentityReportsItsBudget(t *testing.T) {
+	env := newTokenLogSearchEnv(t, withIdentityLimits(5, 3, 7, nil))
+	identity, _ := identityRunClient(t, env)
+	resp := identity.post("/api/log-search/estimate", searchReq(paymentsID()))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	var body LogSearchEstimateDTO
+	decode(t, resp, &body)
+	if body.ScanLimitBytes != 3*gib {
+		t.Errorf("scan_limit_bytes = %d, want the identity's 3 GiB", body.ScanLimitBytes)
+	}
+	if body.BudgetBytes == nil || *body.BudgetBytes != 7*gib || body.BudgetRemainingBytes == nil || *body.BudgetRemainingBytes != 7*gib {
+		t.Errorf("budget = %v, remaining = %v; want 7 GiB both", body.BudgetBytes, body.BudgetRemainingBytes)
 	}
 }

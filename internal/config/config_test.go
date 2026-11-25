@@ -1023,31 +1023,37 @@ func TestLoad_AgentIdentityLimitsValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.AgentIdentityRatePerSecond != 5 || cfg.AgentIdentityLogSearchMaxGB != 2 || cfg.AgentIdentityLogSearchDailyGB != 20 {
+	if cfg.AgentIdentityRatePerSecond != 5 || cfg.AgentIdentityLogSearchMaxGB != 2 ||
+		cfg.AgentIdentityLogSearchDailyGB != 20 {
 		t.Errorf("defaults = %d, %d, %d; want 5, 2, 20",
 			cfg.AgentIdentityRatePerSecond, cfg.AgentIdentityLogSearchMaxGB, cfg.AgentIdentityLogSearchDailyGB)
 	}
 
 	cfg, err = Load(tokenEnv(map[string]string{
-		"HM_AGENT_IDENTITY_RATE_PER_SECOND": "50", "HM_AGENT_IDENTITY_LOG_SEARCH_MAX_GB": "0", "HM_AGENT_IDENTITY_LOG_SEARCH_DAILY_GB": "0",
+		"HM_AGENT_IDENTITY_RATE_PER_SECOND": "50", "HM_AGENT_IDENTITY_LOG_SEARCH_MAX_GB": "0",
+		"HM_AGENT_IDENTITY_LOG_SEARCH_DAILY_GB": "0",
 	}))
 	if err != nil {
 		t.Fatalf("edge values: %v", err)
 	}
-	if cfg.AgentIdentityRatePerSecond != 50 || cfg.AgentIdentityLogSearchMaxGB != 0 || cfg.AgentIdentityLogSearchDailyGB != 0 {
+	if cfg.AgentIdentityRatePerSecond != 50 || cfg.AgentIdentityLogSearchMaxGB != 0 ||
+		cfg.AgentIdentityLogSearchDailyGB != 0 {
 		t.Errorf("edge values = %d, %d, %d; want 50, 0, 0",
 			cfg.AgentIdentityRatePerSecond, cfg.AgentIdentityLogSearchMaxGB, cfg.AgentIdentityLogSearchDailyGB)
 	}
-	if cfg, err = Load(tokenEnv(map[string]string{"HM_AGENT_IDENTITY_RATE_PER_SECOND": "1"})); err != nil || cfg.AgentIdentityRatePerSecond != 1 {
+	cfg, err = Load(tokenEnv(map[string]string{"HM_AGENT_IDENTITY_RATE_PER_SECOND": "1"}))
+	if err != nil || cfg.AgentIdentityRatePerSecond != 1 {
 		t.Errorf("rate 1: cfg %d, err %v; want 1 and no error", cfg.AgentIdentityRatePerSecond, err)
 	}
 
 	for name, tc := range map[string]struct{ key, value string }{
-		"rate zero":      {"HM_AGENT_IDENTITY_RATE_PER_SECOND", "0"},
-		"rate above 50":  {"HM_AGENT_IDENTITY_RATE_PER_SECOND", "51"},
-		"rate negative":  {"HM_AGENT_IDENTITY_RATE_PER_SECOND", "-1"},
-		"max negative":   {"HM_AGENT_IDENTITY_LOG_SEARCH_MAX_GB", "-1"},
-		"daily negative": {"HM_AGENT_IDENTITY_LOG_SEARCH_DAILY_GB", "-1"},
+		"rate zero":       {"HM_AGENT_IDENTITY_RATE_PER_SECOND", "0"},
+		"rate above 50":   {"HM_AGENT_IDENTITY_RATE_PER_SECOND", "51"},
+		"rate negative":   {"HM_AGENT_IDENTITY_RATE_PER_SECOND", "-1"},
+		"max negative":    {"HM_AGENT_IDENTITY_LOG_SEARCH_MAX_GB", "-1"},
+		"daily negative":  {"HM_AGENT_IDENTITY_LOG_SEARCH_DAILY_GB", "-1"},
+		"max too large":   {"HM_AGENT_IDENTITY_LOG_SEARCH_MAX_GB", "1000001"},
+		"daily too large": {"HM_AGENT_IDENTITY_LOG_SEARCH_DAILY_GB", "1000001"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := Load(tokenEnv(map[string]string{tc.key: tc.value}))
