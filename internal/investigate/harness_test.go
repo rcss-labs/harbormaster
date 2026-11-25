@@ -103,6 +103,16 @@ func (c *call) hold() bool {
 	}
 }
 
+// gate is a channel a script may wait on and what opens it. The end of the test opens it too, before the fake agent of
+// the fixture is closed: Close waits for its handlers, so a test that failed first would hang instead. Call it after
+// the fixture is made.
+func gate(t *testing.T) (opened <-chan struct{}, open func()) {
+	ch := make(chan struct{})
+	open = sync.OnceFunc(func() { close(ch) })
+	t.Cleanup(open)
+	return ch, open
+}
+
 func usage(cost int64) map[string]any {
 	return map[string]any{"type": "usage", "input_tokens": cost / 10, "output_tokens": cost / 100, "cost_micro_usd": cost}
 }
