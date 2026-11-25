@@ -241,3 +241,50 @@ func TestMigrate_0224GivesUpOnALock(t *testing.T) {
 		})
 	}
 }
+
+// ClaimReviewRun locks review runs and then reads investigations. A migration that locked the two tables the other way
+// round would deadlock with it (40P01), and either of them would be ended.
+func TestMigrate_0224LocksInTheOrderOfAClaim(t *testing.T) {
+	for label, held := range map[string]bool{"the claim ends": false, "the claim stays": true} {
+		t.Run(label, func(t *testing.T) {
+			s, ctx := storetest.Open(t), context.Background()
+			seedReviewRuns(t, s, invNow)
+			run := claimReview(t, s, invNow) // a running row, as the claim waits for
+			stepBackTo0223(t, s)
+			claim, err := s.Pool.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer claim.Rollback(ctx) //nolint:errcheck // ended below on the happy path
+			if tag, err := claim.Exec(ctx, `select 1 from agent_review_runs where state = 'running' order by id for update`); err != nil || tag.RowsAffected() != 1 {
+				t.Fatalf("run %d: %v rows, %v", run.ID, tag, err)
+			}
+			migrated := make(chan error, 1)
+			go func() { migrated <- apply0224(s) }()
+			deadline := time.Now().Add(1500 * time.Millisecond)
+			for waiting := false; !waiting; time.Sleep(5 * time.Millisecond) {
+				if time.Now().After(deadline) {
+					t.Fatal("the migration never waited for a lock")
+				}
+				if err := s.Pool.QueryRow(ctx, `select count(*) > 0 from pg_stat_activity where wait_event_type = 'Lock' and datname = current_database()
+					and query like '-- The ids of the clusters%'`).Scan(&waiting); err != nil {
+					t.Fatal(err)
+				}
+			}
+			readCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+			defer cancel()
+			if _, err := claim.Exec(readCtx, `select exists (select 1 from agent_investigations where state = 'requested')`); err != nil {
+				t.Fatalf("the claim's second read beside the waiting migration: %v", err)
+			}
+			if !held {
+				if err := claim.Commit(ctx); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err = <-migrated
+			if held && (err == nil || !strings.Contains(err.Error(), "55P03")) || !held && err != nil {
+				t.Errorf("held %v: the migration ended with %v", held, err)
+			}
+		})
+	}
+}

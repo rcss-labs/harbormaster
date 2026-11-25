@@ -105,7 +105,7 @@ Review rows still waiting in the delivery log are not sent by an older release, 
 
 This release adds migration `0223_agent_custom_reviews`: a fifth review type, `custom`, a text column on reviews and on their runs, and a test flag on runs. It adds a setting, `HM_AGENT_CUSTOM_REVIEWS`, off by default. Nothing changes for users until the operator turns it on and an admin writes a custom review. The text sent for the four built-in types is the same bytes as before.
 
-**Migration 0224 takes a short exclusive lock** on the investigations and the review runs, with the same 2 second lock timeout and the same retry at the next start. It adds a column for the ids of the services and clusters a stored summary names.
+**Migration 0224 takes a short exclusive lock** on the review runs and then on the investigations, with a lock timeout of 2 seconds for each, so the wait can come to about 4 seconds in all. If it times out (`55P03`), or the database ends it as one side of a deadlock (`40P01`), it rolls back whole and is tried again at the next start, as described below for 0223. It adds a column for the ids of the services and clusters a stored summary names.
 
 **Migration 0223 takes a short exclusive lock** on the review tables, with a lock timeout of 2 seconds, for the reason given for 0220 above. If a long transaction holds one of them at that moment, the migration times out and rolls back whole, the task exits at start, and ECS starts another that tries again. Find and end the long transaction as described above if tasks keep exiting at start with a lock timeout in their log.
 
