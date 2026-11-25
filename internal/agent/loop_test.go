@@ -13,6 +13,7 @@ import (
 
 	"github.com/rcss-labs/harbormaster/internal/agent/provider"
 	"github.com/rcss-labs/harbormaster/internal/agent/provider/fake"
+	"github.com/rcss-labs/harbormaster/internal/model"
 )
 
 // testModel prices input at 3 micro-dollars and output at 15 per token.
@@ -708,5 +709,37 @@ func TestLoop_CancelStopsPromptly(t *testing.T) {
 		if e.Type == "done" || e.Type == "error" {
 			t.Errorf("a cancelled run emitted %s", e.Type)
 		}
+	}
+}
+
+// The model needs the opaque ids in a list result to name a service in its next call.
+func TestLoop_ServiceIDInAListResultReachesTheNextCall(t *testing.T) {
+	id := model.ServiceKey{
+		ClusterKey: model.ClusterKey{AccountID: "123456789012", Region: "eu-west-1", Cluster: "prod-cluster"},
+		Service:    "checkout-api",
+	}.ID()
+	list := `{"services":[{"id":"` + id + `","name":"checkout-api","status":"ACTIVE"}]}`
+	runner := &recordingRunner{reply: func(name string) (string, bool) {
+		if name == "list_services" {
+			return list, false
+		}
+		return `{"revisions":[]}`, false
+	}}
+	p := fake.New(
+		fake.ToolCalls(provider.Usage{InputTokens: 10, OutputTokens: 5}, provider.ToolCall{ID: "c1", Name: "list_services", Arguments: map[string]any{}}),
+		fake.ToolCalls(provider.Usage{InputTokens: 10, OutputTokens: 5}, provider.ToolCall{ID: "c2", Name: "list_revisions", Arguments: map[string]any{"service_id": id}}),
+		fake.Text("Done.", provider.Usage{InputTokens: 10, OutputTokens: 5}),
+	)
+	if _, err := run(t, newLoop(p, runner), baseInput()); err != nil {
+		t.Fatal(err)
+	}
+	reqs := p.Requests()
+	seen := reqs[1].Messages[len(reqs[1].Messages)-1].Text
+	if !strings.Contains(seen, id) {
+		t.Errorf("the model was not shown the service id: %.300s", seen)
+	}
+	calls := runner.Calls()
+	if len(calls) != 2 || calls[1].Name != "list_revisions" || calls[1].Args["service_id"] != id {
+		t.Errorf("runner calls = %+v, want the second to carry the service id", calls)
 	}
 }
