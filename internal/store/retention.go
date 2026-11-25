@@ -104,7 +104,7 @@ func (s *Store) RunRetention(ctx context.Context, now time.Time, r Retention) (R
 	}
 
 	if r.AgentRuns > 0 {
-		n, err := s.DeleteInvestigationsBefore(ctx, now.Add(-r.AgentRuns))
+		n, err := s.DeleteInvestigationsBefore(ctx, now.Add(-r.AgentRuns), now)
 		if err != nil {
 			return result, fmt.Errorf("retention agent_investigations: %w", err)
 		}

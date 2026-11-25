@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -38,6 +39,29 @@ const (
 	maxInvestigationSummary  = 1200
 )
 
+// minInvestigationRetention is the youngest a settled investigation can be and still be deleted, whatever the
+// configured retention (the config refuses a shorter non-zero value; this is the same floor for a direct caller).
+const minInvestigationRetention = 48 * time.Hour
+
+// ErrInvestigationText is returned, before any SQL runs, for a text field that is not valid UTF-8, holds a NUL
+// byte, or is longer than its cap.
+var ErrInvestigationText = errors.New("investigation text refused")
+
+// Claim is the fence of one claim. ClaimInvestigation returns it; every later write by the holder (start, renew,
+// release, finish, skip) must carry it. A row whose attempt or claim_seq differs, or that is not running, gives
+// ErrConflict and nothing is written, so a holder that was paused past its lease cannot touch the row a newer holder
+// owns, even when a free release reused the same attempt number.
+type Claim struct {
+	InvestigationID int64
+	Attempt         int
+	Seq             int64
+}
+
+// Claim returns the fence of the claim that produced v.
+func (v Investigation) Claim() Claim {
+	return Claim{InvestigationID: v.ID, Attempt: v.Attempts, Seq: v.ClaimSeq}
+}
+
 // InvestigationMember is one service of a group investigation, as it was when the group was requested.
 type InvestigationMember struct {
 	Cluster string `json:"cluster"`
@@ -54,6 +78,7 @@ type Investigation struct {
 	AlertOpenedAt                               time.Time
 	State, Reason                               string
 	Attempts                                    int
+	ClaimSeq                                    int64
 	// ClaimedUntil is the lease while running, and the earliest retry time while requested.
 	ClaimedUntil          *time.Time
 	RunID                 *uuid.UUID
@@ -96,7 +121,7 @@ type InvestigationKey struct {
 }
 
 const investigationColumnNames = `id, subject_kind, subject_key, account_id, region, cluster_name, service_name, members,
-	alert_kind, alert_title, alert_text, alert_opened_at, state, reason, attempts, claimed_until, run_id, provider, model,
+	alert_kind, alert_title, alert_text, alert_opened_at, state, reason, attempts, claim_seq, claimed_until, run_id, provider, model,
 	summary, summary_replaced, evidence_dropped, requested_at, started_at, finished_at`
 
 var investigationColumns = investigationColumnList("")
@@ -109,13 +134,16 @@ func investigationColumnList(prefix string) string {
 	return strings.Join(names, ", ")
 }
 
-func scanInvestigation(row pgx.Row) (Investigation, error) {
+func scanInvestigation(row pgx.Row) (Investigation, error) { return scanInvestigationWith(row) }
+
+// scanInvestigationWith scans the investigation columns after any leading destinations.
+func scanInvestigationWith(row pgx.Row, lead ...any) (Investigation, error) {
 	var v Investigation
 	var members []byte
-	err := row.Scan(&v.ID, &v.SubjectKind, &v.SubjectKey, &v.AccountID, &v.Region, &v.ClusterName, &v.ServiceName, &members,
-		&v.AlertKind, &v.AlertTitle, &v.AlertText, &v.AlertOpenedAt, &v.State, &v.Reason, &v.Attempts, &v.ClaimedUntil, &v.RunID,
+	dest := append(lead, &v.ID, &v.SubjectKind, &v.SubjectKey, &v.AccountID, &v.Region, &v.ClusterName, &v.ServiceName, &members,
+		&v.AlertKind, &v.AlertTitle, &v.AlertText, &v.AlertOpenedAt, &v.State, &v.Reason, &v.Attempts, &v.ClaimSeq, &v.ClaimedUntil, &v.RunID,
 		&v.Provider, &v.Model, &v.Summary, &v.SummaryReplaced, &v.EvidenceDropped, &v.RequestedAt, &v.StartedAt, &v.FinishedAt)
-	if err != nil {
+	if err := row.Scan(dest...); err != nil {
 		return Investigation{}, err
 	}
 	if err := json.Unmarshal(members, &v.Members); err != nil {
@@ -267,45 +295,83 @@ func investigationMembers(subjectKind string, raw []byte) ([]byte, error) {
 	return json.Marshal(out)
 }
 
-// ClaimInvestigation leases the oldest due investigation to the caller: one that is requested with no retry time or
-// a past one, or running with an expired lease and an attempt left. It returns ErrNotFound when nothing is due. A row
-// that has no attempt left (a lease that expired on the last attempt, or a release that used it) is failed as
-// interrupted here and not returned.
-func (s *Store) ClaimInvestigation(ctx context.Context, now time.Time, lease time.Duration) (Investigation, error) {
-	if _, err := s.Pool.Exec(ctx, `update agent_investigations set state = 'failed', reason = 'interrupted', finished_at = $1, claimed_until = null
-		where id in (select id from agent_investigations
-		  where state in ('requested', 'running') and attempts >= $2 and coalesce(claimed_until, '-infinity') <= $1
-		  for update skip locked)`, now, maxInvestigationAttempts); err != nil {
-		return Investigation{}, fmt.Errorf("claim investigation: fail interrupted: %w", err)
+// checkInvestigationText is the one text rule for every field a holder supplies: valid UTF-8, no NUL, at most
+// maxRunes characters and maxBytes bytes (0 = no byte cap).
+func checkInvestigationText(field, text string, maxRunes, maxBytes int) error {
+	switch {
+	case !utf8.ValidString(text):
+		return fmt.Errorf("%w: %s is not valid UTF-8", ErrInvestigationText, field)
+	case strings.ContainsRune(text, 0):
+		return fmt.Errorf("%w: %s has a NUL byte", ErrInvestigationText, field)
+	case utf8.RuneCountInString(text) > maxRunes:
+		return fmt.Errorf("%w: %s is longer than %d characters", ErrInvestigationText, field, maxRunes)
+	case maxBytes > 0 && len(text) > maxBytes:
+		return fmt.Errorf("%w: %s is longer than %d bytes", ErrInvestigationText, field, maxBytes)
 	}
-	v, err := scanInvestigation(s.Pool.QueryRow(ctx, `update agent_investigations set state = 'running', attempts = attempts + 1, claimed_until = $2
-		where id = (select id from agent_investigations
-		  where attempts < $3 and (
-		    (state = 'requested' and (claimed_until is null or claimed_until <= $1))
-		    or (state = 'running' and claimed_until <= $1))
-		  order by requested_at, id limit 1 for update skip locked)
-		returning `+investigationColumns, now, now.Add(lease), maxInvestigationAttempts))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return Investigation{}, ErrNotFound
-	}
-	if err != nil {
-		return Investigation{}, fmt.Errorf("claim investigation: %w", err)
-	}
-	return v, nil
+	return nil
 }
 
-// StartInvestigationRun records the agent run of the claimed attempt. ErrConflict when the row is not running at
-// that attempt.
-func (s *Store) StartInvestigationRun(ctx context.Context, id int64, attempt int, runID uuid.UUID, provider, model string) error {
-	tag, err := s.Pool.Exec(ctx, `update agent_investigations set run_id = $3, provider = $4, model = $5, started_at = now()
-		where id = $1 and state = 'running' and attempts = $2`, id, attempt, runID, provider, model)
+// fencedInvestigation is the predicate every holder write carries: $1 id, $2 attempt, $3 claim_seq.
+const fencedInvestigation = `id = $1 and state = 'running' and attempts = $2 and claim_seq = $3`
+
+// ClaimInvestigation leases the oldest due investigation to the caller: one that is requested with no retry time or
+// a past one, or running with an expired lease. It returns ErrNotFound when nothing is due. One statement either
+// claims the row or, when it has no attempt left (a lease that expired on the last attempt, or a release that used
+// it), fails it as interrupted; a failed row is not returned and the next due row is tried.
+func (s *Store) ClaimInvestigation(ctx context.Context, now time.Time, lease time.Duration) (Investigation, Claim, error) {
+	for {
+		v, err := scanInvestigation(s.Pool.QueryRow(ctx, `update agent_investigations set
+			state = case when attempts < $3 then 'running' else 'failed' end,
+			reason = case when attempts < $3 then reason else 'interrupted' end,
+			finished_at = case when attempts < $3 then finished_at else $1::timestamptz end,
+			attempts = case when attempts < $3 then attempts + 1 else attempts end,
+			claim_seq = case when attempts < $3 then claim_seq + 1 else claim_seq end,
+			claimed_until = case when attempts < $3 then $2::timestamptz else null end
+			where id = (select id from agent_investigations
+			  where (state = 'requested' and (claimed_until is null or claimed_until <= $1))
+			     or (state = 'running' and claimed_until <= $1)
+			  order by requested_at, id limit 1 for update skip locked)
+			returning `+investigationColumns, now, now.Add(lease), maxInvestigationAttempts))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Investigation{}, Claim{}, ErrNotFound
+		}
+		if err != nil {
+			return Investigation{}, Claim{}, fmt.Errorf("claim investigation: %w", err)
+		}
+		if v.State == InvestigationFailed {
+			continue
+		}
+		return v, v.Claim(), nil
+	}
+}
+
+// fencedUpdate runs an update whose where clause is fencedInvestigation and maps no rows to ErrConflict.
+func (s *Store) fencedUpdate(ctx context.Context, what string, c Claim, setSQL string, args ...any) error {
+	all := append([]any{c.InvestigationID, c.Attempt, c.Seq}, args...)
+	tag, err := s.Pool.Exec(ctx, `update agent_investigations set `+setSQL+` where `+fencedInvestigation, all...)
 	if err != nil {
-		return fmt.Errorf("start investigation run: %w", err)
+		return fmt.Errorf("%s: %w", what, err)
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrConflict
 	}
 	return nil
+}
+
+// StartInvestigationRun records the agent run of the claimed attempt at now. ErrConflict when the claim is stale.
+func (s *Store) StartInvestigationRun(ctx context.Context, c Claim, runID uuid.UUID, provider, model string, now time.Time) error {
+	if err := checkInvestigationText("provider", provider, 200, 0); err != nil {
+		return err
+	}
+	if err := checkInvestigationText("model", model, 200, 0); err != nil {
+		return err
+	}
+	return s.fencedUpdate(ctx, "start investigation run", c, `run_id = $4, provider = $5, model = $6, started_at = $7`, runID, provider, model, now)
+}
+
+// RenewInvestigation extends the lease of a claim to now + lease. ErrConflict when the claim is stale.
+func (s *Store) RenewInvestigation(ctx context.Context, c Claim, now time.Time, lease time.Duration) error {
+	return s.fencedUpdate(ctx, "renew investigation", c, `claimed_until = $4`, now.Add(lease))
 }
 
 func validateInvestigationResult(state string, r *InvestigationResult) error {
@@ -318,8 +384,8 @@ func validateInvestigationResult(state string, r *InvestigationResult) error {
 	if state == InvestigationDone && strings.TrimSpace(r.Summary) == "" {
 		return errors.New("finish investigation: a done investigation needs a summary")
 	}
-	if len([]rune(r.Summary)) > maxInvestigationSummary {
-		return errors.New("finish investigation: summary is too long")
+	if err := checkInvestigationText("summary", r.Summary, maxInvestigationSummary, 0); err != nil {
+		return err
 	}
 	if len(r.Evidence) > maxInvestigationEvidence {
 		return fmt.Errorf("finish investigation: %d evidence items, at most %d", len(r.Evidence), maxInvestigationEvidence)
@@ -336,25 +402,30 @@ func validateInvestigationResult(state string, r *InvestigationResult) error {
 		if e.Tool == "" || e.AccountID == "" || e.Region == "" || e.ClusterName == "" || e.ServiceName == "" {
 			return fmt.Errorf("finish investigation: evidence %d has no tool or service", i+1)
 		}
-		if len(e.Excerpt) > maxEvidenceExcerptBytes {
-			return fmt.Errorf("finish investigation: evidence %d excerpt is %d bytes, at most %d", i+1, len(e.Excerpt), maxEvidenceExcerptBytes)
+		for field, text := range map[string]string{"tool": e.Tool, "account": e.AccountID, "region": e.Region, "cluster": e.ClusterName, "service": e.ServiceName} {
+			if err := checkInvestigationText(fmt.Sprintf("evidence %d %s", i+1, field), text, 255, 0); err != nil {
+				return err
+			}
 		}
-		if len([]rune(e.Note)) > maxEvidenceNoteRunes {
-			return fmt.Errorf("finish investigation: evidence %d note is too long", i+1)
+		if err := checkInvestigationText(fmt.Sprintf("evidence %d note", i+1), e.Note, maxEvidenceNoteRunes, 0); err != nil {
+			return err
 		}
-		if strings.ContainsRune(e.Excerpt, 0) || strings.ContainsRune(e.Note, 0) {
-			return fmt.Errorf("finish investigation: evidence %d has a NUL byte", i+1)
+		if err := checkInvestigationText(fmt.Sprintf("evidence %d excerpt", i+1), e.Excerpt, maxEvidenceExcerptBytes, maxEvidenceExcerptBytes); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-// FinishInvestigation settles the claimed attempt as done or failed, writes the result and replaces the evidence in
-// one transaction, and clears the lease. ErrConflict when the row is not running at that attempt (a newer holder
-// owns it), and then nothing is written. A refused result is an error and nothing is written either.
-func (s *Store) FinishInvestigation(ctx context.Context, id int64, attempt int, state, reason string, result *InvestigationResult, now time.Time) error {
+// FinishInvestigation settles the claimed attempt as done (no reason) or failed (a fixed reason), writes the result
+// and replaces the evidence in one transaction, and clears the lease. ErrConflict when the claim is stale, and then
+// nothing is written. A refused result is an error and nothing is written either.
+func (s *Store) FinishInvestigation(ctx context.Context, c Claim, state, reason string, result *InvestigationResult, now time.Time) error {
 	switch state {
 	case InvestigationDone:
+		if reason != "" {
+			return fmt.Errorf("finish investigation: a done investigation has no reason, got %q", reason)
+		}
 	case InvestigationFailed:
 		if !investigationReasons[reason] {
 			return fmt.Errorf("finish investigation: unknown reason %q", reason)
@@ -373,24 +444,24 @@ func (s *Store) FinishInvestigation(ctx context.Context, id int64, attempt int, 
 		return fmt.Errorf("finish investigation: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // no-op after commit
-	tag, err := tx.Exec(ctx, `update agent_investigations set state = $3, reason = $4, summary = $5, summary_replaced = $6,
-		evidence_dropped = $7, finished_at = $8, claimed_until = null
-		where id = $1 and state = 'running' and attempts = $2`,
-		id, attempt, state, reason, result.Summary, result.SummaryReplaced, result.EvidenceDropped, now)
+	tag, err := tx.Exec(ctx, `update agent_investigations set state = $4, reason = $5, summary = $6, summary_replaced = $7,
+		evidence_dropped = $8, finished_at = $9, claimed_until = null
+		where `+fencedInvestigation,
+		c.InvestigationID, c.Attempt, c.Seq, state, reason, result.Summary, result.SummaryReplaced, result.EvidenceDropped, now)
 	if err != nil {
 		return fmt.Errorf("finish investigation: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrConflict
 	}
-	if _, err := tx.Exec(ctx, `delete from agent_investigation_evidence where investigation_id = $1`, id); err != nil {
+	if _, err := tx.Exec(ctx, `delete from agent_investigation_evidence where investigation_id = $1`, c.InvestigationID); err != nil {
 		return fmt.Errorf("finish investigation: clear evidence: %w", err)
 	}
 	for i, e := range result.Evidence {
 		if _, err := tx.Exec(ctx, `insert into agent_investigation_evidence
 			(investigation_id, ordinal, tool, action, account_id, region, cluster_name, service_name, note, excerpt)
 			values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-			id, i+1, e.Tool, e.Action, e.AccountID, e.Region, e.ClusterName, e.ServiceName, e.Note, e.Excerpt); err != nil {
+			c.InvestigationID, i+1, e.Tool, e.Action, e.AccountID, e.Region, e.ClusterName, e.ServiceName, e.Note, e.Excerpt); err != nil {
 			return fmt.Errorf("finish investigation: store evidence: %w", err)
 		}
 	}
@@ -401,46 +472,33 @@ func (s *Store) FinishInvestigation(ctx context.Context, id int64, attempt int, 
 }
 
 // ReleaseInvestigation hands a claimed attempt back to the queue, to be claimed again from retryAt (zero: at once).
-// countAttempt false gives the attempt back, for a run that never started. ErrConflict when the row is not running
-// at that attempt.
-func (s *Store) ReleaseInvestigation(ctx context.Context, id int64, attempt int, retryAt time.Time, countAttempt bool) error {
+// countAttempt false gives the attempt back, for a run that never started; when that returns the row to no attempts
+// started_at is cleared too (run_id stays, so the orphaned run can still be ended), so the hourly count does not
+// include it. ErrConflict when the claim is stale.
+func (s *Store) ReleaseInvestigation(ctx context.Context, c Claim, retryAt time.Time, countAttempt bool) error {
 	var retry *time.Time
 	if !retryAt.IsZero() {
 		retry = &retryAt
 	}
-	tag, err := s.Pool.Exec(ctx, `update agent_investigations set state = 'requested', claimed_until = $3,
-		attempts = case when $4 then attempts else attempts - 1 end
-		where id = $1 and state = 'running' and attempts = $2`, id, attempt, retry, countAttempt)
-	if err != nil {
-		return fmt.Errorf("release investigation: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrConflict
-	}
-	return nil
+	return s.fencedUpdate(ctx, "release investigation", c, `state = 'requested', claimed_until = $4,
+		started_at = case when $5 or attempts > 1 then started_at else null end,
+		attempts = case when $5 then attempts else attempts - 1 end`, retry, countAttempt)
 }
 
-// SkipInvestigation ends a requested or running investigation without a result. ErrNotFound for a missing row,
-// ErrConflict for one that is already settled.
-func (s *Store) SkipInvestigation(ctx context.Context, id int64, reason string, now time.Time) error {
+// SkipInvestigation ends a running investigation without a result, for a claim the caller holds. Nothing in the
+// investigator skips a row it has not claimed (it claims, then decides), so a never-claimed requested row has no
+// skip path. ErrConflict when the claim is stale.
+func (s *Store) SkipInvestigation(ctx context.Context, c Claim, reason string, now time.Time) error {
 	if !investigationReasons[reason] {
 		return fmt.Errorf("skip investigation: unknown reason %q", reason)
 	}
-	tag, err := s.Pool.Exec(ctx, `update agent_investigations set state = 'skipped', reason = $2, finished_at = $3, claimed_until = null
-		where id = $1 and state in ('requested', 'running')`, id, reason, now)
-	if err != nil {
-		return fmt.Errorf("skip investigation: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		if _, err := s.GetInvestigation(ctx, id); err != nil {
-			return err
-		}
-		return ErrConflict
-	}
-	return nil
+	return s.fencedUpdate(ctx, "skip investigation", c, `state = 'skipped', reason = $4, finished_at = $5, claimed_until = null`, reason, now)
 }
 
-// InvestigationsStartedSince counts investigations whose latest run started at or after since; the hourly cap reads it.
+// InvestigationsStartedSince counts investigations whose latest run started at or after since; the hourly cap reads
+// it. The count and the start that follows are separate statements, so holders that check at the same moment can
+// each start one run: the cap can overshoot by up to the number of concurrent holders. A free release clears
+// started_at, so a run that never began is not counted.
 func (s *Store) InvestigationsStartedSince(ctx context.Context, since time.Time) (int, error) {
 	var n int
 	if err := s.Pool.QueryRow(ctx, `select count(*) from agent_investigations where started_at >= $1`, since).Scan(&n); err != nil {
@@ -545,15 +603,9 @@ func (s *Store) InvestigationsForOpenIncidents(ctx context.Context, keys []model
 	defer rows.Close()
 	for rows.Next() {
 		var kind string
-		var v Investigation
-		var members []byte
-		if err := rows.Scan(&kind, &v.ID, &v.SubjectKind, &v.SubjectKey, &v.AccountID, &v.Region, &v.ClusterName, &v.ServiceName, &members,
-			&v.AlertKind, &v.AlertTitle, &v.AlertText, &v.AlertOpenedAt, &v.State, &v.Reason, &v.Attempts, &v.ClaimedUntil, &v.RunID,
-			&v.Provider, &v.Model, &v.Summary, &v.SummaryReplaced, &v.EvidenceDropped, &v.RequestedAt, &v.StartedAt, &v.FinishedAt); err != nil {
+		v, err := scanInvestigationWith(rows, &kind)
+		if err != nil {
 			return nil, fmt.Errorf("investigations for open incidents: %w", err)
-		}
-		if err := json.Unmarshal(members, &v.Members); err != nil {
-			return nil, fmt.Errorf("decode investigation members: %w", err)
 		}
 		key := InvestigationKey{ServiceKey: model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: v.AccountID, Region: v.Region, Cluster: v.ClusterName}, Service: v.ServiceName}, Kind: kind}
 		out[key] = v
@@ -561,10 +613,15 @@ func (s *Store) InvestigationsForOpenIncidents(ctx context.Context, keys []model
 	return out, rows.Err()
 }
 
-// DeleteInvestigationsBefore removes investigations settled (or, if never settled, requested) before t. Their
-// evidence and incident links cascade.
-func (s *Store) DeleteInvestigationsBefore(ctx context.Context, t time.Time) (int64, error) {
-	tag, err := s.Pool.Exec(ctx, `delete from agent_investigations where coalesce(finished_at, requested_at) < $1`, t)
+// DeleteInvestigationsBefore removes settled (done, failed, skipped) investigations finished before t, and never one
+// that finished less than 48 hours before now, whatever t is. A requested or running row is never removed here. Their
+// evidence and incident links cascade. The finished_at index serves the query.
+func (s *Store) DeleteInvestigationsBefore(ctx context.Context, t, now time.Time) (int64, error) {
+	if floor := now.Add(-minInvestigationRetention); t.After(floor) {
+		t = floor
+	}
+	tag, err := s.Pool.Exec(ctx, `delete from agent_investigations
+		where state in ('done', 'failed', 'skipped') and finished_at < $1`, t)
 	if err != nil {
 		return 0, fmt.Errorf("delete investigations: %w", err)
 	}
@@ -573,10 +630,11 @@ func (s *Store) DeleteInvestigationsBefore(ctx context.Context, t time.Time) (in
 
 // DeleteAgentRunsBefore removes finished runs that started before both cutoff and monthStart. A run that is running,
 // or finished but not yet audited (the reconciler still reads it), and every run of the current month stay, so the
-// month's spend never shrinks. A zero monthStart deletes nothing.
+// month's spend never shrinks. The month start is moved back an hour, so a run at the boundary stays. A zero
+// monthStart deletes nothing.
 func (s *Store) DeleteAgentRunsBefore(ctx context.Context, cutoff, monthStart time.Time) (int64, error) {
 	tag, err := s.Pool.Exec(ctx, `delete from agent_runs
-		where state <> 'running' and audited_at is not null and started_at < $1 and started_at < $2`, cutoff, monthStart)
+		where state <> 'running' and audited_at is not null and started_at < $1 and started_at < $2`, cutoff, monthStart.Add(-time.Hour))
 	if err != nil {
 		return 0, fmt.Errorf("delete agent runs: %w", err)
 	}

@@ -61,6 +61,9 @@ type RetentionConfig struct {
 	AgentRuns time.Duration
 }
 
+// MinAgentRunsRetention is the shortest non-zero HM_RETENTION_AGENT_RUNS; the store enforces the same floor.
+const MinAgentRunsRetention = 48 * time.Hour
+
 // AnalyticsConfig toggles optional analytics collection.
 type AnalyticsConfig struct {
 	// Util enables the daily CloudWatch utilisation rollup (one GetMetricData batch per account and region a day).
@@ -435,6 +438,10 @@ func Load(getenv func(string) string) (Config, error) {
 		},
 	}
 
+	// A short retention would delete the audit trail of investigations an operator may still be reading.
+	if d := cfg.Retention.AgentRuns; d != 0 && d < MinAgentRunsRetention {
+		reader.fail("HM_RETENTION_AGENT_RUNS", "%s is too short: use 0 to keep everything or at least %s", d, MinAgentRunsRetention)
+	}
 	if reader.err != nil {
 		return Config{}, reader.err
 	}

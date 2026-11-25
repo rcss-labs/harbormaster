@@ -85,8 +85,8 @@ func TestRetention_PrunesOldInvestigations(t *testing.T) {
 	}
 	st := storetest.Open(t)
 	ctx := context.Background()
-	if _, err := st.Pool.Exec(ctx, `insert into agent_investigations (subject_kind, subject_key, account_id, alert_kind, alert_title, alert_text, alert_opened_at, requested_at)
-		values ('service', 'service/a/r/c/s', 'a', 'k', 't', 'x', now(), now() - interval '3 days')`); err != nil {
+	if _, err := st.Pool.Exec(ctx, `insert into agent_investigations (subject_kind, subject_key, account_id, alert_kind, alert_title, alert_text, alert_opened_at, requested_at, state, finished_at)
+		values ('service', 'service/a/r/c/s', 'a', 'k', 't', 'x', now(), now() - interval '9 days', 'failed', now() - interval '8 days')`); err != nil {
 		t.Fatal(err)
 	}
 	res, err := st.RunRetention(ctx, time.Now(), r)

@@ -1035,3 +1035,18 @@ func TestLoad_RetentionAgentRuns(t *testing.T) {
 		t.Errorf("Retention.AgentRuns = %v, want 48h", cfg.Retention.AgentRuns)
 	}
 }
+
+func TestLoad_RetentionAgentRunsRefusesAShortValue(t *testing.T) {
+	for _, tc := range []struct {
+		raw   string
+		valid bool
+	}{{"1h", false}, {"47h59m", false}, {"1ns", false}, {"-48h", false}, {"48h", true}, {"0", true}, {"2160h", true}} {
+		_, err := Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example", "HM_RETENTION_AGENT_RUNS": tc.raw}))
+		if (err == nil) != tc.valid {
+			t.Errorf("HM_RETENTION_AGENT_RUNS=%s: err = %v, want valid = %v", tc.raw, err, tc.valid)
+		}
+		if err != nil && !strings.Contains(err.Error(), "HM_RETENTION_AGENT_RUNS") {
+			t.Errorf("HM_RETENTION_AGENT_RUNS=%s: message %q does not name the variable", tc.raw, err)
+		}
+	}
+}

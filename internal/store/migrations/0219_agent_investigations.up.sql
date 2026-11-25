@@ -22,6 +22,7 @@ create table agent_investigations (
   reason text not null default '',
   attempts int not null default 0 check (attempts between 0 and 2),
   claimed_until timestamptz,                      -- lease while running; retry time while requested
+  claim_seq bigint not null default 0,            -- +1 on every claim: the fence every write by a holder carries
   run_id uuid,                                    -- latest attempt; no foreign key, runs are deleted separately
   provider text not null default '',
   model text not null default '',
@@ -36,6 +37,8 @@ create index agent_investigations_subject_idx on agent_investigations (subject_k
 create index agent_investigations_service_idx on agent_investigations (account_id, region, cluster_name, service_name, requested_at desc);
 create index agent_investigations_open_idx on agent_investigations (requested_at) where state in ('requested', 'running');
 create index agent_investigations_finished_idx on agent_investigations (finished_at);
+create index agent_investigations_list_idx on agent_investigations (requested_at desc, id desc);
+create index agent_investigations_started_idx on agent_investigations (started_at) where started_at is not null;
 
 -- An incident joins at most one investigation. Deleting either side removes only the link.
 create table agent_investigation_incidents (
