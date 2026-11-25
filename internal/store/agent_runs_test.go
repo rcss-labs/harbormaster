@@ -549,3 +549,120 @@ func TestSettleAgentRun_FiguresAndStateAreOneWrite(t *testing.T) {
 		t.Errorf("run = %s cost %d, want it untouched", state, cost)
 	}
 }
+
+func TestReserveLeaving_RefusesWhenTheRoomAfterwardsIsTooSmall(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	setBudget(t, st, 100)
+	refused := agentRun(40)
+	if err := st.ReserveAgentRunLeaving(ctx, refused, 70, time.Hour, agentNow); !errors.Is(err, store.ErrBudgetExhausted) {
+		t.Fatalf("leave 70 = %v, want ErrBudgetExhausted", err)
+	}
+	var n int
+	if err := st.Pool.QueryRow(ctx, `select count(*) from agent_runs where id = $1`, refused.ID).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("refused run was written: %d, %v", n, err)
+	}
+	ok := agentRun(40)
+	if err := st.ReserveAgentRunLeaving(ctx, ok, 60, time.Hour, agentNow); err != nil {
+		t.Fatalf("leave 60: %v", err)
+	}
+	var held int64
+	if err := st.Pool.QueryRow(ctx, `select reserved_micro_usd from agent_runs where id = $1`, ok.ID).Scan(&held); err != nil || held != 40 {
+		t.Fatalf("row holds %d, %v; want the request, 40", held, err)
+	}
+	if _, reserved, err := st.AgentSpend(ctx, agentNow); err != nil || reserved != 40 {
+		t.Fatalf("reserved = %d, %v; the leave must not be held", reserved, err)
+	}
+}
+
+func TestReserveLeaving_ZeroLeaveIsReserve(t *testing.T) {
+	type step struct {
+		request int64
+		want    bool
+	}
+	for name, tc := range map[string]struct {
+		budget int64
+		steps  []step
+	}{
+		"exactly the budget":       {1000, []step{{1000, true}}},
+		"one over the budget":      {1000, []step{{1001, false}}},
+		"second fits the room":     {1000, []step{{600, true}, {400, true}}},
+		"second is one too many":   {1000, []step{{600, true}, {401, false}}},
+		"budget 0 refuses free":    {0, []step{{0, false}}},
+		"free run with a budget":   {1, []step{{0, true}}},
+		"refusal keeps the room":   {1000, []step{{1001, false}, {1000, true}}},
+		"refused then a small fit": {500, []step{{501, false}, {500, true}, {1, false}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			for _, viaLeaving := range []bool{false, true} {
+				st := storetest.Open(t)
+				setBudget(t, st, tc.budget)
+				for i, s := range tc.steps {
+					var err error
+					if viaLeaving {
+						err = st.ReserveAgentRunLeaving(t.Context(), agentRun(s.request), 0, time.Hour, agentNow)
+					} else {
+						err = st.ReserveAgentRun(t.Context(), agentRun(s.request), time.Hour, agentNow)
+					}
+					if s.want && err != nil || !s.want && !errors.Is(err, store.ErrBudgetExhausted) {
+						t.Errorf("leaving=%v step %d (%d) = %v, want accepted=%v", viaLeaving, i, s.request, err, s.want)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestReserveLeaving_SaturatesInsteadOfWrapping(t *testing.T) {
+	st := storetest.Open(t)
+	setBudget(t, st, math.MaxInt64)
+	// Added without saturating these sums wrap to a small or negative number and would fit.
+	for name, tc := range map[string]struct{ request, leave int64 }{
+		"both above half the cap": {math.MaxInt64/2 + 1, math.MaxInt64/2 + 1},
+		"request at the cap":      {math.MaxInt64, 1},
+		"leave at the cap":        {1, math.MaxInt64},
+		"both at the cap":         {math.MaxInt64, math.MaxInt64},
+	} {
+		run := agentRun(tc.request)
+		if err := st.ReserveAgentRunLeaving(t.Context(), run, tc.leave, time.Hour, agentNow); !errors.Is(err, store.ErrBudgetExhausted) {
+			t.Errorf("%s: %v, want ErrBudgetExhausted", name, err)
+		}
+	}
+	// Exactly the cap fits.
+	if err := st.ReserveAgentRunLeaving(t.Context(), agentRun(math.MaxInt64-5), 5, time.Hour, agentNow); err != nil {
+		t.Errorf("request + leave = the cap: %v", err)
+	}
+}
+
+func TestReserveLeaving_NegativeLeaveIsAnError(t *testing.T) {
+	st := storetest.Open(t)
+	setBudget(t, st, 1000)
+	run := agentRun(10)
+	err := st.ReserveAgentRunLeaving(t.Context(), run, -1, time.Hour, agentNow)
+	if err == nil || errors.Is(err, store.ErrBudgetExhausted) {
+		t.Fatalf("negative leave = %v, want a plain error", err)
+	}
+	var n int
+	if err := st.Pool.QueryRow(t.Context(), `select count(*) from agent_runs where id = $1`, run.ID).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("a run was written: %d, %v", n, err)
+	}
+}
+
+func TestReserveLeaving_AChatRunStillFitsAfterAReview(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	setBudget(t, st, 1000)
+	const oneChatRun = 300
+	if err := st.ReserveAgentRunLeaving(ctx, agentRun(700), oneChatRun, time.Hour, agentNow); err != nil {
+		t.Fatalf("review: %v", err)
+	}
+	if err := st.ReserveAgentRunLeaving(ctx, agentRun(oneChatRun), 0, time.Hour, agentNow); err != nil {
+		t.Fatalf("chat after the review: %v", err)
+	}
+	// A review one micro-dollar larger would have taken that room.
+	st2 := storetest.Open(t)
+	setBudget(t, st2, 1000)
+	if err := st2.ReserveAgentRunLeaving(ctx, agentRun(701), oneChatRun, time.Hour, agentNow); !errors.Is(err, store.ErrBudgetExhausted) {
+		t.Fatalf("review taking the chat room = %v, want ErrBudgetExhausted", err)
+	}
+}
