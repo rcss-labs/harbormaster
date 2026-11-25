@@ -9,6 +9,12 @@ import (
 // limitLine is the loop's own instruction for the final call.
 const limitLine = "You have reached the limit for this question. Answer now from what you have, say what is missing, and do not call tools."
 
+// submitLine is limitLine for an investigator, whose answer is a tool call.
+const submitLine = "You have reached the limit for this investigation: call submit_result now with what you have and say what is missing. Do not call any other tool."
+
+// reminderLine is the loop's instruction to an investigator that ended in plain text.
+const reminderLine = "Call submit_result now with your conclusion."
+
 const (
 	// minShare is the least of a cut result worth sending; below it the result
 	// becomes a placeholder.
@@ -172,13 +178,21 @@ func entryMessages(entries []entry) []provider.Message {
 // is removed from every tool result, so that nothing a tool returned can
 // imitate it.
 func (r *session) finalInstruction() provider.Message {
-	return provider.Message{Role: provider.RoleUser, Text: "[Message from the loop, code " + r.loopCode + "] " + limitLine}
+	if r.found != nil {
+		return r.loopMessage(submitLine)
+	}
+	return r.loopMessage(limitLine)
+}
+
+// loopMessage is a message in the loop's own words.
+func (r *session) loopMessage(text string) provider.Message {
+	return provider.Message{Role: provider.RoleUser, Text: "[Message from the loop, code " + r.loopCode + "] " + text}
 }
 
 // planGathering plans an ordinary call with the messages as they stand, or
 // says that the next call must be the final one.
 func (r *session) planGathering() (call, bool) {
-	bytes := r.requestBytes()
+	bytes := r.requestBytes() + messageBytes(r.reminder...)
 	lastStep := r.steps+1 >= r.l.Limits.MaxSteps
 	if lastStep || r.lowTime() || bytes > r.contextBytes(charsPerTokenTrim) {
 		return call{}, false

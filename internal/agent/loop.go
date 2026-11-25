@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/rcss-labs/harbormaster/internal/agent/provider"
+	"github.com/rcss-labs/harbormaster/internal/agentresult"
 	"github.com/rcss-labs/harbormaster/internal/hmtools"
 	"github.com/rcss-labs/harbormaster/internal/secretshape"
 )
@@ -31,6 +32,33 @@ type Event struct {
 	Notice       string          `json:"notice,omitempty"`
 	Code         string          `json:"code,omitempty"`
 	Message      string          `json:"message,omitempty"`
+	// Result is set on a result event only.
+	Result *agentresult.Result `json:"result,omitempty"`
+}
+
+// Task is what an investigator run works on. It takes the place of a chat's
+// messages.
+type Task struct {
+	Kind    string      `json:"kind"`
+	Subject TaskSubject `json:"subject"`
+	Alert   TaskAlert   `json:"alert"`
+}
+
+// TaskSubject is what an investigation is about.
+type TaskSubject struct {
+	Kind       string   `json:"kind"`
+	ServiceIDs []string `json:"service_ids"`
+	ClusterID  string   `json:"cluster_id"`
+	AccountID  string   `json:"account_id"`
+	Region     string   `json:"region"`
+}
+
+// TaskAlert is the alert that started an investigation.
+type TaskAlert struct {
+	Kind     string    `json:"kind"`
+	Title    string    `json:"title"`
+	Text     string    `json:"text"`
+	OpenedAt time.Time `json:"opened_at"`
 }
 
 type PageContext struct{ Path, ServiceID, ClusterID string }
@@ -43,6 +71,8 @@ type RunInput struct {
 	Page            PageContext
 	Bearer          string
 	MaxCostMicroUSD int64
+	// Task is set for an investigator run, which has no Messages.
+	Task *Task
 }
 
 // Limits bound a run. A zero value allows nothing: a run with MaxSteps,
@@ -59,7 +89,8 @@ type Loop struct {
 	Provider provider.Provider
 	Tools    ToolRunner
 	Limits   Limits
-	// Log, when set, gets one line for each failed model call.
+	// Log, when set, gets one line for each failed model call and one, with
+	// counts only, at the end of an investigator run.
 	Log *slog.Logger
 
 	// Test seams: nonce makes each of the run's two random codes, newTimer makes the wait
@@ -113,6 +144,12 @@ type session struct {
 	notified bool // limit_reached was emitted for the final call
 	timedOut bool // the run ended because its time ran out
 	spoke    bool // the reply in progress, or the last one, has text for the user
+
+	// For an investigator run only.
+	found    *findings          // nil for a chat
+	reminded bool               // the reminder turn was used
+	reminder []provider.Message // extra messages of the next gathering call
+	result   *agentresult.Result
 }
 
 // Run drives one conversation turn to its end, reporting through emit. It
@@ -122,19 +159,40 @@ func (l *Loop) Run(ctx context.Context, in RunInput, emit func(Event)) error {
 	r := &session{l: l, in: in, emit: emit, results: map[int]*toolResult{}, started: l.clock()}
 	r.tagCode, r.loopCode = l.newNonce(), l.newNonce()
 	r.codes = regexp.MustCompile(`(?i)` + regexp.QuoteMeta(r.tagCode) + `|` + regexp.QuoteMeta(r.loopCode))
+	if in.Role == roleInvestigator {
+		// Its answer is the result event: its text is for nobody.
+		r.found, in.Page = newFindings(), PageContext{}
+		r.emit = func(ev Event) {
+			if ev.Type != "text" {
+				emit(ev)
+			}
+		}
+	}
+	if (in.Task != nil) != (r.found != nil) {
+		r.fail("invalid_request", "This kind of run is not supported.")
+		return nil
+	}
 	system, ok := systemText(in.Role, in.Page, r.tagCode, r.loopCode)
 	if !ok {
 		r.fail("invalid_request", "This kind of run is not supported.")
 		return nil
 	}
 	r.system = system
-	r.messages = textOnly(in.Messages)
+	if r.found != nil {
+		defer r.logFindings()
+		r.messages = []provider.Message{r.taskMessage(*in.Task)}
+	} else {
+		r.messages = textOnly(in.Messages)
+	}
 	if len(r.messages) == 0 || r.messages[len(r.messages)-1].Role != provider.RoleUser {
 		r.fail("invalid_request", "There is no question to answer.")
 		return nil
 	}
 	for _, tool := range hmtools.Tools() {
 		r.tools = append(r.tools, provider.ToolDef{Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema()})
+	}
+	if r.found != nil {
+		r.tools = append(r.tools, submitToolDef())
 	}
 	r.frameBytes = frameBytes(r.system, r.tools)
 	r.ledger = ledger{model: in.Model, ceiling: max(in.MaxCostMicroUSD, 0), maxTokens: l.Limits.MaxRunTokens}
@@ -164,12 +222,25 @@ func (l *Loop) Run(ctx context.Context, in RunInput, emit func(Event)) error {
 			return nil
 		}
 
+		submit, submitted := r.findSubmit(resp.ToolCalls)
+		problem := ""
+		if submitted {
+			if problem = r.submit(submit); problem == "" {
+				return nil
+			}
+		}
 		if r.final {
-			// Tool calls in the final reply are ignored; its text was streamed.
+			// Other tool calls in the final reply are ignored; its text was streamed.
 			if !r.spoke {
 				r.emit(Event{Type: "text", Delta: noAnswerText})
 			}
 			r.emit(Event{Type: "done"})
+			return nil
+		}
+		if len(resp.ToolCalls) == 0 && r.found != nil {
+			if r.remind(resp) {
+				continue
+			}
 			return nil
 		}
 		if len(resp.ToolCalls) == 0 {
@@ -201,9 +272,15 @@ func (l *Loop) Run(ctx context.Context, in RunInput, emit func(Event)) error {
 				r.stopTimedOut()
 				return nil
 			}
-			// The final call shows its results too, so only the time kept for
-			// it can stop a tool.
-			msg, res := r.runTool(runCtx, call, i >= maxToolCallsPerTurn, r.lowTime())
+			var msg provider.Message
+			var res *toolResult
+			if submitted {
+				msg, res = r.refuse(call, problem)
+			} else {
+				// The final call shows its results too, so only the time kept for
+				// it can stop a tool.
+				msg, res = r.runTool(runCtx, call, i >= maxToolCallsPerTurn, r.lowTime())
+			}
 			r.messages = append(r.messages, msg)
 			r.results[len(r.messages)-1] = res
 		}
@@ -336,7 +413,7 @@ func (r *session) nextCall() (call, []provider.Message, bool) {
 	if !r.final {
 		r.trim()
 		if c, ok := r.planGathering(); ok {
-			return c, slices.Clone(r.messages), true
+			return c, append(slices.Clone(r.messages), r.reminder...), true
 		}
 		r.final = true
 	}
@@ -374,6 +451,10 @@ func (r *session) attempt(runCtx context.Context, c call, msgs []provider.Messag
 		say(resp.Text)
 	}
 	r.emitUsage(provider.Usage{InputTokens: r.ledger.usedIn, OutputTokens: r.ledger.usedOut}, r.ledger.spentMicroUSD, false)
+	r.reminder = nil
+	if r.found != nil {
+		r.found.noteShown(msgs)
+	}
 	return resp, streamed, nil
 }
 
@@ -439,7 +520,12 @@ func (r *session) runTool(ctx context.Context, call provider.ToolCall, overLimit
 }
 
 func (r *session) resultMessage(call provider.ToolCall, name, text string, isError bool) (provider.Message, *toolResult) {
-	res := r.newResult(name, text)
+	var res *toolResult
+	if r.found != nil && !isError {
+		res = r.readResult(name, call.Arguments, text)
+	} else {
+		res = r.newResult(name, text)
+	}
 	return provider.Message{
 		Role: provider.RoleTool, ToolCallID: call.ID, ToolName: call.Name, IsError: isError,
 		Text: res.render(len(res.data)),
