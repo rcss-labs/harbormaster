@@ -6,6 +6,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -52,16 +54,66 @@ type Provider struct {
 // New returns a provider that plays script in order, one step per Generate.
 func New(script ...Step) *Provider { return &Provider{script: script} }
 
+// Func returns a provider that answers each request with respond's step.
+func Func(respond func(provider.Request) Step) *Provider { return &Provider{respond: respond} }
+
 // Demo returns a provider that calls get_overview, then, once it has the
-// result, answers in two sentences.
+// result, answers in two sentences. When it is offered submit_result it plays
+// DemoInvestigator instead, so one provider serves both roles.
 func Demo() *Provider {
 	return &Provider{respond: func(req provider.Request) Step {
+		for _, tool := range req.Tools {
+			if tool.Name == "submit_result" {
+				return investigatorStep(req)
+			}
+		}
 		if n := len(req.Messages); n > 0 && req.Messages[n-1].Role == provider.RoleTool {
 			return Text("This is a canned answer from the demo model. It did not read your estate.", provider.Usage{InputTokens: 120, OutputTokens: 18})
 		}
 		return ToolCalls(provider.Usage{InputTokens: 80, OutputTokens: 12},
 			provider.ToolCall{ID: "demo-call-1", Name: "get_overview", Arguments: map[string]any{}})
 	}}
+}
+
+// DemoInvestigator returns a provider that reads the task's first service and
+// its timeline, then submits a result that cites the first piece it was shown.
+func DemoInvestigator() *Provider { return Func(investigatorStep) }
+
+var (
+	taskServiceID = regexp.MustCompile(`"service_ids":\["([^"\\]+)"`)
+	unitMarker    = regexp.MustCompile(`(?m)^\[(e[0-9]{1,5})\] `)
+)
+
+func investigatorStep(req provider.Request) Step {
+	var serviceID, ref string
+	results := 0
+	for _, m := range req.Messages {
+		switch found := unitMarker.FindStringSubmatch(m.Text); {
+		case m.Role == provider.RoleTool:
+			results++
+			if ref == "" && found != nil {
+				ref = found[1]
+			}
+		case serviceID == "" && m.Role == provider.RoleUser:
+			if id := taskServiceID.FindStringSubmatch(m.Text); id != nil {
+				serviceID = id[1]
+			}
+		}
+	}
+	// A user message after the task tells the model to finish.
+	told := len(req.Messages) > 1 && req.Messages[len(req.Messages)-1].Role == provider.RoleUser
+	if reads := []string{"get_service", "get_service_timeline"}; serviceID != "" && !told && results < len(reads) {
+		return ToolCalls(provider.Usage{InputTokens: 80, OutputTokens: 12},
+			provider.ToolCall{ID: fmt.Sprintf("demo-read-%d", results+1), Name: reads[results], Arguments: map[string]any{"service_id": serviceID}})
+	}
+	evidence := []any{}
+	if ref != "" {
+		evidence = append(evidence, map[string]any{"ref": ref, "note": "The first thing the demo model read."})
+	}
+	return ToolCalls(provider.Usage{InputTokens: 120, OutputTokens: 30}, provider.ToolCall{
+		ID: "demo-submit", Name: "submit_result",
+		Arguments: map[string]any{"summary": "This is a canned conclusion from the demo model. It did not judge the service.", "evidence": evidence},
+	})
 }
 
 func (p *Provider) Name() string { return "fake" }
