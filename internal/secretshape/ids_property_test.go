@@ -73,7 +73,7 @@ func TestLongRunSpans_OnlyWholeIDRunsBecomeVisible(t *testing.T) {
 				}
 				text.WriteString(glue[rng.Intn(len(glue))])
 			}
-			old, now := referenceLongRunSpans(text.String()), longRunSpans(text.String())
+			old, now := referenceLongRunSpans(text.String()), longRunSpans(text.String(), Names{})
 			in := func(spans [][2]int, span [2]int) bool {
 				for _, s := range spans {
 					if s == span {

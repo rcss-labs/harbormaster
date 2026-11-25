@@ -43,4 +43,6 @@ type Result struct {
 	SummaryReplaced bool       `json:"summary_replaced"`
 	Evidence        []Evidence `json:"evidence"`
 	EvidenceDropped int        `json:"evidence_dropped"`
+	// NameIDs are ids of services, beyond the task's own, whose names the scrubber let stand in the result.
+	NameIDs []string `json:"name_ids,omitempty"`
 }

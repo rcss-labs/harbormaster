@@ -40,8 +40,8 @@ func isHiddenRune(r rune) bool {
 }
 
 // passesBasics holds the tests a repeat can make without the logs: valid UTF-8, nothing hidden, not empty, within the
-// cap, unchanged by the scrubber.
-func passesBasics(text string, limit int) bool {
+// cap, unchanged by the scrubber, which lets the names in keep stand.
+func passesBasics(text string, limit int, keep secretshape.Names) bool {
 	if strings.TrimSpace(text) == "" || !utf8.ValidString(text) || utf8.RuneCountInString(text) > limit {
 		return false
 	}
@@ -50,7 +50,7 @@ func passesBasics(text string, limit int) bool {
 			return false
 		}
 	}
-	return secretshape.ScrubText(text) == text
+	return secretshape.ScrubTextKeeping(text, keep) == text
 }
 
 // knownReplacement returns replacement when it is one of the two summary sentences and the investigation sentence
@@ -71,8 +71,12 @@ func CheckSummary(summary string, corpus *Corpus) (clean string, replaced bool) 
 // CheckSummaryAs is CheckSummary with the sentence a failed summary is replaced by. Only the two replacement constants
 // are accepted; anything else gets the investigation sentence, so a caller cannot make the check hand back its own text.
 func CheckSummaryAs(summary string, corpus *Corpus, replacement string) (clean string, replaced bool) {
+	return checkSummary(summary, corpus, replacement, secretshape.Names{})
+}
+
+func checkSummary(summary string, corpus *Corpus, replacement string, keep secretshape.Names) (clean string, replaced bool) {
 	replacement = knownReplacement(replacement)
-	if !passesBasics(summary, SummaryCap) || hasImageMarkup(summary) || corpus == nil || corpus.Full() || corpus.hasRunAllowing(summary) {
+	if !passesBasics(summary, SummaryCap, keep) || hasImageMarkup(summary) || corpus == nil || corpus.Full() || corpus.hasRunAllowing(summary) {
 		return replacement, true
 	}
 	return summary, false
@@ -85,8 +89,13 @@ func RecheckSummary(summary string) (clean string, replaced bool) {
 
 // RecheckSummaryAs is RecheckSummary with the replacement sentence, under the rule of CheckSummaryAs.
 func RecheckSummaryAs(summary, replacement string) (clean string, replaced bool) {
+	return RecheckSummaryNaming(summary, replacement, secretshape.Names{})
+}
+
+// RecheckSummaryNaming is RecheckSummaryAs for a run that may name what is in keep.
+func RecheckSummaryNaming(summary, replacement string, keep secretshape.Names) (clean string, replaced bool) {
 	replacement = knownReplacement(replacement)
-	if !passesBasics(summary, SummaryCap) {
+	if !passesBasics(summary, SummaryCap, keep) {
 		return replacement, true
 	}
 	return summary, false
@@ -94,8 +103,12 @@ func RecheckSummaryAs(summary, replacement string) (clean string, replaced bool)
 
 // CheckNote is CheckSummary for a one-line note with the 300 cap.
 func CheckNote(note string, corpus *Corpus) string {
+	return checkNote(note, corpus, secretshape.Names{})
+}
+
+func checkNote(note string, corpus *Corpus, keep secretshape.Names) string {
 	note = flatten(note)
-	if !passesBasics(note, NoteCap) || hasImageMarkup(note) || corpus == nil || corpus.Full() || corpus.HasRunIn(note) {
+	if !passesBasics(note, NoteCap, keep) || hasImageMarkup(note) || corpus == nil || corpus.Full() || corpus.HasRunIn(note) {
 		return ReplacementNote
 	}
 	return note
@@ -103,8 +116,13 @@ func CheckNote(note string, corpus *Corpus) string {
 
 // RecheckNote is RecheckSummary for a note.
 func RecheckNote(note string) string {
+	return RecheckNoteNaming(note, secretshape.Names{})
+}
+
+// RecheckNoteNaming is RecheckNote for a run that may name what is in keep.
+func RecheckNoteNaming(note string, keep secretshape.Names) string {
 	note = flatten(note)
-	if !passesBasics(note, NoteCap) {
+	if !passesBasics(note, NoteCap, keep) {
 		return ReplacementNote
 	}
 	return note

@@ -40,14 +40,15 @@ type jsonWalker struct {
 	text  string
 	pos   int
 	depth int
+	keep  Names
 	edits []edit
 	// secretValues are the ranges of "value" members whose object names a secret environment variable.
 	secretValues [][2]int
 }
 
 // jsonEdits returns the edits for text, which must be valid JSON.
-func jsonEdits(text string, depth int) []edit {
-	w := &jsonWalker{text: text, depth: depth}
+func jsonEdits(text string, keep Names, depth int) []edit {
+	w := &jsonWalker{text: text, keep: keep, depth: depth}
 	w.value(hideNothing)
 	sort.Slice(w.edits, func(i, j int) bool { return w.edits[i].start < w.edits[j].start })
 	if len(w.secretValues) == 0 {
@@ -236,7 +237,7 @@ func (w *jsonWalker) str(hide hiding) string {
 		}
 		return content
 	}
-	for _, e := range scrub(content, w.depth+1) {
+	for _, e := range scrub(content, w.keep, w.depth+1) {
 		// A replacement may itself hold quotes when a number deeper inside became a string.
 		quoted := strconv.Quote(e.replacement)
 		w.edits = append(w.edits, edit{start + offsets[e.start], start + offsets[e.end], quoted[1 : len(quoted)-1]})

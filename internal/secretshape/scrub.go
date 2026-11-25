@@ -23,7 +23,13 @@ type edit struct {
 // ScrubText replaces each secret-shaped span in text with Redacted and leaves the rest byte-identical. JSON, whole or
 // one value per line, is walked structurally and stays valid; everything else is read as plain text.
 func ScrubText(text string) string {
-	edits := scrub(text, 0)
+	return ScrubTextKeeping(text, Names{})
+}
+
+// ScrubTextKeeping is ScrubText that leaves a long run alone when the whole run is a name in keep. Every other rule
+// hides such a name as ever.
+func ScrubTextKeeping(text string, keep Names) string {
+	edits := scrub(text, keep, 0)
 	if len(edits) == 0 {
 		return text
 	}
@@ -39,15 +45,15 @@ func ScrubText(text string) string {
 }
 
 // scrub returns the edits for text, in order and not overlapping. depth counts the JSON strings text is nested in.
-func scrub(text string, depth int) []edit {
+func scrub(text string, keep Names, depth int) []edit {
 	if depth >= maxJSONDepth {
-		return plainEdits(text)
+		return plainEdits(text, keep)
 	}
 	if isJSON(text, "{[\"-0123456789") {
-		return jsonEdits(text, depth)
+		return jsonEdits(text, keep, depth)
 	}
 	if !strings.Contains(text, "\n") {
-		return plainEdits(text)
+		return plainEdits(text, keep)
 	}
 	// Lines that are JSON are walked one by one; the stretches between them are plain text.
 	var edits []edit
@@ -58,13 +64,13 @@ func scrub(text string, depth int) []edit {
 			lineEnd = lineStart + i + 1
 		}
 		if line := text[lineStart:lineEnd]; isJSON(line, "{[") {
-			edits = appendShifted(edits, plainEdits(text[plainStart:lineStart]), plainStart)
-			edits = appendShifted(edits, jsonEdits(line, depth), lineStart)
+			edits = appendShifted(edits, plainEdits(text[plainStart:lineStart], keep), plainStart)
+			edits = appendShifted(edits, jsonEdits(line, keep, depth), lineStart)
 			plainStart = lineEnd
 		}
 		lineStart = lineEnd
 	}
-	return appendShifted(edits, plainEdits(text[plainStart:]), plainStart)
+	return appendShifted(edits, plainEdits(text[plainStart:], keep), plainStart)
 }
 
 func appendShifted(edits, more []edit, by int) []edit {
@@ -83,8 +89,8 @@ func isJSON(text, first string) bool {
 // plainEdits applies the plain-text rules to text as it is and as it reads with one to maxEscapeLevels levels of JSON
 // escapes removed, so that a secret after \n or &, or a pair with escaped quotes, is found in JSON that was cut
 // and cannot be parsed. Everything any reading finds is hidden.
-func plainEdits(text string) []edit {
-	spans := append(pairSpans(text), valueSpans(text)...)
+func plainEdits(text string, keep Names) []edit {
+	spans := append(pairSpans(text), valueSpans(text, keep)...)
 	view := text
 	var offsets []int // of each byte of view in text
 	for level := 0; level < maxEscapeLevels && strings.IndexByte(view, '\\') >= 0; level++ {
@@ -95,7 +101,7 @@ func plainEdits(text string) []edit {
 			}
 		}
 		view, offsets = next, at
-		for _, span := range append(pairSpans(view), valueSpans(view)...) {
+		for _, span := range append(pairSpans(view), valueSpans(view, keep)...) {
 			spans = append(spans, [2]int{offsets[span[0]], offsets[span[1]]})
 		}
 	}

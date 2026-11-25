@@ -3,11 +3,14 @@ package secretshape
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"os"
+	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/rcss-labs/harbormaster/internal/model"
@@ -25,13 +28,13 @@ const (
 func fullDiff() bool { return os.Getenv("HM_SCRUB_DIFF") == "full" }
 
 // diffGroups runs check once for every batch number below batches, in parallel, in subtests of diffGroup batches; by
-// default only the first subtest runs.
-func diffGroups(t *testing.T, batches int, check func(t *testing.T, batch int)) {
+// default only for the first few.
+func diffGroups(t *testing.T, batches, byDefault int, check func(t *testing.T, batch int)) {
 	t.Helper()
+	if !fullDiff() {
+		batches = min(batches, byDefault)
+	}
 	for first := 0; first < batches; first += diffGroup {
-		if first > 0 && !fullDiff() {
-			return
-		}
 		t.Run(fmt.Sprintf("seeds_%03d", first), func(t *testing.T) {
 			var workers sync.WaitGroup
 			for batch := first; batch < min(first+diffGroup, batches); batch++ {
@@ -368,9 +371,283 @@ func TestScrubBaseline_Unchanged(t *testing.T) {
 	if len(want) != baselineBatches {
 		t.Fatalf("%d hashes are recorded, want %d", len(want), baselineBatches)
 	}
-	diffGroups(t, baselineBatches, func(t *testing.T, batch int) {
+	foreign := foreignNames()
+	diffGroups(t, baselineBatches, 20, func(t *testing.T, batch int) {
 		if got := baselineHash(batch, ScrubText); got != want[batch] {
 			t.Errorf("batch %d: the output changed", batch)
 		}
+		if got := baselineHash(batch, func(text string) string { return ScrubTextKeeping(text, foreign) }); got != want[batch] {
+			t.Errorf("batch %d: the output changed with names that are in none of the texts", batch)
+		}
 	})
+}
+
+// foreignNames are 50 kept names that diffTexts never writes.
+func foreignNames() Names {
+	names := newDiffTexts(-1)
+	var ids []string
+	for i := 0; i < 50; i++ {
+		ids = append(ids, diffServiceID("prod-cluster", "Outside"+names.cdkName()))
+	}
+	return NamesOf(ids...)
+}
+
+func diffServiceID(cluster, service string) string {
+	return model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: "123456789012", Region: "eu-west-1", Cluster: cluster}, Service: service}.ID()
+}
+
+// diffKeptNames are names a set keeps. Some are the start or the end of another, or differ in one letter.
+var diffKeptNames = []string{
+	"CheckoutStack-CheckoutServiceF3A9B2C1-Xy7KpQ2mNvRt",
+	"CheckoutStack-CheckoutServiceF3A9B2C1-Xy7KpQ2mNvRtA",
+	"CheckoutStack-CheckoutServiceF3A9B2C1-Xy7KpQ2mNvRu",
+	"Stack-CheckoutServiceF3A9B2C1-Xy7KpQ2mNvRt",
+	"Infra-ClusterEB0386A7-wD3kQ9sLmN2v",
+	"kQ9x_Tz3-Lm8vWb2Nc7Yd4Re1Uf6Hg0Js5ApXo-Qi",
+	"HarborStack-ApiServiceService7C1A2B3D-Xk3J9mLpQ2Rt",
+	"-Xk3J9mLpQ2Rt7C1A2B3DXk3J9mLpQ2Rt_",
+	"Zm9vYmFyQmF6QXV0aDB4OTlYWXo1MjabcdEFGH",
+}
+
+func diffKept(t *testing.T) (Names, map[string]bool) {
+	t.Helper()
+	ids, oracle := make([]string, 0, len(diffKeptNames)), map[string]bool{}
+	for _, name := range diffKeptNames {
+		ids = append(ids, diffServiceID("prod-cluster", name))
+		oracle[name] = true
+	}
+	return NamesOf(ids...), oracle
+}
+
+const (
+	diffBatches = 100 // of baselineTexts texts that hold kept names
+	// diffSeeds keeps these seeds apart from those of the baseline.
+	diffSeeds = 1_000_000
+)
+
+// eachKeptText calls check with the texts of a batch. Each holds a kept name somewhere.
+func eachKeptText(batch int, check func(text string)) {
+	texts := newDiffTexts(diffSeeds+int64(batch), diffKeptNames...)
+	for done := 0; done < baselineTexts; {
+		text := texts.text()
+		holds := false
+		for _, name := range diffKeptNames {
+			holds = holds || strings.Contains(text, name)
+		}
+		if holds {
+			check(text)
+			done++
+		}
+	}
+}
+
+// longRunSpansWithoutNames is longRunSpans as it was before names were known.
+func longRunSpansWithoutNames(text string) [][2]int {
+	arns := arnSpan.FindAllStringIndex(text, -1)
+	var spans [][2]int
+	for _, m := range longRun.FindAllStringIndex(text, -1) {
+		run := text[m[0]:m[1]]
+		if isHarbormasterID(run) || !looksLikeRandomRun(run) {
+			continue
+		}
+		if insideAny(arns, m) {
+			continue
+		}
+		if hexOnly.MatchString(run) && hexRunIsDiagnostic(text, m[0]) {
+			continue
+		}
+		spans = append(spans, [2]int{m[0], m[1]})
+	}
+	return spans
+}
+
+// The long-run rule finds what it found before, without the runs that are kept names, and nothing else changes.
+func TestLongRunSpans_OnlyWholeKeptNamesBecomeVisible(t *testing.T) {
+	keep, oracle := diffKept(t)
+	var texts, shown atomic.Int64
+	diffGroups(t, diffBatches, 4, func(t *testing.T, batch int) {
+		eachKeptText(batch, func(text string) {
+			old := longRunSpansWithoutNames(text)
+			if now := longRunSpans(text, Names{}); !slices.Equal(old, now) {
+				t.Errorf("batch %d: the empty set changes the spans of %q", batch, text)
+			}
+			want := old[:0:0]
+			for _, span := range old {
+				if !oracle[text[span[0]:span[1]]] {
+					want = append(want, span)
+				}
+			}
+			if now := longRunSpans(text, keep); !slices.Equal(now, want) {
+				t.Errorf("batch %d: got %v, want %v in %q", batch, now, want, text)
+			}
+			texts.Add(1)
+			shown.Add(int64(len(old) - len(want)))
+		})
+	})
+	t.Logf("%d texts, %d runs became visible", texts.Load(), shown.Load())
+	if shown.Load() == 0 {
+		t.Error("no run became visible")
+	}
+}
+
+// hiddenBytes marks the bytes of text that the edits replace.
+func hiddenBytes(text string, edits []edit) []bool {
+	hidden := make([]bool, len(text))
+	for _, e := range edits {
+		for i := e.start; i < e.end; i++ {
+			hidden[i] = true
+		}
+	}
+	return hidden
+}
+
+// nameSpans returns where a whole run of text is one of names, read with any number of levels of JSON escapes removed.
+func nameSpans(text string, names map[string]bool) [][2]int {
+	var spans [][2]int
+	view, offsets := text, make([]int, len(text)+1)
+	for i := range offsets {
+		offsets[i] = i
+	}
+	for level := 0; level <= maxJSONDepth; level++ {
+		for _, run := range longRun.FindAllStringIndex(view, -1) {
+			if names[view[run[0]:run[1]]] {
+				spans = append(spans, [2]int{offsets[run[0]], offsets[run[1]]})
+			}
+		}
+		next, at := unescape(view)
+		for i := range at {
+			at[i] = offsets[at[i]]
+		}
+		view, offsets = next, at
+	}
+	return spans
+}
+
+// Keeping names never hides more, and each stretch that it shows is exactly one kept name. In text that is no JSON a
+// name with \uXXXX inside can be shown in part: what another reading of the escapes takes for a longer run stays hidden.
+func TestScrubTextKeeping_RevealsOnlyKeptNames(t *testing.T) {
+	keep, oracle := diffKept(t)
+	var texts, shown, inPart atomic.Int64
+	diffGroups(t, diffBatches, 4, func(t *testing.T, batch int) {
+		eachKeptText(batch, func(text string) {
+			old, now := hiddenBytes(text, scrub(text, Names{}, 0)), hiddenBytes(text, scrub(text, keep, 0))
+			names := nameSpans(text, oracle)
+			for i := 0; i < len(text); {
+				if now[i] && !old[i] {
+					t.Errorf("batch %d: byte %d of %q is hidden only with the set", batch, i, text)
+					return
+				}
+				if now[i] || !old[i] {
+					i++
+					continue
+				}
+				start := i
+				for i < len(text) && old[i] && !now[i] {
+					i++
+				}
+				// The stretch is a name, or part of a name written with escapes, beside bytes that are hidden still.
+				whole := slices.Contains(names, [2]int{start, i})
+				part := (start > 0 && now[start-1] || i < len(text) && now[i]) && slices.ContainsFunc(names, func(name [2]int) bool {
+					return name[0] <= start && i <= name[1] && strings.IndexByte(text[name[0]:name[1]], '\\') >= 0 && !slices.Contains(old[name[0]:name[1]], false)
+				})
+				if !whole && !part {
+					t.Errorf("batch %d: %q became visible in %q", batch, text[start:i], text)
+				}
+				shown.Add(1)
+				if !whole {
+					inPart.Add(1)
+				}
+			}
+			if isJSON(text, `{["`) && !json.Valid([]byte(ScrubTextKeeping(text, keep))) {
+				t.Errorf("batch %d: no longer JSON: %q", batch, text)
+			}
+			texts.Add(1)
+		})
+	})
+	t.Logf("%d texts, %d stretches became visible, %d of them part of a name", texts.Load(), shown.Load(), inPart.Load())
+	if shown.Load() == 0 {
+		t.Error("nothing became visible")
+	}
+}
+
+// Scrubbing again changes nothing where scrubbing again without names changes nothing.
+func TestScrubTextKeeping_Idempotent(t *testing.T) {
+	keep, _ := diffKept(t)
+	var texts, compared atomic.Int64
+	diffGroups(t, 20, 2, func(t *testing.T, batch int) {
+		eachKeptText(diffBatches+batch, func(text string) {
+			texts.Add(1)
+			once := ScrubTextKeeping(text, keep)
+			if ScrubTextKeeping(once, keep) == once {
+				compared.Add(1)
+				return
+			}
+			if plain := ScrubText(text); ScrubText(plain) == plain {
+				t.Errorf("batch %d: scrubbing %q\ngave %q\nand then %q", batch, text, once, ScrubTextKeeping(once, keep))
+			}
+		})
+	})
+	t.Logf("%d texts, %d unchanged by a second pass", texts.Load(), compared.Load())
+}
+
+// The wrapped and encoded secrets stay hidden when the set holds names, also names that begin or end as they do.
+func TestScrubTextKeeping_NeverUncoversCorpusSecrets(t *testing.T) {
+	keep, _ := diffKept(t)
+	for _, secret := range []string{fakeBase64URL, fakeMixed, fakeHM, "hunter2x"} {
+		for _, name := range []string{
+			secret[:len(secret)-1], secret[1:], secret + "-Xy7KpQ2mNvRtF3A9B2C1wD3k", "Xy7KpQ2mNvRtF3A9B2C1wD3k-" + secret, secret + secret + secret,
+		} {
+			keep.Add(diffServiceID("prod-cluster", name), diffServiceID(name, "checkout-api"))
+		}
+	}
+	if got := ScrubTextKeeping(fakeBase64URL[1:], keep); got != fakeBase64URL[1:] {
+		t.Fatalf("test setup: the end of a corpus secret is not kept: %q", got)
+	}
+	scrubText := func(text string) string { return ScrubTextKeeping(text, keep) }
+	requireWrappingUncoversNothing(t, scrubText)
+	requireEncodedSecretsHidden(t, scrubText)
+}
+
+// A set that ids give no name for is the empty set.
+func TestScrubTextKeeping_EmptySetIsScrubText(t *testing.T) {
+	empty := map[string]Names{
+		"zero value": {}, "no ids": NamesOf(), "ordinary ids": NamesOf(diffServiceID("prod-cluster", "checkout-api")), "no id": NamesOf(diffKeptNames...),
+	}
+	texts := append([]string{}, baselineLeakRows...)
+	for _, row := range leakCorpus() {
+		texts = append(texts, row.text)
+	}
+	texts = append(texts, fakeAWSKey, fakeAWSTemp, fakeJWT, fakeSK, fakeAnthropic, fakeGitHub, fakeGitHubOA, fakeSlackBot, fakeSlackUser,
+		fakeGoogle, fakeHM, fakeMixed, fakeHex40, fakeBase64URL, fakeBase64Slash)
+	texts = append(texts, diffKeptNames...)
+	for _, text := range texts {
+		for label, keep := range empty {
+			if !keep.Empty() {
+				t.Errorf("%s: not empty", label)
+			}
+			for _, form := range []string{text, encode(t, text, 1), `{"name":` + encode(t, text, 2) + `}`} {
+				if got, want := ScrubTextKeeping(form, keep), ScrubText(form); got != want {
+					t.Errorf("%s: %q became %q, want %q", label, form, got, want)
+				}
+			}
+		}
+	}
+}
+
+// IDNames gives no name with a value pattern, so the condition of the set can be seen only here.
+func TestMayBeKept_EachCondition(t *testing.T) {
+	for name, want := range map[string]bool{
+		diffKeptNames[0]:                  true,
+		"Xy7KpQ2mNvRtF3A9B2C1wD3kQ9sLmN2": false, // 31 bytes
+		"payments-settlement-reconciliation-background-worker-service": false,
+		fakeHex40:                                     false,
+		fakeGitHub + "A":                              false,
+		"sk-" + fakeBase64URL:                         false,
+		"x-" + fakeAWSKey + "-Xy7KpQ2mNvRt":           false,
+		"hmp_" + "abcdefghijkl" + "_" + fakeBase64URL: false,
+	} {
+		if got := mayBeKept(name); got != want {
+			t.Errorf("%q: got %v", name, got)
+		}
+	}
 }

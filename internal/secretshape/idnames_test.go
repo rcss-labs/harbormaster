@@ -27,30 +27,40 @@ func TestIDNames_ServiceClusterAndTaskIDs(t *testing.T) {
 }
 
 func TestIDNames_RefusesInvalidPaddedAndNonCanonicalIDs(t *testing.T) {
-	good := serviceID("prod-cluster", "checkout-api")
+	for name, id := range refusedIDs(t, "checkout-api") {
+		if cluster, service, ok := secretshape.IDNames(id); ok || cluster != "" || service != "" {
+			t.Errorf("%s: got %q, %q, %v", name, cluster, service, ok)
+		}
+	}
+}
+
+// refusedIDs are texts that are no ids, most of them made from an id of service.
+func refusedIDs(t *testing.T, service string) map[string]string {
+	t.Helper()
+	good := serviceID("prod-cluster", service)
 	enc := base64.RawURLEncoding.EncodeToString
-	for name, id := range map[string]string{
+	spare := idAccount + "|" + idRegion + "|prod-cluster|" + service
+	if len(spare)%3 == 0 {
+		spare += "b"
+	}
+	return map[string]string{
 		"empty":            "",
 		"line feed":        good[:10] + "\n" + good[10:],
 		"carriage return":  good[:10] + "\r" + good[10:],
 		"trailing newline": good + "\n",
 		"prose":            "the checkout service",
 		"padded":           good + "=",
-		"standard base64":  strings.NewReplacer("-", "+", "_", "/").Replace(enc([]byte(idAccount + "|" + idRegion + "|prod-cluster|checkout-api~~"))),
-		"non canonical":    nonCanonical(t, idAccount+"|"+idRegion+"|prod-cluster|ab"),
-		"bad account":      enc([]byte("12345|" + idRegion + "|prod-cluster|checkout-api")),
-		"bad region":       enc([]byte(idAccount + "|nowhere|prod-cluster|checkout-api")),
-		"five fields":      enc([]byte(idAccount + "|" + idRegion + "|a|b|c")),
+		"standard base64":  strings.NewReplacer("-", "+", "_", "/").Replace(enc([]byte(idAccount + "|" + idRegion + "|prod-cluster|" + service + "~~"))),
+		"non canonical":    nonCanonical(t, spare),
+		"bad account":      enc([]byte("12345|" + idRegion + "|prod-cluster|" + service)),
+		"bad region":       enc([]byte(idAccount + "|nowhere|prod-cluster|" + service)),
+		"five fields":      enc([]byte(idAccount + "|" + idRegion + "|a|b|" + service)),
 		"two fields":       enc([]byte(idAccount + "|" + idRegion)),
-		"space in name":    enc([]byte(idAccount + "|" + idRegion + "|prod cluster|checkout-api")),
-		"control byte":     enc([]byte(idAccount + "|" + idRegion + "|prod\x01|checkout-api")),
-		"task other acct":  taskID("arn:aws:ecs:" + idRegion + ":999999999999:task/c/abc"),
-		"secret in a name": serviceID("prod-cluster", idAWSKey),
-		"over the bound":   enc([]byte(idAccount + "|" + idRegion + "|" + strings.Repeat("c", 3000) + "|s")),
-	} {
-		if cluster, service, ok := secretshape.IDNames(id); ok || cluster != "" || service != "" {
-			t.Errorf("%s: got %q, %q, %v", name, cluster, service, ok)
-		}
+		"space in name":    enc([]byte(idAccount + "|" + idRegion + "|prod cluster|" + service)),
+		"control byte":     enc([]byte(idAccount + "|" + idRegion + "|prod\x01|" + service)),
+		"task other acct":  taskID("arn:aws:ecs:" + idRegion + ":999999999999:task/" + service + "/abc"),
+		"secret in a name": serviceID(service, idAWSKey),
+		"over the bound":   enc([]byte(idAccount + "|" + idRegion + "|" + strings.Repeat("c", 3000) + "|" + service)),
 	}
 }
 

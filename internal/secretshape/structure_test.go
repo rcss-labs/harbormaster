@@ -253,6 +253,11 @@ func TestScrubText_TimeGrowsWithTheInput(t *testing.T) {
 
 // No six-character piece of a secret may survive, whatever encoding it went through and wherever it was cut.
 func TestScrubText_EncodedRandomSecretsNeverLeak(t *testing.T) {
+	requireEncodedSecretsHidden(t, ScrubText)
+}
+
+func requireEncodedSecretsHidden(t *testing.T, scrubText func(string) string) {
+	t.Helper()
 	rng := rand.New(rand.NewSource(11))
 	var alphabet []byte
 	for c := byte('!'); c <= '~'; c++ {
@@ -273,11 +278,11 @@ func TestScrubText_EncodedRandomSecretsNeverLeak(t *testing.T) {
 			texts = append(texts, encode(t, `{"t":1,"lines":["a\tb",`+object+`],"n":2}`, depth))
 		}
 		for _, text := range texts {
-			got := ScrubText(text)
+			got := scrubText(text)
 			if text != line && !json.Valid([]byte(got)) {
 				t.Fatalf("%s became invalid JSON: %s", text, got)
 			}
-			cut := ScrubText(text[:rng.Intn(len(text)+1)] + []string{"", "\n[cut]"}[i%2])
+			cut := scrubText(text[:rng.Intn(len(text)+1)] + []string{"", "\n[cut]"}[i%2])
 			for label, out := range map[string]string{"whole": got, "cut": cut} {
 				// What a cut or an encoding leaves of the secret, decoded at each level.
 				for _, view := range decodedForms(out) {
