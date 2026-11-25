@@ -596,7 +596,9 @@ func TestInvestigationList_NewestFirstAndCapped(t *testing.T) {
 	if list.Items == nil || len(list.Items) != 1 {
 		t.Errorf("other service: items %v", list.Items)
 	}
-	e.st.Pool.Exec(t.Context(), `delete from agent_investigations`) //nolint:errcheck // test cleanup
+	if _, err := e.st.Pool.Exec(t.Context(), `delete from agent_investigations`); err != nil {
+		t.Fatal(err)
+	}
 	resp = viewer.get("/api/services/" + devSvc.ID() + "/investigations")
 	decode(t, resp, &list)
 	if list.Items == nil || len(list.Items) != 0 {
@@ -691,5 +693,216 @@ func TestAlerts_NoLinkAfterResolve(t *testing.T) {
 	}
 	if value := rawAlerts(t, e.sam)["image-resizer"]["investigation"]; value != nil {
 		t.Errorf("after the incident resolved the alert links %#v", value)
+	}
+}
+
+// recordGroup opens a cluster group incident with n members through the real store path (a route with the switch on,
+// an announced Opened delivery, RecordInvestigationRequests) and returns the investigation it created. Members cycle
+// through two real Prod services, so a reader who can View Prod can View every member.
+func (e *invEnv) recordGroup(t *testing.T, cluster string, n int) int64 {
+	t.Helper()
+	ctx := t.Context()
+	route, err := e.st.CreateNotificationRoute(ctx, store.NotificationRoute{
+		Name: "group-" + cluster, Destination: "webhook", Config: store.NotificationConfig{URLHost: "hooks.example"},
+		SecretEnc: []byte("sealed"), MinSeverity: "warning", Kinds: []string{"service_failing"},
+		RepeatSeconds: 1800, QuietTimezone: "Europe/Berlin", NotifyResolved: true, Investigate: true, Enabled: true,
+	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	members := make([]store.IncidentMember, 0, n)
+	for i := 0; i < n; i++ {
+		svc := []model.ServiceKey{prodSvc, prodSvc2}[i%2]
+		members = append(members, store.IncidentMember{Cluster: svc.Cluster, Service: svc.Service, Kind: "service_failing", Title: "failing"})
+	}
+	now := time.Now().UTC()
+	open, _, err := e.st.SyncNotificationGroups(ctx, now, 2*time.Minute, time.Hour, []store.GroupState{{
+		RouteID: route.ID, ScopeKind: "cluster", Key: invKey(cluster, ""), Kind: "cluster_failing", Severity: model.AlertWarning,
+		Title: cluster + ": failing", Text: "text", Threshold: 1, Failing: n, Total: n, Members: members,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The sync lists every open incident, the groups of earlier calls included; the desired list names only this one,
+	// so earlier groups are absent from it and are not touched here.
+	var group store.NotificationIncident
+	for _, inc := range open {
+		if inc.Key.Cluster == cluster && inc.GroupRouteID == route.ID {
+			group = inc
+		}
+	}
+	if group.ID == 0 {
+		t.Fatalf("no open group incident for %s among %d", cluster, len(open))
+	}
+	open = []store.NotificationIncident{group}
+	incident, routeID := open[0].ID, route.ID
+	due := now
+	if ok, err := e.st.PlanNotificationDelivery(ctx, store.NotificationDelivery{
+		RouteID: &routeID, RouteName: route.Name, Destination: route.Destination, Target: "hooks.example", IncidentID: &incident,
+		Event: "opened", Severity: "critical", AlertTitle: open[0].Title, AlertText: open[0].Text, Key: open[0].Key, Kind: open[0].Kind,
+		Status: "pending", NextAttemptAt: &due, CreatedAt: now,
+	}); err != nil || !ok {
+		t.Fatalf("plan opened = %v, %v", ok, err)
+	}
+	if created, _, err := e.st.RecordInvestigationRequests(ctx, now, 15*time.Minute, 100); err != nil || created != 1 {
+		t.Fatalf("created = %d, %v", created, err)
+	}
+	var id int64
+	if err := e.st.Pool.QueryRow(ctx, `select investigation_id from agent_investigation_incidents where incident_id = $1`, incident).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.st.Pool.Exec(ctx, `update agent_investigations set state = 'done', summary = 'Group findings.', finished_at = now() where id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+// A group stored at the member cap may have been cut, so its member list is not known to be complete: admins only.
+func TestInvestigation_GroupAtTheMemberCapIsAdminOnly(t *testing.T) {
+	e := newInvEnv(t)
+	prodReader := e.reader(t, "pia", map[string]authz.ActionSet{"Prod": viewOnly})
+	for _, tc := range []struct {
+		members    int
+		readerSees bool
+	}{
+		{store.MaxInvestigationMembers - 1, true},
+		{store.MaxInvestigationMembers, false},
+		{store.MaxInvestigationMembers + 1, false},
+	} {
+		id := e.recordGroup(t, fmt.Sprintf("group-%d", tc.members), tc.members)
+		path := fmt.Sprintf("/api/investigations/%d", id)
+		got := getInvestigation(t, e.sam, id)
+		if want := min(tc.members, store.MaxInvestigationMembers); len(got.Members) != want {
+			t.Errorf("%d members: admin sees %d, want %d", tc.members, len(got.Members), want)
+		}
+		if tc.readerSees {
+			getInvestigation(t, prodReader, id)
+		} else {
+			wantNotFound(t, prodReader, path)
+		}
+	}
+}
+
+func TestInvestigation_RefusesNonCanonicalIDs(t *testing.T) {
+	e := newInvEnv(t)
+	id := e.seedInv(t, invSeed{key: devSvc, summary: "Findings."})
+	incident := e.seedIncident(t, id, devSvc, "service_failing")
+	getInvestigation(t, e.sam, id)
+	for _, path := range []string{
+		fmt.Sprintf("/api/investigations/0%d", id), fmt.Sprintf("/api/investigations/+%d", id), "/api/investigations/0",
+		"/api/investigations/-1", fmt.Sprintf("/api/investigations/by-incident/0%d", incident), fmt.Sprintf("/api/investigations/by-incident/+%d", incident),
+	} {
+		wantNotFound(t, e.sam, path)
+	}
+	if resp := e.sam.get(fmt.Sprintf("/api/investigations/by-incident/%d", incident)); resp.StatusCode != http.StatusOK {
+		t.Errorf("canonical by-incident id: status %d, want 200", resp.StatusCode)
+	}
+}
+
+// The evidence rule must hold on its own: a service that is gone now is admin only for every action, and a service of
+// the same name in another account or region is another service.
+func TestInvestigation_GoneServiceLogsItemIsAdminOnly(t *testing.T) {
+	e := newInvEnv(t)
+	id := e.seedInv(t, invSeed{key: devSvc, summary: "Findings."})
+	e.seedEvidence(t, id, 1, "search_logs", "logs", goneSvc, "NOTE-OF-A-GONE-LOGS-ITEM", "EXCERPT-OF-A-GONE-LOGS-ITEM")
+	reader := e.reader(t, "vera", map[string]authz.ActionSet{"Dev": viewLogs, "Prod": viewLogs, "Staging": viewLogs})
+
+	status, body := invBody(t, reader, fmt.Sprintf("/api/investigations/%d", id))
+	if status != http.StatusOK || strings.Contains(body, "GONE-LOGS-ITEM") {
+		t.Errorf("reader with Logs everywhere: status %d body %s, want the item hidden", status, body)
+	}
+	if got := getInvestigation(t, e.sam, id); len(got.Evidence) != 1 {
+		t.Errorf("admin: evidence %d, want 1", len(got.Evidence))
+	}
+}
+
+func TestInvestigation_SameNamesElsewhereAreAnotherService(t *testing.T) {
+	e := newInvEnv(t)
+	id := e.seedInv(t, invSeed{key: devSvc, summary: "Findings."})
+	otherAccount, otherRegion := devSvc2, devSvc2
+	otherAccount.AccountID = "999999999999"
+	otherRegion.Region = "eu-central-1"
+	e.seedEvidence(t, id, 1, "search_logs", "logs", otherAccount, "NOTE-OTHER-ACCOUNT", "EXCERPT-OTHER-ACCOUNT")
+	e.seedEvidence(t, id, 2, "describe_service", "view", otherRegion, "NOTE-OTHER-REGION", "EXCERPT-OTHER-REGION")
+	reader := e.reader(t, "vera", map[string]authz.ActionSet{"Dev": viewLogs})
+
+	status, body := invBody(t, reader, fmt.Sprintf("/api/investigations/%d", id))
+	if status != http.StatusOK || strings.Contains(body, "OTHER-ACCOUNT") || strings.Contains(body, "OTHER-REGION") {
+		t.Errorf("reader: status %d body %s, want both items hidden", status, body)
+	}
+	if got := getInvestigation(t, e.sam, id); len(got.Evidence) != 2 {
+		t.Errorf("admin: evidence %d, want 2", len(got.Evidence))
+	}
+}
+
+// An account entry without a region cannot name its members' services, so only admins read it and the member
+// carries no service id (the web shows plain text).
+func TestInvestigation_AccountWithoutRegionIsAdminOnly(t *testing.T) {
+	e := newInvEnv(t)
+	noRegion := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: sandboxAccountID}}
+	id := e.seedInv(t, invSeed{kind: "account", key: noRegion, summary: "Account findings.",
+		members: []store.InvestigationMember{{Cluster: devSvc.Cluster, Service: devSvc.Service}}})
+	reader := e.reader(t, "vera", map[string]authz.ActionSet{"Dev": viewLogs, "Prod": viewLogs, "Staging": viewLogs})
+
+	wantNotFound(t, reader, fmt.Sprintf("/api/investigations/%d", id))
+	got := getInvestigation(t, e.sam, id)
+	if len(got.Members) != 1 || got.Members[0].ServiceID != "" || got.Members[0].Service != devSvc.Service {
+		t.Errorf("members of a region-less account = %+v, want one member with an empty service_id", got.Members)
+	}
+
+	known := e.seedInv(t, invSeed{kind: "account", key: invKey("", ""), summary: "Account findings.",
+		members: []store.InvestigationMember{{Cluster: devSvc.Cluster, Service: devSvc.Service}}})
+	if got := getInvestigation(t, e.sam, known); len(got.Members) != 1 || got.Members[0].ServiceID != devSvc.ID() {
+		t.Errorf("members with a region = %+v, want service_id %q", got.Members, devSvc.ID())
+	}
+}
+
+// The evidence rule on its own, with a subject that holds Logs without View (the store never writes such a set).
+func TestEvidenceRule_LogsNeedsViewAsWell(t *testing.T) {
+	tags := fixedTags{}
+	subject := authz.Subject{UserID: 7, Perms: map[authz.TagID]authz.ActionSet{1: authz.ActionSet(authz.Logs)}}
+	reader := investigationReader{subject: subject, tags: tags, existing: map[model.ServiceKey]bool{devSvc: true}}
+	for _, action := range []string{"logs", "view"} {
+		item := store.InvestigationEvidence{Action: action, AccountID: devSvc.AccountID, Region: devSvc.Region, ClusterName: devSvc.Cluster, ServiceName: devSvc.Service}
+		if reader.mayReadEvidence(item) {
+			t.Errorf("a %s item was readable by a subject without View", action)
+		}
+	}
+}
+
+// fixedTags puts every service under tag 1.
+type fixedTags struct{}
+
+func (fixedTags) DevTagID() authz.TagID                           { return 1 }
+func (fixedTags) ClusterTag(model.ClusterKey) (authz.TagID, bool) { return 1, true }
+func (fixedTags) ServiceTag(model.ServiceKey) (authz.TagID, bool) { return 0, false }
+
+func TestAlerts_TwoKindsOnOneServiceLinkTheirOwnInvestigation(t *testing.T) {
+	e := newInvEnv(t)
+	failing := serviceAlert(sandboxAccountID, "us-east-1", devSvc.Cluster, devSvc.Service, model.AlertDanger, "failing")
+	looping := serviceAlert(sandboxAccountID, "us-east-1", devSvc.Cluster, devSvc.Service, model.AlertWarning, "looping")
+	looping.alert.Kind = "restart_loop"
+	replaceAlerts(t, e.st, e.fk, failing, looping)
+	first := e.seedInv(t, invSeed{key: devSvc, state: "done", summary: "One."})
+	second := e.seedInv(t, invSeed{key: devSvc, state: "running"})
+	e.seedIncident(t, first, devSvc, "service_failing")
+	e.seedIncident(t, second, devSvc, "restart_loop")
+
+	resp := e.sam.get("/api/alerts")
+	var body struct {
+		Items []struct {
+			Kind          string                 `json:"kind"`
+			Investigation *AlertInvestigationDTO `json:"investigation"`
+		} `json:"items"`
+	}
+	decode(t, resp, &body)
+	got := map[string]int64{}
+	for _, item := range body.Items {
+		if item.Investigation != nil {
+			got[item.Kind] = item.Investigation.ID
+		}
+	}
+	if got["service_failing"] != first || got["restart_loop"] != second || len(got) != 2 {
+		t.Errorf("links by kind = %v, want service_failing %d and restart_loop %d", got, first, second)
 	}
 }

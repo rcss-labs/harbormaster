@@ -1,6 +1,6 @@
 import { render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { InvestigationDetailDTO } from '../../api/investigations'
 import { INVESTIGATION_DONE } from '../../test/investigationFixtures'
 import { InvestigationView } from './InvestigationView'
@@ -75,6 +75,26 @@ describe('InvestigationView', () => {
     const list = screen.getByRole('list', { name: 'Services' })
     expect(within(list).getByText('payments')).toBeInTheDocument()
     expect(within(list).getByText('ledger')).toBeInTheDocument()
+  })
+
+  it('shows a member without a service id as plain text under a key of its own', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    show({
+      subject: { ...INVESTIGATION_DONE.subject, kind: 'account', service_id: '', service: '' },
+      members: [
+        { service_id: '', service: 'payments', cluster: 'prod-main' },
+        { service_id: '', service: 'ledger', cluster: 'prod-main' },
+        { service_id: 'c', service: 'billing', cluster: 'prod-main' },
+      ],
+    })
+
+    const list = screen.getByRole('list', { name: 'Services' })
+    expect(within(list).getByText('payments')).toBeInTheDocument()
+    expect(within(list).queryByRole('link', { name: 'payments' })).not.toBeInTheDocument()
+    expect(within(list).queryByRole('link', { name: 'ledger' })).not.toBeInTheDocument()
+    expect(within(list).getByRole('link', { name: 'billing' })).toHaveAttribute('href', '/services/c/timeline')
+    expect(error).not.toHaveBeenCalled()
+    error.mockRestore()
   })
 
   it('says why there is no diagnosis for a skipped investigation', () => {

@@ -14,19 +14,11 @@ import (
 // investigationListLimit caps the investigations listed for one service.
 const investigationListLimit = 50
 
-// knownInvestigationState and knownInvestigationKind are the closed sets this code renders. Anything else is
-// answered as not found for everyone, admins included.
+// knownInvestigationState is the closed set of states this code renders. Any other state is answered as not found
+// for everyone, admins included; an unknown kind is refused by the default of mayRead's switch.
 func knownInvestigationState(state string) bool {
 	switch state {
 	case store.InvestigationRequested, store.InvestigationRunning, store.InvestigationDone, store.InvestigationFailed, store.InvestigationSkipped:
-		return true
-	}
-	return false
-}
-
-func knownInvestigationKind(kind string) bool {
-	switch kind {
-	case "service", "cluster", "account":
 		return true
 	}
 	return false
@@ -48,7 +40,8 @@ func (rd investigationReader) canView(key model.ServiceKey) bool {
 	return authz.Can(rd.subject, authz.View, authz.EffectiveServiceTag(rd.tags, key))
 }
 
-// mayRead applies the read rule of the investigation's subject kind.
+// mayRead applies the read rule of the investigation's kind and state. It is the one place that refuses an unknown
+// state or kind, for admins too.
 func (rd investigationReader) mayRead(v store.Investigation) bool {
 	if !knownInvestigationState(v.State) {
 		return false
@@ -60,7 +53,8 @@ func (rd investigationReader) mayRead(v store.Investigation) bool {
 		if rd.subject.Admin {
 			return true
 		}
-		if len(v.Members) == 0 {
+		// A list at the cap may have been cut, so it is not known to be complete.
+		if len(v.Members) == 0 || len(v.Members) >= store.MaxInvestigationMembers {
 			return false
 		}
 		for _, m := range v.Members {
@@ -73,71 +67,97 @@ func (rd investigationReader) mayRead(v store.Investigation) bool {
 	return false
 }
 
-// mayReadEvidence applies the rule of one item: View on its service for a view item, View and Logs for a logs item.
-// A service that is gone is for admins only; any other action is for nobody.
+// mayReadEvidence applies the rule of one item on its own: a service that is gone is for admins only, whatever the
+// action; then the reader needs View on the service's current tag, and Logs as well for a logs item. Any other action
+// is for nobody.
 func (rd investigationReader) mayReadEvidence(e store.InvestigationEvidence) bool {
-	key := model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: e.AccountID, Region: e.Region, Cluster: e.ClusterName}, Service: e.ServiceName}
+	key := evidenceKey(e)
+	if !rd.canView(key) {
+		return false
+	}
 	switch e.Action {
 	case "view":
-		return rd.canView(key)
+		return true
 	case "logs":
-		if !rd.canView(key) {
-			return false
-		}
-		if !rd.existing[key] {
-			return true // a gone service reached here only for an admin
-		}
 		return authz.Can(rd.subject, authz.Logs, authz.EffectiveServiceTag(rd.tags, key))
 	}
 	return false
 }
 
-// newInvestigationReader loads the tags and the existence of every service the rules will ask about, in one query.
-func (s *Server) newInvestigationReader(r *http.Request, keys []model.ServiceKey) (investigationReader, error) {
+// newInvestigationReader loads the tags once per request; services are added with know.
+func (s *Server) newInvestigationReader(r *http.Request) (investigationReader, error) {
 	tags, err := s.tags(r)
 	if err != nil {
 		return investigationReader{}, err
 	}
+	return investigationReader{subject: auth.SubjectFrom(r.Context()), tags: tags, existing: map[model.ServiceKey]bool{}}, nil
+}
+
+// know records which of the services exist, in one query.
+func (s *Server) know(r *http.Request, rd investigationReader, keys []model.ServiceKey) error {
 	existing, err := s.Store.ExistingServices(r.Context(), keys)
 	if err != nil {
-		return investigationReader{}, err
+		return err
 	}
-	return investigationReader{subject: auth.SubjectFrom(r.Context()), tags: tags, existing: existing}, nil
+	for key := range existing {
+		rd.existing[key] = true
+	}
+	return nil
 }
 
 func evidenceKey(e store.InvestigationEvidence) model.ServiceKey {
 	return model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: e.AccountID, Region: e.Region, Cluster: e.ClusterName}, Service: e.ServiceName}
 }
 
+// canonicalID parses a decimal id written without a sign, leading zeros or spaces; anything else is not an id.
+func canonicalID(raw string) (int64, bool) {
+	if raw == "" || raw[0] < '1' || raw[0] > '9' {
+		return 0, false
+	}
+	for i := 1; i < len(raw); i++ {
+		if raw[i] < '0' || raw[i] > '9' {
+			return 0, false
+		}
+	}
+	id, err := strconv.ParseInt(raw, 10, 64)
+	return id, err == nil
+}
+
 // investigationDetail answers for one investigation: not found unless this reader may read it, else the summary and
 // the evidence this reader may see. Everything is computed from the current permissions on every request.
 func (s *Server) investigationDetail(w http.ResponseWriter, r *http.Request, v store.Investigation) {
-	if !knownInvestigationKind(v.SubjectKind) || !knownInvestigationState(v.State) {
-		s.fail(w, store.ErrNotFound)
-		return
-	}
-	evidence, err := s.Store.ListInvestigationEvidence(r.Context(), v.ID)
+	reader, err := s.newInvestigationReader(r)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	keys := make([]model.ServiceKey, 0, len(v.Members)+len(evidence)+1)
+	subjectKeys := make([]model.ServiceKey, 0, len(v.Members)+1)
 	if v.SubjectKind == "service" {
-		keys = append(keys, investigationServiceKey(v))
+		subjectKeys = append(subjectKeys, investigationServiceKey(v))
 	}
 	for _, m := range v.Members {
-		keys = append(keys, investigationMemberKey(v, m))
+		subjectKeys = append(subjectKeys, investigationMemberKey(v, m))
 	}
-	for _, e := range evidence {
-		keys = append(keys, evidenceKey(e))
-	}
-	reader, err := s.newInvestigationReader(r, keys)
-	if err != nil {
+	if err := s.know(r, reader, subjectKeys); err != nil {
 		s.fail(w, err)
 		return
 	}
 	if !reader.mayRead(v) {
 		s.fail(w, store.ErrNotFound)
+		return
+	}
+	// Evidence is loaded only for a reader who may read the investigation at all.
+	evidence, err := s.Store.ListInvestigationEvidence(r.Context(), v.ID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	evidenceKeys := make([]model.ServiceKey, 0, len(evidence))
+	for _, e := range evidence {
+		evidenceKeys = append(evidenceKeys, evidenceKey(e))
+	}
+	if err := s.know(r, reader, evidenceKeys); err != nil {
+		s.fail(w, err)
 		return
 	}
 	out := InvestigationDetailDTO{
@@ -146,7 +166,7 @@ func (s *Server) investigationDetail(w http.ResponseWriter, r *http.Request, v s
 		Evidence:         make([]InvestigationEvidenceDTO, 0, len(evidence)),
 	}
 	for _, m := range v.Members {
-		out.Members = append(out.Members, InvestigationMemberDTO{ServiceID: investigationMemberKey(v, m).ID(), Service: m.Service, Cluster: m.Cluster})
+		out.Members = append(out.Members, InvestigationMemberDTO{ServiceID: investigationMemberID(v, m), Service: m.Service, Cluster: m.Cluster})
 	}
 	for _, e := range evidence {
 		if !reader.mayReadEvidence(e) {
@@ -163,8 +183,8 @@ func (s *Server) investigationDetail(w http.ResponseWriter, r *http.Request, v s
 
 // getInvestigation answers GET /api/investigations/{id}.
 func (s *Server) getInvestigation(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
+	id, ok := canonicalID(r.PathValue("id"))
+	if !ok {
 		s.fail(w, store.ErrNotFound)
 		return
 	}
@@ -178,8 +198,8 @@ func (s *Server) getInvestigation(w http.ResponseWriter, r *http.Request) {
 
 // getIncidentInvestigation answers GET /api/investigations/by-incident/{incidentId}.
 func (s *Server) getIncidentInvestigation(w http.ResponseWriter, r *http.Request) {
-	incident, err := strconv.ParseInt(r.PathValue("incidentId"), 10, 64)
-	if err != nil {
+	incident, ok := canonicalID(r.PathValue("incidentId"))
+	if !ok {
 		s.fail(w, store.ErrNotFound)
 		return
 	}

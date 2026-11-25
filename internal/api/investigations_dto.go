@@ -101,6 +101,15 @@ func investigationServiceKey(v store.Investigation) model.ServiceKey {
 	return model.ServiceKey{ClusterKey: investigationClusterKey(v), Service: v.ServiceName}
 }
 
+// investigationMemberID is a member's service id, empty when the group has no region: without it the service is not
+// named, so the web shows the member as text.
+func investigationMemberID(v store.Investigation, m store.InvestigationMember) string {
+	if v.Region == "" {
+		return ""
+	}
+	return investigationMemberKey(v, m).ID()
+}
+
 // investigationMemberKey is a member's service. A group investigation keeps the account and region of its subject.
 func investigationMemberKey(v store.Investigation, m store.InvestigationMember) model.ServiceKey {
 	return model.ServiceKey{ClusterKey: model.ClusterKey{AccountID: v.AccountID, Region: v.Region, Cluster: m.Cluster}, Service: m.Service}
