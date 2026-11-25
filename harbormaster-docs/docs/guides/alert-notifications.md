@@ -14,6 +14,9 @@ Notifications are under **Settings > Notifications** (`/settings/notifications`,
 | Update | For a cluster or account entry, when more services fail or the severity rises. Nothing is sent when it gets better. |
 | Repeat | While it stays open, at the route's repeat interval (`Do not repeat`, `Every 30 minutes` or `Every 2 hours`). A repeat lists the current services. |
 | Resolved | It has been gone for 2 minutes (a shorter flap is one incident), if the route has **Notify when resolved** and its opened message was delivered. |
+| Diagnosis | Only on a route with **Investigate with AI** on. An AI investigation of the alert finished with a summary, the alert is still open and the Opened message was delivered. Sent once for each route and alert. Never for PagerDuty. |
+
+With **Investigate with AI** on, a route also gets a [Diagnosis](#diagnosis-messages) after the Opened message. See [Automatic AI investigations](ai-agent-investigator.md).
 
 A route can choose from seven alert types: service failing, service degraded, restart loop, unhealthy tasks or targets, deployment failed, cannot place tasks, and account unreachable. `info` alerts are never sent.
 
@@ -23,8 +26,8 @@ One route is one channel. For two Slack channels or two Telegram chats, add two 
 
 - **Slack**: paste an incoming webhook URL (`https://hooks.slack.com/...`). It posts to the channel the webhook belongs to. The optional **Channel** field is only a label.
 - **Telegram**: create a bot with BotFather, add the bot to the chat (for a channel, make it an administrator), then enter the **Bot token** and **Chat ID** (a number, negative for groups and channels, or `@channelname`). For a group topic, enter the **Topic ID**. To find a chat ID, send the bot a message and open `https://api.telegram.org/bot<token>/getUpdates`.
-- **PagerDuty**: paste an Events API v2 **integration key** and choose the US or EU region. Opened and updates trigger an incident, resolved resolves it, and the dedup key keeps one incident per alert.
-- **Webhook**: Harbormaster POSTs one JSON object per notification with `event`, `scope`, `severity`, `title`, `text`, `service`, `cluster`, `account_id`, `region` and `url`. Cluster and account entries add `threshold`, `failing`, `total` and `services`. An optional **Signing secret** adds `X-Harbormaster-Signature: sha256=<HMAC of the body>`. `X-Harbormaster-Delivery` is a stable id per delivery.
+- **PagerDuty**: paste an Events API v2 **integration key** and choose the US or EU region. Opened and updates trigger an incident, resolved resolves it, and the dedup key keeps one incident per alert. PagerDuty gets no diagnosis message. On a route with **Investigate with AI** on, the incident's link opens `/investigations/incident/<incident id>` in Harbormaster, which shows that incident's investigation once it exists.
+- **Webhook**: Harbormaster POSTs one JSON object per notification with `event`, `scope`, `severity`, `title`, `text`, `service`, `cluster`, `account_id`, `region` and `url`. Cluster and account entries add `threshold`, `failing`, `total` and `services`. An optional **Signing secret** adds `X-Harbormaster-Signature: sha256=<HMAC of the body>`. `X-Harbormaster-Delivery` is a stable id per delivery. A route with **Investigate with AI** on also receives a `diagnosis` event: see [Diagnosis messages](#diagnosis-messages).
 - **Email**: needs `HM_SMTP_HOST` and `HM_SMTP_FROM` (and usually `HM_SMTP_USERNAME` and `HM_SMTP_PASSWORD`) on the server. STARTTLS is required unless `HM_SMTP_TLS=implicit`. Without `HM_SMTP_HOST` the Email option is disabled. Enter up to 10 addresses.
 
 ## Scope
@@ -43,6 +46,56 @@ An entry for a cluster, service or account that no longer exists is marked `No l
 ## Scaling is not a failure
 
 A service scaled up from zero is `failing`, and a scale-out is `degraded`, until the new tasks run. The [off-hours](scaling-and-off-hours.md) wake does this every morning. `HM_NOTIFY_SETTLE` (default 3 minutes) makes `service_failing` and `service_degraded` wait that long before they are notified or counted toward a threshold. Restart loops, failed deployments and the other types notify at once. The trade-off: a service that is simply down is reported up to 3 minutes late through those two types. Set it to `0` to notify immediately. A deployment in progress, a service scaled to zero and scaling in raise no alert.
+
+## Diagnosis messages
+
+**Investigate with AI** is a switch on each route, off by default. It appears only while the AI agent is on, and a route cannot be switched on without it. With it on, Harbormaster asks the AI agent to investigate the alert after the Opened message went out, and sends a **Diagnosis** when there is a summary. The Opened message is never held back for it: it is sent on its own schedule whether or not the agent works. For what the investigation does, what it can get wrong and what it costs, see [Automatic AI investigations](ai-agent-investigator.md).
+
+A diagnosis is sent when all of these hold:
+
+- the route is on, has the switch on, and is not PagerDuty;
+- the Opened message of that alert was delivered to the route;
+- the investigation finished with a summary;
+- the alert has not resolved.
+
+If the alert resolves first, the investigation is still stored and readable, but no Diagnosis is sent, and one already waiting is cancelled. A route whose switch is turned off or that is deleted before the send gets nothing. Other routes are unaffected. A Diagnosis for a warning follows the route's quiet hours (warnings are held until 08:00 when **Hold warnings** is on); critical ones are never held. It appears in the delivery log as **Diagnosis**, is retried like other messages, and does not count toward the route's "last three deliveries failed" warning.
+
+Every diagnosis message carries "Written by AI. Check it before acting." ahead of the text and a link to the investigation. The text is the model's summary, cleaned again at send time: a summary that fails the checks is replaced by a fixed sentence, and every link that is not to your Harbormaster address is replaced by `[link removed]`. See [what the summary check does and does not catch](ai-agent-investigator.md#what-the-summary-check-does-and-does-not-catch). The summary is plain text in every destination, with no Markdown.
+
+| Destination | What the diagnosis looks like |
+| --- | --- |
+| Slack | A message headed `Diagnosis: <alert title>`, the notice line, the summary as plain text (up to 3000 characters), then the place and an **Open the investigation** link. Link previews are off. |
+| Telegram | A bold `Diagnosis: <alert title>` headline, the place, the notice line, the summary in a preformatted block (so Telegram makes no mention, command, hashtag or link of it) and an **Open the investigation** link. Link previews are off. |
+| Email | Subject `[Harbormaster] Diagnosis: <alert title>`. Plain text: the notice line, the summary and the link. |
+| Webhook | A JSON object with `"event": "diagnosis"`, described below. |
+| PagerDuty | Nothing is sent. |
+
+### Webhook event
+
+A diagnosis has the fields of every webhook message, a link in `url` to the investigation, and three more: `summary`, `investigation_id` and `ai_generated` (always `true`). `event` is `diagnosis`, not in the `alert.*` family, so a receiver that rejects unknown event names needs a change before you switch the route on.
+
+```json
+{
+  "event": "diagnosis",
+  "delivery_id": 4211,
+  "scope": "service",
+  "kind": "service_failing",
+  "severity": "critical",
+  "title": "orders-api is failing",
+  "text": "0 of 3 tasks are running.",
+  "service": "orders-api",
+  "cluster": "production",
+  "account_id": "<account-id>",
+  "region": "eu-west-1",
+  "at": "2026-11-25T09:14:03Z",
+  "url": "https://harbormaster.internal.example.com/investigations/87",
+  "summary": "The tasks stop a few seconds after they start. The last deployment changed the database host. Check the task's environment and the database security group.",
+  "investigation_id": 87,
+  "ai_generated": true
+}
+```
+
+The `title` and `text` are the alert's, as in the Opened message. The signature header, if you set a signing secret, covers this body as for every event. Delivery is at least once: dedupe on `X-Harbormaster-Delivery`.
 
 ## Quiet hours, delivery log and retries
 
@@ -78,5 +131,6 @@ Check it worked: the test message arrives in Slack and the **Delivery log** show
 ## Next steps
 
 - [Configuration reference](../reference/configuration.md)
+- [Automatic AI investigations](ai-agent-investigator.md)
 - [Overview and clusters](overview-and-clusters.md)
 - [Audit log](audit-log.md)

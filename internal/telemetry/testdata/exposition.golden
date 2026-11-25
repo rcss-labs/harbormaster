@@ -51,6 +51,9 @@ harbormaster_snapshot_cache_requests_total{model="cluster",result="hit"} 1
 # HELP harbormaster_snapshot_cache_token_write_failures_total Generation token writes that failed (the cached pages stay stale until the retry succeeds).
 # TYPE harbormaster_snapshot_cache_token_write_failures_total counter
 harbormaster_snapshot_cache_token_write_failures_total 0
+# HELP harbormaster_investigation_step_errors_total Errors and panics of the dispatcher's investigation step (alert sends are not affected).
+# TYPE harbormaster_investigation_step_errors_total counter
+harbormaster_investigation_step_errors_total 0
 # HELP harbormaster_fenced_writes_rejected_total Poller writes rejected because the slice lease was lost.
 # TYPE harbormaster_fenced_writes_rejected_total counter
 harbormaster_fenced_writes_rejected_total 1
