@@ -217,7 +217,7 @@ func seedReviewResult(ctx context.Context, st *store.Store, review store.Review)
 		return nil
 	}
 	now := time.Now()
-	run, err := st.RequestManualReviewRun(ctx, review.ID, "Example from the demo seed", now)
+	run, err := st.RequestManualReviewRun(ctx, review.ID, "Example from the demo seed", false, now)
 	if err != nil {
 		return fmt.Errorf("seed review result: %w", err)
 	}
