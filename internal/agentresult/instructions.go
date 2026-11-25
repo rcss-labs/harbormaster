@@ -27,9 +27,9 @@ const (
 	InstructionsSecret   InstructionProblem = "secret"
 )
 
-var instructionLineEnds = strings.NewReplacer("\r\n", "\n", "\r", "\n")
+var instructionLineEnds = strings.NewReplacer("\r\n", "\n", "\r", "\n", "\u2028", "\n", "\u2029", "\n")
 
-// CleanInstructions makes every line break a line feed and trims white space at both ends. Nothing else changes.
+// CleanInstructions makes every line break, U+2028 and U+2029 included, a line feed and trims white space at both ends. Nothing else changes.
 func CleanInstructions(raw string) string {
 	return strings.TrimSpace(instructionLineEnds.Replace(raw))
 }

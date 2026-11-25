@@ -55,7 +55,7 @@ func TestRuns_CustomInstructionsTable(t *testing.T) {
 		notText  = "instructions must be valid UTF-8 without a NUL character."
 		tooLong  = "instructions must hold at most 2000 characters and 8000 bytes."
 		hidden   = "instructions must hold no hidden characters, and only line feeds as line breaks."
-		edges    = "instructions must have no white space at either end."
+		edges    = "instructions must have only line feeds as line breaks and no white space at either end."
 	)
 	words := strings.Repeat("abcd ", 400)[:1991]
 	for name, c := range map[string]struct {
@@ -75,6 +75,9 @@ func TestRuns_CustomInstructionsTable(t *testing.T) {
 		"a trailing break":    {"SENTINEL\n", edges},
 		"an outer separator":  {"SENTINEL\u2028", edges},
 		"a CR LF":             {"SENTINEL\r\nx", hidden},
+		"a line separator":    {"SENTINEL by tag.\u2028Then by account.", edges},
+		"a paragraph one":     {"SENTINEL by tag.\u2029Then by account.", edges},
+		"one beside a secret": {"SENTINEL " + fakeJWT + "\u2028Report.", edges},
 	} {
 		p := fake.New(calls(submitCall(plainSummary)))
 		h := newHarness(t, harnessOptions{providers: map[string]provider.Provider{"fake": p}})
@@ -100,7 +103,6 @@ func TestRuns_CustomInstructionsTable(t *testing.T) {
 		"2000 characters":        words + " 12345678",
 		"2000 x four bytes":      strings.Repeat("\U0001F600", 2000),
 		"lines and tabs":         "Costs:\n\t- by tag\n\n\t- by account",
-		"a separator inside":     "Costs by tag.\u2028Then by account.",
 		"another script":         "Vergleiche die Kosten über die Woche. コストを比較する。",
 		"a secret, for the loop": "Use the token " + fakeJWT + " here.",
 	} {

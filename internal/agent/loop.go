@@ -213,7 +213,7 @@ func (l *Loop) Run(ctx context.Context, in RunInput, emit func(Event)) error {
 	if r.found != nil {
 		defer r.logFindings()
 		if r.customReview() {
-			r.request = r.cleanRequest(in.Task.Review.Instructions)
+			r.request = r.cleanText(in.Task.Review.Instructions)
 		}
 		r.messages = []provider.Message{r.taskMessage(*in.Task)}
 	} else {

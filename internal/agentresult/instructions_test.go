@@ -15,6 +15,9 @@ func TestCleanInstructions_LineEndsAndEdgesOnly(t *testing.T) {
 		{"edges trimmed", " \t\n a b \r\n\t ", "a b"},
 		{"inner spacing, tabs and blank lines kept", "a  b\t\tc\n\n\n  d  \ne", "a  b\t\tc\n\n\n  d  \ne"},
 		{"mixed ends", "x\r\r\ny\n\rz", "x\n\ny\n\nz"},
+		{"line separator", "a\u2028b", "a\nb"},
+		{"paragraph separator", "a\u2029b", "a\nb"},
+		{"separators beside other ends and at the edges", "\u2029a\u2028\r\n\u2029b\u2028", "a\n\n\nb"},
 	}
 	for _, c := range cases {
 		if got := CleanInstructions(c.in); got != c.want {
@@ -24,7 +27,7 @@ func TestCleanInstructions_LineEndsAndEdgesOnly(t *testing.T) {
 }
 
 func TestCleanInstructions_Idempotent(t *testing.T) {
-	for _, in := range []string{"", " a\r\nb ", "\r\n\r\n", "x\r\r\ny\n\rz", "  a \t\n b  "} {
+	for _, in := range []string{"", " a\r\nb ", "\r\n\r\n", "x\r\r\ny\n\rz", "  a \t\n b  ", "a\u2028 \u2029b\u2028"} {
 		once := CleanInstructions(in)
 		if twice := CleanInstructions(once); twice != once {
 			t.Errorf("not idempotent for %q: %q then %q", in, once, twice)
@@ -66,6 +69,16 @@ func TestCheckInstructions_Table(t *testing.T) {
 	for _, c := range cases {
 		if got := CheckInstructions(c.in); got != c.want {
 			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// The scrubber walks a JSON line only between line feeds, so the secret is seen once the text is cleaned.
+func TestCheckInstructions_SecretInAJSONLineBetweenSeparators(t *testing.T) {
+	line := `[{"value":"not a real one","name":"DB_PASSWORD"}]`
+	for _, separator := range []string{"\u2028", "\u2029", "\n"} {
+		if got := CheckInstructions(CleanInstructions("Look:" + separator + line + separator + "Report.")); got != InstructionsSecret {
+			t.Errorf("separator %q: got %q, want %q", separator, got, InstructionsSecret)
 		}
 	}
 }

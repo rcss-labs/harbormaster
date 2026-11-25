@@ -164,7 +164,7 @@ func instructionsRefusal(review TaskReview) string {
 	switch agentresult.CheckInstructions(text) {
 	case agentresult.InstructionsOK, agentresult.InstructionsSecret:
 		if agentresult.CleanInstructions(text) != text {
-			return "instructions must have no white space at either end."
+			return "instructions must have only line feeds as line breaks and no white space at either end."
 		}
 		return ""
 	case agentresult.InstructionsNotText:
@@ -180,16 +180,6 @@ func instructionsRefusal(review TaskReview) string {
 }
 
 const instructionsNotText = "instructions must be valid UTF-8 without a NUL character."
-
-// lineSeparators are the line breaks a request may hold that the scrubber does not take for one.
-var lineSeparators = strings.NewReplacer("\u2028", "\n", "\u2029", "\n")
-
-// cleanRequest prepares an admin's request for the model. It is scrubbed as it
-// came and again as it reads by line: either reading may show a secret the other
-// hides.
-func (r *session) cleanRequest(text string) string {
-	return r.cleanText(lineSeparators.Replace(secretshape.ScrubText(text)))
-}
 
 // reviewMessage renders a review as its first message: a fixed template with
 // the type's instructions, which are the loop's own words, then an admin's
