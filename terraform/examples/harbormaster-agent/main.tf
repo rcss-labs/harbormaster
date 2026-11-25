@@ -62,8 +62,10 @@ module "harbormaster_agent" {
   image              = local.agent_image
   upstream_url       = local.base_url
 
-  harbormaster_alb_security_group_id   = module.harbormaster.security_group_ids.alb
-  harbormaster_task_security_group_ids = [module.harbormaster.security_group_ids.web]
+  harbormaster_alb_security_group_id = module.harbormaster.security_group_ids.alb
+  # Single-service install: the server task calls the agent. With split_services = true use
+  # [module.harbormaster.security_group_ids.web] instead.
+  harbormaster_task_security_group_ids = [module.harbormaster.security_group_ids.server]
 
   # Prices and context sizes are the operator's to keep current.
   model_providers = [
