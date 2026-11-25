@@ -56,7 +56,13 @@ Skip this section if you do not run the agent (`HM_AGENT_URL` unset).
 - [ ] **Keys.** Keep provider API keys in Secrets Manager only, one secret per provider. Keys are kept out of logs, errors, audit rows and browser responses by design, with provider error text scrubbed best effort. Rotate them as in the [runbook](../operations/runbooks/ai-agent.md). Give the execution role `kms:Decrypt` if a customer-managed key encrypts them.
 - [ ] **Allowance.** Set a monthly allowance you are happy to lose, and lower `limits.max_run_tokens` and `limits.max_steps` if the defaults are generous.
 - [ ] **Bedrock.** Use ECS container credentials. Do not set `AWS_ENDPOINT_URL_*` in the agent's environment: the STS and SSO credential clients honour them.
-- [ ] **Retention.** Review `HM_RETENTION_AGENT_CONVERSATIONS` (30 days by default).
+- [ ] **Retention.** Review `HM_RETENTION_AGENT_CONVERSATIONS` (30 days by default) and `HM_RETENTION_AGENT_RUNS` (90 days), which also covers the stored evidence of investigations.
+- [ ] **Agent identity.** Skip this and the next four items if no route has **Investigate with AI** on. Grant the agent identity View only on tags you want investigated, and Logs on fewer. It starts with no access. Review `agent_identity_update` audit entries.
+- [ ] **Investigator model.** Choose a provider whose terms you accept for unattended runs over your alerts. Keep redaction on for it. Prefer Amazon Bedrock for sensitive estates.
+- [ ] **Destinations.** A diagnosis puts a model's text into each route's destination. Switch the route on only for destinations that treat text as text (no automation that runs what a message says). Check that your webhook receiver accepts the `diagnosis` event.
+- [ ] **Allowance and counts.** The investigator spends from the chat's allowance. Keep `HM_AGENT_INVESTIGATIONS_PER_HOUR` low enough that a storm cannot use the month's allowance, or set it to `0` to turn investigations off.
+- [ ] **Identity limits.** Keep `HM_AGENT_IDENTITY_LOG_SEARCH_MAX_GB` and `HM_AGENT_IDENTITY_LOG_SEARCH_DAILY_GB` at values whose CloudWatch Logs Insights cost you accept, or set the daily one to `0` to stop its log search.
+- [ ] **Coordinator reach.** In split mode, the coordinator's security group must be in `harbormaster_task_security_group_ids` on the agent module, and nothing else needs to be.
 - [ ] **Alarms.** Set `alarm_sns_topic_arns` on the agent module.
 
 ## Related pages

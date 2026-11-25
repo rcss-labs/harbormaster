@@ -1,6 +1,6 @@
 # Terraform module: harbormaster-agent
 
-The `harbormaster-agent` module runs the AI agent: a private ECS Fargate service behind an internal load balancer. Harbormaster calls it for chat runs. This page lists every input and output, what the module creates and which permissions it holds. Use it when you deploy or review the agent.
+The `harbormaster-agent` module runs the AI agent: a private ECS Fargate service behind an internal load balancer. Harbormaster calls it for chat runs and, from its coordinator, for automatic investigations. This page lists every input and output, what the module creates and which permissions it holds. Use it when you deploy or review the agent.
 
 The module source is `terraform/modules/harbormaster-agent`. For the install steps, see [Install the AI agent](../install/ai-agent.md). For day-to-day operation, see the [AI agent runbook](../operations/runbooks/ai-agent.md).
 
@@ -37,7 +37,7 @@ A variable with no default is required.
 | `upstream_url` | `string` | none | yes | `HM_AGENT_UPSTREAM_URL`: Harbormaster's internal address. Must start with `https://` and match the internal certificate's name. |
 | `upstream_ca_pem` | `string` | `null` | no | `HM_AGENT_UPSTREAM_CA_PEM`: PEM of extra CAs that sign Harbormaster's internal load balancer certificate. A plain environment value, not a secret. |
 | `harbormaster_alb_security_group_id` | `string` | none | yes | Security group of Harbormaster's internal load balancer (the egress target). Use `security_group_ids.alb`. |
-| `harbormaster_task_security_group_ids` | `list(string)` | none | yes | The only callers the agent's load balancer admits on 443, at least one. Use `security_group_ids.web` (`server` in single-service mode). |
+| `harbormaster_task_security_group_ids` | `list(string)` | none | yes | The only callers the agent's load balancer admits on 443, at least one. Use `security_group_ids.web` and `security_group_ids.coordinator` with split services (`server` in single-service mode): the web tasks run the chat and the coordinator runs automatic investigations. |
 | `model_providers` | `list(object)` | none | yes | The catalogue, serialised as `HM_AGENT_PROVIDERS`. Each entry has `provider` (`anthropic`, `openai`, `google` or `bedrock`, each at most once) and `models`: `id`, `input_per_mtok_usd` and `output_per_mtok_usd` (decimal strings in US dollars per million tokens, such as `"3.00"`) and `context_tokens`. At least one provider. The input is not named `providers` because Terraform reserves that name. |
 | `api_key_secret_arns` | `map(string)` | `{}` | no | Secrets Manager ARN of each provider's API key, keyed `anthropic`, `openai` or `google`. Every non-Bedrock provider in the catalogue needs an entry and every entry needs a catalogue provider. The values reach the task as `secrets`, never as environment. |
 | `bedrock_region` | `string` | `null` | no | `HM_AGENT_BEDROCK_REGION`. Required when the catalogue lists `bedrock`. |

@@ -91,6 +91,7 @@ nav:
       - Access tokens: guides/access-tokens.md
       - AI access (MCP): guides/ai-access-mcp.md
       - AI chat: guides/ai-agent-chat.md
+      - Automatic AI investigations: guides/ai-agent-investigator.md
       - Network and storage: guides/network-and-storage.md
       - AWS accounts: guides/aws-accounts.md
       - Audit log: guides/audit-log.md

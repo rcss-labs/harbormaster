@@ -2,7 +2,7 @@
 
 How to deploy the Harbormaster AI agent with the `harbormaster-agent` Terraform module and switch the chat on. For the engineer who owns the Harbormaster deployment. To use the chat, see [AI chat](../guides/ai-agent-chat.md).
 
-The agent is a separate service. Harbormaster calls it for chat runs. The agent calls a model provider and reads Harbormaster through its internal load balancer with a short-lived, read-only run token. It has no database, cache, SAML or AWS estate access. It is off by default: with `HM_AGENT_URL` unset there are no agent routes, no setting, no button, and a run token does not authenticate.
+The agent is a separate service. Harbormaster calls it for chat runs, and its coordinator calls it for [automatic investigations](../guides/ai-agent-investigator.md) of alerts. The agent calls a model provider and reads Harbormaster through its internal load balancer with a short-lived, read-only run token. It has no database, cache, SAML or AWS estate access. It is off by default: with `HM_AGENT_URL` unset there are no agent routes, no setting, no button, and a run token does not authenticate.
 
 ## Before you begin
 
@@ -35,7 +35,10 @@ The agent is a separate service. Harbormaster calls it for chat runs. The agent 
 
       upstream_url                         = "https://harbormaster.internal.example.com"
       harbormaster_alb_security_group_id   = module.harbormaster.security_group_ids.alb
-      harbormaster_task_security_group_ids = [module.harbormaster.security_group_ids.web]
+      harbormaster_task_security_group_ids = [
+        module.harbormaster.security_group_ids.web,
+        module.harbormaster.security_group_ids.coordinator,
+      ]
 
       model_providers = [
         {
@@ -54,7 +57,7 @@ The agent is a separate service. Harbormaster calls it for chat runs. The agent 
     }
     ```
 
-    Use `security_group_ids.server` instead of `web` when Harbormaster runs as a single service. The `web` tasks (or the single service) are the only callers the agent's load balancer admits.
+    The agent's load balancer admits only the groups you list. With split services, list both `web` (the chat) and `coordinator` (the investigator job), as above: with `web` alone the chat works and every investigation fails as `agent_unavailable`. When Harbormaster runs as a single service, list `security_group_ids.server` alone.
 
     Prices are what your provider charges per million tokens. Harbormaster hardcodes no model id and no price: the catalogue is the only source, so keep it current. See [Terraform module: harbormaster-agent](../reference/terraform-agent.md) for every input.
 
@@ -73,7 +76,7 @@ The agent is a separate service. Harbormaster calls it for chat runs. The agent 
     }
     ```
 
-    `extra_env` reaches every service, so the web tasks (which serve chat) and the coordinator tasks (which run the repair job for interrupted runs) both get `HM_AGENT_URL`. In split mode, check that both roles got it. If the agent's certificate comes from a private CA, also set `HM_AGENT_CA_PEM` to the CA's PEM.
+    `extra_env` reaches every service, so the web tasks (which serve chat) and the coordinator tasks (which run the repair job for interrupted runs and the investigator) both get `HM_AGENT_URL`. The same goes for the investigation settings in [Configuration](../reference/configuration.md#ai-agent): put any you change in `extra_env`. In split mode, check that both roles got it. If the agent's certificate comes from a private CA, also set `HM_AGENT_CA_PEM` to the CA's PEM.
 
 3. Apply in your deployment system. Nothing here runs `terraform plan` or `terraform apply` locally.
 
@@ -82,6 +85,14 @@ The agent is a separate service. Harbormaster calls it for chat runs. The agent 
     Choose the first allowance as several times what one question reserves. A question must fit its whole worst case in the allowance left, and the worst case is the run's token limit at the model's higher price. **Settings > AI agent** shows it under the model: "One question reserves up to $X with this model." For example, with the default 200,000-token limit and a model that charges 3 USD per million tokens at most, one question reserves up to $0.60, so an allowance of $10 covers at least 16 questions at their worst case, and far more in practice. An allowance below the reservation refuses every question, and the page warns about it.
 
 5. Turn on **AI chat** for users in **Settings > Users**. See [AI chat](../guides/ai-agent-chat.md).
+
+6. Optional: automatic investigations. They are off until you do all of this, and each step can be left for later.
+
+    1. In **Settings > AI agent**, choose **Model for investigations**. Without it, investigations are skipped as `not_configured`.
+    2. In **Agent identity** on the same page, give the agent identity View (and, if you accept it, Logs) on the tags to investigate. It starts with no access.
+    3. In **Settings > Notifications**, tick **Investigate with AI** on a route.
+
+    Read [Automatic AI investigations](../guides/ai-agent-investigator.md) first: it spends from the same allowance as the chat, sends log text to the model provider and puts the model's text into your notification destinations. An agent that is older than Harbormaster does not offer the investigator role: investigations are skipped as `not_configured` until both are new. See [Upgrading](upgrading.md#the-release-that-adds-automatic-investigations).
 
 ## Bedrock
 
@@ -97,6 +108,7 @@ Bedrock needs no API key. List `bedrock` in `model_providers`, set `bedrock_regi
 - As a user with AI chat, ask "who am I and what can I see?" The answer matches **My access**.
 - `GET /api/agent/status` answers `404` while `HM_AGENT_URL` is unset.
 - The audit log shows `agent_settings_update` for your save and `agent_run` for each question.
+- With investigations on, an alert on a service the identity can see shows **Investigating** and then **Diagnosis ready** in **Needs attention**, and `agent_run` rows with the agent identity as actor appear.
 
 ## Try it locally
 
