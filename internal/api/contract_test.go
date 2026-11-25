@@ -204,6 +204,9 @@ func contractShapes() map[string]any {
 		// AI investigations
 		"investigations": shapeOf(reflect.TypeFor[ItemsResponse[InvestigationDTO]]()),
 		"investigation":  shapeOf(reflect.TypeFor[InvestigationDetailDTO]()),
+		// scheduled AI reviews
+		"reviewRuns": shapeOf(reflect.TypeFor[ReviewRunsDTO]()),
+		"reviewRun":  shapeOf(reflect.TypeFor[ReviewRunDetailDTO]()),
 	}
 }
 
