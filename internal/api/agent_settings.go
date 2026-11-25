@@ -28,6 +28,11 @@ const (
 	testRunTokens      = 2000 // the "Test model" call reserves a run of this many tokens at the model's higher price
 )
 
+// investigatorRoleName is the role id of background investigations; settingsRoles are the roles the form sets.
+const investigatorRoleName = "investigator"
+
+var settingsRoles = []string{chatRoleName, investigatorRoleName}
+
 // testCallLimit bounds the "Test model" call; the client's own limit is shorter.
 var testCallLimit = agentrun.Limit{Normal: 2 * time.Minute, Draining: 2 * time.Second}
 
@@ -110,8 +115,19 @@ type AgentChatModelDTO struct {
 	AllowanceBelowQuestion bool   `json:"allowance_below_question"`
 }
 
+// AgentRoleModelsDTO carries the model of each role that has one. The investigator entry has the shape and the stale-model
+// rule of the chat entry; MaxQuestionUSD there is what one background investigation reserves.
 type AgentRoleModelsDTO struct {
-	Chat *AgentChatModelDTO `json:"chat,omitempty"`
+	Chat         *AgentChatModelDTO `json:"chat,omitempty"`
+	Investigator *AgentChatModelDTO `json:"investigator,omitempty"`
+}
+
+// AgentInvestigatorLimitsDTO is what the operator's configuration allows background investigations; read only.
+type AgentInvestigatorLimitsDTO struct {
+	WindowMinutes  int `json:"window_minutes"`
+	PerHour        int `json:"per_hour"`
+	Concurrent     int `json:"concurrent"`
+	MaxWaitMinutes int `json:"max_wait_minutes"`
 }
 
 type AgentSpendDTO struct {
@@ -132,6 +148,9 @@ type AgentSettingsDTO struct {
 	} `json:"catalogue"`
 	AgentReachable bool          `json:"agent_reachable"`
 	Spend          AgentSpendDTO `json:"spend"`
+	// Identity is what background investigations may read; it has its own save (PUT /api/agent/identity).
+	Identity     AgentIdentityDTO           `json:"identity"`
+	Investigator AgentInvestigatorLimitsDTO `json:"investigator"`
 }
 
 func (s *Server) agentSettingsDTO(r *http.Request) (AgentSettingsDTO, error) {
@@ -161,15 +180,28 @@ func (s *Server) agentSettingsDTO(r *http.Request) (AgentSettingsDTO, error) {
 		}
 		out.Catalogue.Providers = append(out.Catalogue.Providers, dto)
 	}
-	if ref, ok := settings.RoleModels[chatRoleName]; ok {
+	roleDTO := func(role string) *AgentChatModelDTO {
+		ref, ok := settings.RoleModels[role]
+		if !ok {
+			return nil
+		}
 		known, offered := findModel(cat, ref)
-		chat := &AgentChatModelDTO{Provider: ref.Provider, Model: ref.Model, Available: offered || catErr != nil}
+		dto := &AgentChatModelDTO{Provider: ref.Provider, Model: ref.Model, Available: offered || catErr != nil}
 		if offered {
 			reservation := known.MaxRunCostMicroUSD(cat.MaxRunTokens)
-			chat.MaxQuestionUSD = formatUSD(reservation, true)
-			chat.AllowanceBelowQuestion = !store.FitsBudget(settings.MonthlyBudgetMicroUSD, settled, reserved, reservation)
+			dto.MaxQuestionUSD = formatUSD(reservation, true)
+			dto.AllowanceBelowQuestion = !store.FitsBudget(settings.MonthlyBudgetMicroUSD, settled, reserved, reservation)
 		}
-		out.RoleModels.Chat = chat
+		return dto
+	}
+	out.RoleModels.Chat = roleDTO(chatRoleName)
+	out.RoleModels.Investigator = roleDTO(investigatorRoleName)
+	if out.Identity, err = s.agentIdentityDTO(r.Context()); err != nil {
+		return AgentSettingsDTO{}, err
+	}
+	out.Investigator = AgentInvestigatorLimitsDTO{
+		WindowMinutes: int(s.Cfg.AgentInvestigationWindow / time.Minute), PerHour: s.Cfg.AgentInvestigationsPerHour,
+		Concurrent: s.Cfg.AgentInvestigationsConcurrent, MaxWaitMinutes: int(s.Cfg.AgentInvestigationMaxWait / time.Minute),
 	}
 	return out, nil
 }
@@ -207,13 +239,14 @@ func modelLabel(ref store.AgentModelRef, ok bool) string {
 	return ref.Provider + "/" + ref.Model
 }
 
-// putAgentSettings saves the allowance, redaction and chat model. The form must carry the version it was loaded
+// putAgentSettings saves the allowance, redaction and the chat and investigator models. The form must carry the version it was loaded
 // at; the save reads the stored settings under the row lock and refuses (409) if they moved on. Everything that
 // depends on the stored values (what changed, the audit's old values) uses that locked read.
 //
 // A role model or provider that is new must be in the agent's catalogue; one already stored may stay as it is
 // although the operator no longer offers it, so an admin can still change the allowance, and a removed provider can
 // be dropped. While the agent cannot be asked, additions and changes are refused (503); removals still go through.
+// A role the form leaves out is cleared, for the investigator as for chat: a save states the whole form.
 func (s *Server) putAgentSettings(w http.ResponseWriter, r *http.Request) {
 	var body agentSettingsUpdate
 	if err := decodeStrictJSON(w, r, &body); err != nil {
@@ -229,9 +262,9 @@ func (s *Server) putAgentSettings(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, invalid("Enter an amount in dollars from 0 to 1000000, with at most two decimal places."))
 		return
 	}
-	var wantChat *store.AgentModelRef
+	wantRoles := map[string]store.AgentModelRef{}
 	for role, choice := range body.RoleModels {
-		if role != chatRoleName {
+		if !slices.Contains(settingsRoles, role) {
 			s.fail(w, invalid("Unknown role: "+role+"."))
 			return
 		}
@@ -239,7 +272,7 @@ func (s *Server) putAgentSettings(w http.ResponseWriter, r *http.Request) {
 			s.fail(w, invalid("Choose a provider and a model."))
 			return
 		}
-		wantChat = &store.AgentModelRef{Provider: choice.Provider, Model: choice.Model}
+		wantRoles[role] = store.AgentModelRef{Provider: choice.Provider, Model: choice.Model}
 	}
 	var wantUnredacted []string
 	for _, p := range body.UnredactedProviders {
@@ -255,16 +288,20 @@ func (s *Server) putAgentSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	old, err := s.Store.UpdateAgentSettings(r.Context(), *body.Version, func(old store.AgentSettings) (store.AgentSettings, error) {
-		oldChat, hadChat := old.RoleModels[chatRoleName]
-		chatChanged := (wantChat != nil) != hadChat || (wantChat != nil && *wantChat != oldChat)
-		// Only additions and changes need the agent's word; dropping a provider or the chat model is the safe direction.
+		// Only additions and changes need the agent's word; dropping a provider or a role model is the safe direction.
+		var changedRoles []store.AgentModelRef
+		for _, role := range settingsRoles {
+			if want, ok := wantRoles[role]; ok && want != old.RoleModels[role] {
+				changedRoles = append(changedRoles, want)
+			}
+		}
 		unredactedAdded := slices.ContainsFunc(wantUnredacted, func(p string) bool { return !slices.Contains(old.UnredactedProviders, p) })
-		if (wantChat != nil && chatChanged) || unredactedAdded {
+		if len(changedRoles) > 0 || unredactedAdded {
 			if catErr != nil {
 				return store.AgentSettings{}, errAgentDown
 			}
-			if wantChat != nil && chatChanged {
-				if _, offered := findModel(cat, *wantChat); !offered {
+			for _, want := range changedRoles {
+				if _, offered := findModel(cat, want); !offered {
 					return store.AgentSettings{}, invalid("That model is not offered by the agent.")
 				}
 			}
@@ -278,9 +315,11 @@ func (s *Server) putAgentSettings(w http.ResponseWriter, r *http.Request) {
 		for role, ref := range old.RoleModels {
 			next.RoleModels[role] = ref
 		}
-		delete(next.RoleModels, chatRoleName)
-		if wantChat != nil {
-			next.RoleModels[chatRoleName] = *wantChat
+		for _, role := range settingsRoles {
+			delete(next.RoleModels, role)
+			if want, ok := wantRoles[role]; ok {
+				next.RoleModels[role] = want
+			}
 		}
 		return next, nil
 	})
@@ -292,11 +331,15 @@ func (s *Server) putAgentSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	oldChat, hadChat := old.RoleModels[chatRoleName]
+	oldInvestigator, hadInvestigator := old.RoleModels[investigatorRoleName]
+	wantChat, wantInvestigator := wantRoles[chatRoleName], wantRoles[investigatorRoleName]
 	s.auditAdmin(r, "agent_settings_update", "agent:settings", "Changed the AI agent settings.", map[string]any{
 		"old_budget_usd":           formatUSD(old.MonthlyBudgetMicroUSD, false),
 		"new_budget_usd":           formatUSD(budget, false),
 		"old_chat_model":           modelLabel(oldChat, hadChat),
-		"new_chat_model":           modelLabelPtr(wantChat),
+		"new_chat_model":           modelLabel(wantChat, wantChat != store.AgentModelRef{}),
+		"old_investigator_model":   modelLabel(oldInvestigator, hadInvestigator),
+		"new_investigator_model":   modelLabel(wantInvestigator, wantInvestigator != store.AgentModelRef{}),
 		"old_unredacted_providers": nonNil(old.UnredactedProviders),
 		"new_unredacted_providers": nonNil(wantUnredacted),
 	})
@@ -306,13 +349,6 @@ func (s *Server) putAgentSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
-}
-
-func modelLabelPtr(ref *store.AgentModelRef) string {
-	if ref == nil {
-		return ""
-	}
-	return modelLabel(*ref, true)
 }
 
 func offersProvider(cat agentclient.Catalogue, provider string) bool {

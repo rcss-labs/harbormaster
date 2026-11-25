@@ -41,6 +41,7 @@ type notifyEnvOptions struct {
 	noSessionKey bool
 	smtp         bool
 	settle       time.Duration
+	agent        bool // HM_AGENT_URL is set
 }
 
 func newNotifyEnv(t *testing.T, opts ...notifyEnvOptions) *notifyEnv {
@@ -68,6 +69,9 @@ func newNotifyEnv(t *testing.T, opts ...notifyEnvOptions) *notifyEnv {
 			s.Cfg.SessionKey = ""
 		}
 		s.Cfg.Notify.Settle = opt.settle
+		if opt.agent {
+			withAgent(nil)(s)
+		}
 	})
 	seedAccounts(t, e.st)
 	e.admin = login(t, e.srv, "sam", testPassword)

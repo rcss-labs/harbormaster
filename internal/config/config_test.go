@@ -101,6 +101,7 @@ func TestLoad_Defaults(t *testing.T) {
 		TokenMaxTTL:      2160 * time.Hour, TokenMaxTTLSSO: 168 * time.Hour, TokenMaxPerUser: 10,
 		TokenLogSearchMaxGB: 2, TokenLogSearchDailyGB: 20,
 		OAuthAccessTTL: time.Hour, AgentRunTokenTTL: 15 * time.Minute,
+		AgentInvestigationWindow: 15 * time.Minute, AgentInvestigationsConcurrent: 2, AgentInvestigationsPerHour: 20, AgentInvestigationMaxWait: 15 * time.Minute,
 		OAuthClientHosts: []string{"claude.ai"},
 		OAuthRedirectURIs: []string{
 			"https://claude.ai/api/mcp/auth_callback", "https://claude.com/api/mcp/auth_callback",
