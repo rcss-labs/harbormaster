@@ -29,7 +29,7 @@ const SETTINGS: AgentSettingsDTO = {
   version: 3,
   monthly_budget_usd: '25.00',
   unredacted_providers: [],
-  role_models: { chat: { provider: 'anthropic', model: 'model-a', available: true } },
+  role_models: { chat: { provider: 'anthropic', model: 'model-a', available: true, max_question_usd: '0.60', allowance_below_question: false } },
   catalogue: CATALOGUE,
   agent_reachable: true,
   spend: { month: '2026-11', settled_usd: '1.25', reserved_usd: '0.60' },
@@ -67,6 +67,40 @@ describe('AgentSettings', () => {
     expect(usage.getByText('$0.42')).toBeInTheDocument()
   })
 
+  it('says what one question reserves with the chosen model', async () => {
+    useAgentMocks()
+    renderApp('/settings/agent')
+    expect(await screen.findByText('One question reserves up to $0.60 with this model.')).toBeInTheDocument()
+    expect(screen.queryByText(/every question will be refused/)).not.toBeInTheDocument()
+  })
+
+  it('warns when the allowance left is below what one question reserves', async () => {
+    const chat = { provider: 'anthropic', model: 'model-a', available: true, max_question_usd: '0.60', allowance_below_question: true }
+    useAgentMocks({ ...SETTINGS, monthly_budget_usd: '0.50', role_models: { chat } })
+    renderApp('/settings/agent')
+    expect(await screen.findByText('The allowance is below what one question reserves, so every question will be refused.')).toBeInTheDocument()
+  })
+
+  it('warns as soon as a typed allowance is below what one question reserves', async () => {
+    useAgentMocks()
+    renderApp('/settings/agent')
+    const allowance = await screen.findByLabelText('Monthly allowance in US dollars')
+    await userEvent.clear(allowance)
+    await userEvent.type(allowance, '0.50')
+    expect(await screen.findByText('The allowance is below what one question reserves, so every question will be refused.')).toBeInTheDocument()
+    await userEvent.clear(allowance)
+    await userEvent.type(allowance, '5')
+    await waitFor(() => expect(screen.queryByText(/every question will be refused/)).not.toBeInTheDocument())
+  })
+
+  it('does not state a reservation while the model is not known', async () => {
+    const chat = { provider: 'anthropic', model: 'model-a', available: true, max_question_usd: '', allowance_below_question: false }
+    useAgentMocks({ ...SETTINGS, role_models: { chat } })
+    renderApp('/settings/agent')
+    await screen.findByLabelText('Monthly allowance in US dollars')
+    expect(screen.queryByText(/One question reserves/)).not.toBeInTheDocument()
+  })
+
   it('saves model and allowance', async () => {
     useAgentMocks()
     const bodies: unknown[] = []
@@ -92,7 +126,7 @@ describe('AgentSettings', () => {
   })
 
   it('shows a stale model warning and still saves other settings with it unchanged', async () => {
-    const stale = { ...SETTINGS, role_models: { chat: { provider: 'anthropic', model: 'retired', available: false } } }
+    const stale = { ...SETTINGS, role_models: { chat: { provider: 'anthropic', model: 'retired', available: false, max_question_usd: '', allowance_below_question: false } } }
     useAgentMocks(stale)
     const bodies: unknown[] = []
     server.use(
@@ -201,7 +235,7 @@ describe('AgentSettings', () => {
       version: 4,
       unredacted_providers: [],
       monthly_budget_usd: '30.00',
-      role_models: { chat: { provider: 'anthropic', model: 'model-b', available: true } },
+      role_models: { chat: { provider: 'anthropic', model: 'model-b', available: true, max_question_usd: '0.06', allowance_below_question: false } },
     }
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
     expect(await screen.findByText('Spent $1.25 and reserved $0.60 of $30.00 in 2026-11.')).toBeInTheDocument()

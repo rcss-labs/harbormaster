@@ -114,6 +114,11 @@ export function AgentSettings() {
   const settled = Number(data.spend.settled_usd)
   const reserved = Number(data.spend.reserved_usd)
   const budget = Number(data.monthly_budget_usd)
+  // What one question reserves is known for the saved model only; a changed allowance is judged here, an unchanged one by the server.
+  const reservation = chat !== undefined && chat.max_question_usd !== '' && draft.provider === chat.provider && draft.model === chat.model ? chat.max_question_usd : ''
+  const typedBudget = budgetValid ? Number(draft.budget.trim()) : Number.NaN
+  const belowQuestion =
+    reservation !== '' && (draft.budget !== baseline.budget && budgetValid ? typedBudget - settled - reserved < Number(reservation) : chat?.allowance_below_question === true)
   const usedPct = budget > 0 ? ((settled + reserved) / budget) * 100 : 0
 
   // Providers shown in the redaction section: the catalogue plus any stored one the operator no longer offers.
@@ -288,6 +293,8 @@ export function AgentSettings() {
         )}
         <p>{`Spent $${data.spend.settled_usd} and reserved $${data.spend.reserved_usd} of $${data.monthly_budget_usd} in ${data.spend.month}.`}</p>
         <Meter pct={usedPct} color={usedPct >= 90 ? 'var(--danger)' : 'var(--accent)'} />
+        {reservation !== '' && <p className={styles.hint}>{`One question reserves up to $${reservation} with this model.`}</p>}
+        {belowQuestion && <Banner kind="warn">The allowance is below what one question reserves, so every question will be refused.</Banner>}
       </Panel>
 
       {redactionProviders.length > 0 && (
