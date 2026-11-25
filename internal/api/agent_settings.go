@@ -167,7 +167,7 @@ func (s *Server) agentSettingsDTO(r *http.Request) (AgentSettingsDTO, error) {
 		if offered {
 			reservation := known.MaxRunCostMicroUSD(cat.MaxRunTokens)
 			chat.MaxQuestionUSD = formatUSD(reservation, true)
-			chat.AllowanceBelowQuestion = !agentrun.BudgetCovers(settings.MonthlyBudgetMicroUSD, settled, reserved, reservation)
+			chat.AllowanceBelowQuestion = !store.FitsBudget(settings.MonthlyBudgetMicroUSD, settled, reserved, reservation)
 		}
 		out.RoleModels.Chat = chat
 	}

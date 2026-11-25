@@ -34,8 +34,18 @@ var (
 
 // Actor is who a run is for: a user, or later the agent's own identity. Name goes to the audit row.
 type Actor struct {
-	ID   int64
 	Name string
+}
+
+// DefaultRunTimeout stands in when the agent's catalogue states no run timeout.
+const DefaultRunTimeout = 5 * time.Minute
+
+// RunTimeout is the timeout a catalogue states, or DefaultRunTimeout when it states none.
+func RunTimeout(catalogued time.Duration) time.Duration {
+	if catalogued <= 0 {
+		return DefaultRunTimeout
+	}
+	return catalogued
 }
 
 // Ending is what the end of a run means outside it, apart from the words for whoever asked.
@@ -53,12 +63,27 @@ type RunnerStore interface {
 	AgentSpend(ctx context.Context, monthStart time.Time) (settledMicroUSD, reservedMicroUSD int64, err error)
 }
 
-// Runner reserves and ends runs of any role and for any caller. It knows nothing of HTTP.
+// Runner reserves and ends runs of any role and for any caller. It knows nothing of HTTP. Now defaults to
+// time.Now and Log to slog.Default; a nil Draining never fires.
 type Runner struct {
 	Store    RunnerStore
 	Now      func() time.Time
 	Log      *slog.Logger
 	Draining <-chan struct{}
+}
+
+func (r *Runner) now() time.Time {
+	if r.Now == nil {
+		return time.Now()
+	}
+	return r.Now()
+}
+
+func (r *Runner) log() *slog.Logger {
+	if r.Log == nil {
+		return slog.Default()
+	}
+	return r.Log
 }
 
 // Reserve reserves a run. The reservation commits on a context of its own: a caller that leaves mid-call must not
@@ -68,7 +93,7 @@ type Runner struct {
 func (r *Runner) Reserve(ctx context.Context, run store.AgentRun, runTimeout time.Duration) error {
 	ctx = context.WithoutCancel(ctx)
 	_, err := Within(ctx, SetUpLimit, r.Draining, func(ctx context.Context) (struct{}, error) {
-		return struct{}{}, r.Store.ReserveAgentRun(ctx, run, StaleAfter(runTimeout), r.Now())
+		return struct{}{}, r.Store.ReserveAgentRun(ctx, run, StaleAfter(runTimeout), r.now())
 	})
 	switch {
 	case err == nil || errors.Is(err, store.ErrNotFound):
@@ -97,34 +122,22 @@ func (r *Runner) budgetRefusal(ctx context.Context, run store.AgentRun) error {
 		if err != nil {
 			return spend{}, err
 		}
-		settled, reserved, err := r.Store.AgentSpend(ctx, r.Now())
+		settled, reserved, err := r.Store.AgentSpend(ctx, r.now())
 		return spend{settings, settled, reserved}, err
 	})
 	if err != nil {
-		r.Log.Warn("agent budget exhausted", "role", run.Role, "user_id", userID, "reserved_micro_usd", run.ReservedMicroUSD)
+		r.LogRunError(run.ID, "agent run: could not read the budget for a refusal", err)
+		r.log().Warn("agent budget exhausted", "role", run.Role, "user_id", userID, "reserved_micro_usd", run.ReservedMicroUSD)
 		return ErrAllowanceUsedUp
 	}
 	budget := read.settings.MonthlyBudgetMicroUSD
-	r.Log.Warn("agent budget exhausted", "role", run.Role, "user_id", userID, "reserved_micro_usd", run.ReservedMicroUSD,
+	r.log().Warn("agent budget exhausted", "role", run.Role, "user_id", userID, "reserved_micro_usd", run.ReservedMicroUSD,
 		"left_micro_usd", BudgetLeft(budget, read.settled, read.reserved))
 	// An allowance of 0 holds nothing, a free run included, so it is "too small" whatever the run reserves.
 	if budget <= 0 || budget < run.ReservedMicroUSD {
 		return ErrAllowanceTooSmall
 	}
 	return ErrAllowanceUsedUp
-}
-
-// BudgetCovers reports whether a run reserving request fits the allowance with settled and reserved already
-// counted, without overflowing int64. It is the store's rule: an allowance of 0 covers nothing, not even a free run.
-func BudgetCovers(budget, settled, reserved, request int64) bool {
-	if budget <= 0 || settled > budget {
-		return false
-	}
-	room := budget - settled
-	if reserved > room {
-		return false
-	}
-	return request <= room-reserved
 }
 
 // BudgetLeft is what an allowance has left after settled and reserved spend, never below 0 and never wrapping:
@@ -146,7 +159,7 @@ func BudgetLeft(budget, settled, reserved int64) int64 {
 func (r *Runner) settleLostReservation(ctx context.Context, runID uuid.UUID) {
 	_, err := Within(ctx, SetUpLimit, r.Draining, func(ctx context.Context) (struct{}, error) {
 		for looks := 1; ; looks++ {
-			err := r.Store.SettleAgentRun(ctx, runID, "failed", nil, nil, r.Now())
+			err := r.Store.SettleAgentRun(ctx, runID, "failed", nil, nil, r.now())
 			if !errors.Is(err, store.ErrNotFound) || looks == lostReservationLooks {
 				return struct{}{}, err
 			}
@@ -169,7 +182,7 @@ func (r *Runner) Ops(run store.AgentRun, actor Actor, ip string, meter *Meter, e
 		state = "done"
 	}
 	return &StoreOps{Store: r.Store, Run: run, Meter: meter, State: state, Outcome: end.Outcome,
-		Tools: []string{}, Username: actor.Name, IP: ip, Now: r.Now}
+		Tools: []string{}, Username: actor.Name, IP: ip, Now: r.now}
 }
 
 // Finish ends a run of any role; see Finisher for the steps. It works on a ctx that has ended.
@@ -178,8 +191,11 @@ func (r *Runner) Finish(ctx context.Context, ops *StoreOps) Result {
 		r.LogRunError(ops.Run.ID, "agent run: could not "+step, err)
 	}}
 	ended := f.Finish(ctx)
-	u, _ := ops.Meter.Last()
-	r.Log.Info("agent run finished", "run_id", ops.Run.ID, "role", ops.Run.Role, "user_id", ops.Run.UserID, "outcome", ops.Outcome,
+	var u Usage
+	if ops.Meter != nil {
+		u, _ = ops.Meter.Last()
+	}
+	r.log().Info("agent run finished", "run_id", ops.Run.ID, "role", ops.Run.Role, "user_id", ops.Run.UserID, "outcome", ops.Outcome,
 		"input_tokens", u.InputTokens, "output_tokens", u.OutputTokens, "cost_micro_usd", u.CostMicroUSD)
 	return ended
 }
@@ -188,8 +204,17 @@ func (r *Runner) Finish(ctx context.Context, ops *StoreOps) Result {
 func (r *Runner) LogRunError(runID uuid.UUID, what string, err error) {
 	var p *PanicError
 	if errors.As(err, &p) {
-		r.Log.Error(what, "run_id", runID, "panic_type", p.Type, "stack", p.Stack)
+		r.log().Error(what, "run_id", runID, "panic_type", p.Type, "stack", p.Stack)
 		return
 	}
-	r.Log.Warn(what, "run_id", runID, "error", err)
+	r.log().Warn(what, "run_id", runID, "error", err)
+}
+
+// End ends a run that has no meter known to this process: one left by an earlier holder, or an orphan. The run is
+// settled with the figures its row has, its token is deleted, and its audit row (with details added) is written, in the
+// steps of Finish.
+func (r *Runner) End(ctx context.Context, run store.AgentRun, actor Actor, ip string, end Ending, details map[string]any) Result {
+	ops := r.Ops(run, actor, ip, nil, end)
+	ops.Details = details
+	return r.Finish(ctx, ops)
 }

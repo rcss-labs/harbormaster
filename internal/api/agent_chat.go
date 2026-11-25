@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/rcss-labs/harbormaster/internal/agentclient"
+	"github.com/rcss-labs/harbormaster/internal/agentrun"
 	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/model"
 	"github.com/rcss-labs/harbormaster/internal/store"
@@ -150,7 +151,7 @@ func (s *Server) agentStatus(w http.ResponseWriter, r *http.Request) {
 		needed = chosenModel.MaxRunCostMicroUSD(cat.MaxRunTokens)
 	}
 	budget := settings.MonthlyBudgetMicroUSD
-	out.BudgetExhausted = budget <= 0 || settled > budget || reserved > budget-settled || needed > budget-settled-reserved
+	out.BudgetExhausted = !store.FitsBudget(budget, settled, reserved, needed)
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -398,10 +399,7 @@ func (s *Server) postAgentMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	runTimeout := cat.RunTimeout
-	if runTimeout <= 0 {
-		runTimeout = defaultRunTimeout
-	}
+	runTimeout := agentrun.RunTimeout(cat.RunTimeout)
 	s.warnIfTokenOutlivedByRun(runTimeout)
 
 	run := store.AgentRun{

@@ -1,12 +1,13 @@
 package agentrun
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"go/build"
 	"io"
 	"log/slog"
-	"math"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -23,13 +24,23 @@ type fakeRunnerStore struct {
 	hangReads  bool
 	release    chan struct{}
 	reserveErr error
+	readErr    error
+	readPanics bool
+	reserved   chan struct{} // when set, ReserveAgentRun waits for its context
 }
 
-func (f *fakeRunnerStore) ReserveAgentRun(context.Context, store.AgentRun, time.Duration, time.Time) error {
+func (f *fakeRunnerStore) ReserveAgentRun(ctx context.Context, _ store.AgentRun, _ time.Duration, _ time.Time) error {
+	if f.reserved != nil {
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	return f.reserveErr
 }
 
 func (f *fakeRunnerStore) hang(ctx context.Context) {
+	if f.readPanics {
+		panic("secret-looking text")
+	}
 	if f.hangReads {
 		select {
 		case <-ctx.Done():
@@ -40,6 +51,9 @@ func (f *fakeRunnerStore) hang(ctx context.Context) {
 
 func (f *fakeRunnerStore) GetAgentSettings(ctx context.Context) (store.AgentSettings, error) {
 	f.hang(ctx)
+	if f.readErr != nil {
+		return store.AgentSettings{}, f.readErr
+	}
 	return f.settings, ctx.Err()
 }
 
@@ -98,38 +112,155 @@ func TestRunner_ReserveRefusalReadsAreBounded(t *testing.T) {
 	}
 }
 
-func TestBudgetCovers(t *testing.T) {
-	for name, tc := range map[string]struct {
-		budget, settled, reserved, request int64
-		want                               bool
-	}{
-		"plenty":                      {1000, 100, 100, 500, true},
-		"exactly the room left":       {1000, 400, 100, 500, true},
-		"one over the room left":      {1000, 400, 100, 501, false},
-		"allowance 0 covers nothing":  {0, 0, 0, 0, false},
-		"spent more than the budget":  {1000, 1001, 0, 0, false},
-		"reserved more than the room": {1000, 600, 401, 0, false},
-		"at the int64 cap, nothing":   {math.MaxInt64, math.MaxInt64, math.MaxInt64, 1, false},
-		"at the int64 cap, reserved":  {math.MaxInt64, 1, math.MaxInt64, 0, false},
-		"at the int64 cap, room":      {math.MaxInt64, 0, 0, math.MaxInt64, true},
-		"free run, room":              {1, 0, 0, 0, true},
-	} {
-		if got := BudgetCovers(tc.budget, tc.settled, tc.reserved, tc.request); got != tc.want {
-			t.Errorf("%s: BudgetCovers%v = %v, want %v", name, []int64{tc.budget, tc.settled, tc.reserved, tc.request}, got, tc.want)
-		}
-	}
-}
-
 // The package must stay usable by a background job: nothing in it may reach the web layer.
 func TestAgentrunImportsNothingFromTheWebLayer(t *testing.T) {
 	pkg, err := build.ImportDir(".", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, imp := range append(pkg.Imports, pkg.TestImports...) {
+	for _, imp := range slices.Concat(pkg.Imports, pkg.TestImports, pkg.XTestImports) {
 		if imp == "net/http" || strings.HasPrefix(imp, "net/http/") && imp != "net/http/httptest" ||
 			strings.HasSuffix(imp, "/internal/api") || strings.Contains(imp, "/internal/api/") {
 			t.Errorf("internal/agentrun imports %s", imp)
 		}
+	}
+}
+
+// A refusal whose reads fail keeps its wording but says why in the log: an error, a timeout and a panic each.
+func TestRunner_ReserveLogsWhyTheBudgetReadFailed(t *testing.T) {
+	defer func(l Limit) { SetUpLimit = l }(SetUpLimit)
+	SetUpLimit = Limit{Normal: 100 * time.Millisecond, Draining: 100 * time.Millisecond}
+	for name, tc := range map[string]struct {
+		st   *fakeRunnerStore
+		want string
+	}{
+		"error":   {&fakeRunnerStore{reserveErr: store.ErrBudgetExhausted, readErr: errors.New("connection refused")}, "connection refused"},
+		"timeout": {&fakeRunnerStore{reserveErr: store.ErrBudgetExhausted, hangReads: true}, "deadline exceeded"},
+		"panic":   {&fakeRunnerStore{reserveErr: store.ErrBudgetExhausted, readPanics: true}, "panic_type=string"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var logs bytes.Buffer
+			r := newRunner(tc.st)
+			r.Log = slog.New(slog.NewTextHandler(&logs, nil))
+			t.Cleanup(func() { close(tc.st.release) })
+			if err := r.Reserve(t.Context(), store.AgentRun{ID: uuid.New(), Role: "chat", ReservedMicroUSD: 1}, time.Minute); !errors.Is(err, ErrAllowanceUsedUp) {
+				t.Errorf("Reserve = %v, want the used-up refusal", err)
+			}
+			out := logs.String()
+			if !strings.Contains(out, "could not read the budget for a refusal") || !strings.Contains(out, tc.want) {
+				t.Errorf("log = %s, want the failed read and %q", out, tc.want)
+			}
+			if strings.Contains(out, "secret-looking text") {
+				t.Errorf("a panic's value was logged: %s", out)
+			}
+		})
+	}
+}
+
+// Reserve stops waiting soon after the server starts to shut down, not at the full limit.
+func TestRunner_ReserveGivesUpWhenDraining(t *testing.T) {
+	defer func(l Limit) { SetUpLimit = l }(SetUpLimit)
+	SetUpLimit = Limit{Normal: time.Minute, Draining: 50 * time.Millisecond}
+	st := &fakeRunnerStore{reserved: make(chan struct{})}
+	r := newRunner(st)
+	draining := make(chan struct{})
+	close(draining)
+	r.Draining = draining
+	got := make(chan error, 1)
+	go func() { got <- r.Reserve(t.Context(), store.AgentRun{ID: uuid.New(), Role: "chat"}, time.Minute) }()
+	select {
+	case err := <-got:
+		if err == nil {
+			t.Error("Reserve = nil, want the error of a reservation that was given up")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Reserve kept waiting while the server was draining")
+	}
+}
+
+// A conversation that is gone is no lost reservation: nothing is settled. Any other failure settles the run.
+func TestRunner_ReserveSettlesOnlyWhenTheReservationIsUnknown(t *testing.T) {
+	gone := &fakeRunnerStore{reserveErr: store.ErrNotFound}
+	if err := newRunner(gone).Reserve(t.Context(), store.AgentRun{ID: uuid.New()}, time.Minute); !errors.Is(err, store.ErrNotFound) || len(gone.calls) != 0 {
+		t.Errorf("not found: err %v, settle calls %v", err, gone.calls)
+	}
+	lost := &fakeRunnerStore{reserveErr: errors.New("connection reset")}
+	if err := newRunner(lost).Reserve(t.Context(), store.AgentRun{ID: uuid.New()}, time.Minute); err == nil || len(lost.calls) != 1 || lost.calls[0] != "settle failed" {
+		t.Errorf("unknown: err %v, settle calls %v", err, lost.calls)
+	}
+}
+
+func TestBudgetLeft(t *testing.T) {
+	const maxInt64 = int64(^uint64(0) >> 1)
+	for name, tc := range map[string]struct{ budget, settled, reserved, want int64 }{
+		"plain":                    {1000, 100, 200, 700},
+		"nothing left":             {1000, 800, 200, 0},
+		"settled over the budget":  {1000, 1001, 0, 0},
+		"reserved over the room":   {1000, 600, 401, 0},
+		"both at the cap":          {1_000_000, maxInt64, maxInt64, 0},
+		"whole cap free":           {maxInt64, 0, 0, maxInt64},
+		"cap budget, cap reserved": {maxInt64, 0, maxInt64, 0},
+	} {
+		if got := BudgetLeft(tc.budget, tc.settled, tc.reserved); got != tc.want {
+			t.Errorf("%s: BudgetLeft = %d, want %d", name, got, tc.want)
+		}
+	}
+}
+
+func TestTurn_EndingMapsEveryReason(t *testing.T) {
+	for reason, want := range map[Reason]Ending{
+		Done:        {Success: true, Outcome: "done"},
+		AgentFailed: {Outcome: "error"},
+		TimedOut:    {Outcome: "error"},
+		BrowserGone: {Outcome: "interrupted"},
+		Draining:    {Outcome: "interrupted"},
+		RunLost:     {Outcome: "interrupted"},
+		Panicked:    {Outcome: "error"},
+		Streaming:   {Outcome: "error"},
+	} {
+		var turn Turn
+		turn.End(reason)
+		if got := turn.Ending(); got != want {
+			t.Errorf("reason %d: Ending = %+v, want %+v", reason, got, want)
+		}
+	}
+}
+
+func TestRunTimeout(t *testing.T) {
+	if got := RunTimeout(0); got != DefaultRunTimeout {
+		t.Errorf("RunTimeout(0) = %v", got)
+	}
+	if got := RunTimeout(-time.Second); got != DefaultRunTimeout {
+		t.Errorf("RunTimeout(-1s) = %v", got)
+	}
+	if got := RunTimeout(90 * time.Second); got != 90*time.Second {
+		t.Errorf("RunTimeout(90s) = %v", got)
+	}
+}
+
+// A coordinator job ends a run it has no meter for: the run settles, its token goes, and one audit row names the
+// actor, the address and the extra details.
+func TestRunner_EndSettlesDeletesTheTokenAndAudits(t *testing.T) {
+	st := &fakeRunnerStore{}
+	r := newRunner(st)
+	run := store.AgentRun{ID: uuid.New(), Role: "investigator", Provider: "fake", Model: "m"}
+	res := r.End(t.Context(), run, Actor{Name: "harbormaster-agent"}, "", Ending{Outcome: "interrupted"}, map[string]any{"investigation_id": 3})
+	if res.SaveErr != nil || !slices.Equal(st.calls, []string{"settle failed"}) || st.usage != nil || !st.tokenDeleted.Load() {
+		t.Errorf("result %+v, settle calls %v, figures %+v, token deleted %v", res, st.calls, st.usage, st.tokenDeleted.Load())
+	}
+	d := st.entry.Details
+	if st.entry.ActorUsername != "harbormaster-agent" || d["outcome"] != "interrupted" || d["investigation_id"] != 3 || d["role"] != "investigator" {
+		t.Errorf("entry = %+v", st.entry)
+	}
+}
+
+// Finish needs no meter, no clock and no logger: the defaults stand in.
+func TestRunner_FinishWithNoMeterOrDefaults(t *testing.T) {
+	st := &fakeRunnerStore{}
+	r := &Runner{Store: st}
+	ops := r.Ops(store.AgentRun{ID: uuid.New(), Role: "investigator"}, Actor{Name: "a"}, "", nil, Ending{Success: true, Outcome: "done"})
+	r.Finish(t.Context(), ops)
+	if !slices.Equal(st.calls, []string{"settle done"}) || st.entry.Details["outcome"] != "done" {
+		t.Errorf("settle calls %v, entry %+v", st.calls, st.entry)
 	}
 }

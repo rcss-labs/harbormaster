@@ -22,8 +22,6 @@ const (
 	// The agent refuses a request of more than 500 messages or 1 MiB; these leave margin.
 	historyMaxMessages = 400
 	historyMaxBytes    = 700 << 10
-	// defaultRunTimeout stands in when the catalogue states none.
-	defaultRunTimeout = 5 * time.Minute
 )
 
 var errorCodePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,39}$`)
@@ -47,20 +45,20 @@ type turnResult struct {
 }
 
 func resultOf(turn *agentrun.Turn) turnResult {
+	res := turnResult{Ending: turn.Ending()}
 	switch turn.Reason() {
-	case agentrun.Done:
-		return turnResult{Ending: agentrun.Ending{Success: true, Outcome: "done"}}
+	case agentrun.Done, agentrun.BrowserGone:
 	case agentrun.AgentFailed:
 		code, message := turn.Failure()
-		return turnResult{Ending: agentrun.Ending{Outcome: "error"}, code: errorCodeFrom(code), message: errorMessageFrom(message)}
+		res.code, res.message = errorCodeFrom(code), errorMessageFrom(message)
 	case agentrun.TimedOut:
-		return turnResult{Ending: agentrun.Ending{Outcome: "error"}, code: "timeout", message: "The agent took too long and was stopped."}
-	case agentrun.BrowserGone:
-		return turnResult{Ending: agentrun.Ending{Outcome: "interrupted"}}
+		res.code, res.message = "timeout", "The agent took too long and was stopped."
 	case agentrun.Draining, agentrun.RunLost:
-		return turnResult{Ending: agentrun.Ending{Outcome: "interrupted"}, code: "interrupted", message: "This question was stopped before it finished. Try again."}
+		res.code, res.message = "interrupted", "This question was stopped before it finished. Try again."
+	default:
+		res.code, res.message = "agent_unavailable", agentUnavailableMsg
 	}
-	return turnResult{Ending: agentrun.Ending{Outcome: "error"}, code: "agent_unavailable", message: agentUnavailableMsg}
+	return res
 }
 
 // chatTurn is one question and its answer. One goroutine, the handler's, owns it: it alone decides why the turn
@@ -354,7 +352,7 @@ func (s *Server) runner() *agentrun.Runner {
 
 // runOps is how a run of any role ends in the store.
 func (s *Server) runOps(r *http.Request, run store.AgentRun, user store.User, meter *agentrun.Meter, res turnResult) *agentrun.StoreOps {
-	return s.runner().Ops(run, agentrun.Actor{ID: user.ID, Name: user.Username}, s.clientIP(r), meter, res.Ending)
+	return s.runner().Ops(run, agentrun.Actor{Name: user.Username}, s.clientIP(r), meter, res.Ending)
 }
 
 // finishRun ends a run of any role.

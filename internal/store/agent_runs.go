@@ -108,7 +108,7 @@ func (s *Store) reserveAgentRun(ctx context.Context, run AgentRun, staleAfter ti
 	if err := tx.QueryRow(ctx, spendSQL, start, end).Scan(&settled, &reserved); err != nil {
 		return fmt.Errorf("reserve agent run: spend: %w", err)
 	}
-	if !fitsBudget(budget, settled, reserved, run.ReservedMicroUSD) {
+	if !FitsBudget(budget, settled, reserved, run.ReservedMicroUSD) {
 		if err := tx.Commit(ctx); err != nil {
 			return fmt.Errorf("reserve agent run: %w", err)
 		}
@@ -134,9 +134,9 @@ func (s *Store) reserveAgentRun(ctx context.Context, run AgentRun, staleAfter ti
 	return nil
 }
 
-// fitsBudget reports whether settled+reserved+request stays within budget, without overflowing int64. All inputs
+// FitsBudget reports whether settled+reserved+request stays within budget, without overflowing int64. All inputs
 // are non-negative. A budget of 0 fits nothing.
-func fitsBudget(budget, settled, reserved, request int64) bool {
+func FitsBudget(budget, settled, reserved, request int64) bool {
 	if budget <= 0 || settled > budget {
 		return false
 	}
