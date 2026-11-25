@@ -98,7 +98,7 @@ func (s *Server) setPermission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	user, err := s.Store.GetUser(ctx, userID)
+	user, err := s.Store.GetHumanUser(ctx, userID)
 	if err != nil {
 		s.fail(w, err)
 		return

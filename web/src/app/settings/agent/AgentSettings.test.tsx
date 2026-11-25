@@ -2,7 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { AgentSettingsDTO, AgentUsageDTO } from '../../../api/agent'
+import type { AgentInvestigationDTO, AgentSettingsDTO, AgentUsageDTO } from '../../../api/agent'
 import { ME_ADMIN } from '../../../test/fixtures'
 import { server } from '../../../test/msw'
 import { renderApp } from '../../../test/renderApp'
@@ -33,7 +33,27 @@ const SETTINGS: AgentSettingsDTO = {
   catalogue: CATALOGUE,
   agent_reachable: true,
   spend: { month: '2026-11', settled_usd: '1.25', reserved_usd: '0.60' },
+  identity: { username: 'harbormaster-agent', permissions: [{ tag_id: 3, tag_name: 'Prod', logs: false }] },
+  investigator: { window_minutes: 15, per_hour: 20, concurrent: 2, max_wait_minutes: 15 },
 }
+
+const investigation = (id: number, fields: Partial<AgentInvestigationDTO> = {}): AgentInvestigationDTO => ({
+  id,
+  state: 'done',
+  reason: '',
+  subject: { kind: 'service', service_id: 'core-payments-api', service: 'payments-api', cluster: 'core-services', cluster_id: 'c1', account_id: '482109375512', region: 'us-east-1' },
+  alert: { kind: 'service_failing', title: 'payments-api: service failing' },
+  requested_at: '2026-11-24T10:00:00Z',
+  started_at: '2026-11-24T10:00:05Z',
+  finished_at: '2026-11-24T10:01:00Z',
+  summary: '',
+  summary_replaced: false,
+  provider: 'anthropic',
+  model: 'model-a',
+  attempts: 1,
+  cost_usd: '0.12',
+  ...fields,
+})
 
 const USAGE: AgentUsageDTO = {
   month: '2026-11',
@@ -45,6 +65,7 @@ const useAgentMocks = (settings: AgentSettingsDTO = SETTINGS) =>
     http.get('/api/me', () => HttpResponse.json({ ...ME_ADMIN, agent_enabled: true, ai_chat: true })),
     http.get('/api/agent/settings', () => HttpResponse.json(settings)),
     http.get('/api/agent/usage', () => HttpResponse.json(USAGE)),
+    http.get('/api/agent/investigations', () => HttpResponse.json({ items: [], next_cursor: '' })),
   )
 
 describe('AgentSettings', () => {
@@ -447,5 +468,164 @@ describe('AgentSettings', () => {
     expect(await screen.findByText('No model provider is enabled. Your operator sets providers up at install time.')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Install guide' })).toHaveAttribute('href', 'https://github.com/rcss-labs/harbormaster/blob/main/harbormaster-docs/docs/install/ai-agent.md')
     expect(screen.queryByLabelText('Model')).not.toBeInTheDocument()
+  })
+
+  it('saves the investigator model', async () => {
+    useAgentMocks()
+    const bodies: unknown[] = []
+    server.use(
+      http.put('/api/agent/settings', async ({ request }) => {
+        bodies.push(await request.json())
+        return HttpResponse.json(SETTINGS)
+      }),
+    )
+    renderApp('/settings/agent')
+    await userEvent.selectOptions(await screen.findByLabelText('Investigation provider'), 'openai')
+    await userEvent.selectOptions(screen.getByLabelText('Investigation model'), 'model-c')
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(bodies).toEqual([
+        {
+          monthly_budget_usd: '25.00',
+          unredacted_providers: [],
+          role_models: { chat: { provider: 'anthropic', model: 'model-a' }, investigator: { provider: 'openai', model: 'model-c' } },
+          version: 3,
+        },
+      ]),
+    )
+  })
+
+  it('warns when the investigator model is no longer offered', async () => {
+    const investigator = { provider: 'anthropic', model: 'retired', available: false, max_question_usd: '', allowance_below_question: false }
+    useAgentMocks({ ...SETTINGS, role_models: { ...SETTINGS.role_models, investigator } })
+    renderApp('/settings/agent')
+    await screen.findByLabelText('Investigation model')
+    expect(screen.getByText('This model is no longer offered by the operator. Choose another.')).toBeInTheDocument()
+  })
+
+  it('sets a tag to view and logs', async () => {
+    useAgentMocks()
+    const bodies: unknown[] = []
+    server.use(
+      http.put('/api/agent/identity', async ({ request }) => {
+        bodies.push(await request.json())
+        return HttpResponse.json({ username: 'harbormaster-agent', permissions: [{ tag_id: 2, tag_name: 'Staging', logs: true }, { tag_id: 3, tag_name: 'Prod', logs: false }] })
+      }),
+    )
+    renderApp('/settings/agent')
+    expect(await screen.findByText('Background investigations read only what this identity can see. It cannot sign in or change anything.')).toBeInTheDocument()
+    expect(screen.getByText('harbormaster-agent')).toBeInTheDocument()
+    expect(await screen.findByLabelText('Access to Prod')).toHaveValue('view')
+    const staging = screen.getByLabelText('Access to Staging')
+    expect(staging).toHaveValue('none')
+    expect(screen.getByRole('button', { name: 'Save access' })).toBeDisabled()
+    await userEvent.selectOptions(staging, 'View and logs')
+    await userEvent.click(screen.getByRole('button', { name: 'Save access' }))
+    await waitFor(() => expect(bodies).toEqual([{ permissions: [{ tag_id: 2, logs: true }, { tag_id: 3, logs: false }] }]))
+    expect(await screen.findByText('Saved.')).toBeInTheDocument()
+  })
+
+  it('shows the limits', async () => {
+    useAgentMocks()
+    renderApp('/settings/agent')
+    expect(
+      await screen.findByText('Alerts for the same service within 15 minutes share one investigation. At most 20 start an hour, 2 run at a time, and none waits longer than 15 minutes.'),
+    ).toBeInTheDocument()
+  })
+
+  it('lists past investigations and loads more', async () => {
+    useAgentMocks()
+    const cursors: (string | null)[] = []
+    server.use(
+      http.get('/api/agent/investigations', ({ request }) => {
+        const cursor = new URL(request.url).searchParams.get('cursor')
+        cursors.push(cursor)
+        return HttpResponse.json(
+          cursor
+            ? { items: [investigation(40, { state: 'skipped', reason: 'budget', cost_usd: '0.00', subject: { ...investigation(40).subject, service: 'auth' } })], next_cursor: '' }
+            : { items: [investigation(41)], next_cursor: 'abc' },
+        )
+      }),
+    )
+    renderApp('/settings/agent')
+    const link = await screen.findByRole('link', { name: 'payments-api' })
+    expect(link).toHaveAttribute('href', '/investigations/41')
+    const table = within(screen.getByRole('region', { name: 'Investigations' }))
+    expect(table.getByText('Done')).toBeInTheDocument()
+    expect(table.getByText('$0.12')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Load more' }))
+    expect(await screen.findByRole('link', { name: 'auth' })).toHaveAttribute('href', '/investigations/40')
+    expect(table.getByText('Skipped')).toBeInTheDocument()
+    expect(cursors).toContain('abc')
+    expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument()
+  })
+
+  it('says when there are no investigations yet', async () => {
+    useAgentMocks()
+    renderApp('/settings/agent')
+    expect(await screen.findByText('No investigations yet.')).toBeInTheDocument()
+  })
+
+  it('keeps the saved access when the allowance is saved afterwards', async () => {
+    useAgentMocks()
+    server.use(
+      http.put('/api/agent/identity', () => HttpResponse.json({ username: 'harbormaster-agent', permissions: [{ tag_id: 3, tag_name: 'Prod', logs: true }] })),
+      http.put('/api/agent/settings', () => HttpResponse.json({ ...SETTINGS, monthly_budget_usd: '40.00' })),
+    )
+    renderApp('/settings/agent')
+    await userEvent.selectOptions(await screen.findByLabelText('Access to Prod'), 'View and logs')
+    expect(screen.getByText('Unsaved changes', { selector: '[data-access-cue]' })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Save access' }))
+    await screen.findByText('Saved.')
+    expect(document.querySelector('[data-access-cue]')).toBeNull()
+    const allowance = screen.getByLabelText('Monthly allowance in US dollars')
+    await userEvent.clear(allowance)
+    await userEvent.type(allowance, '40')
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(screen.getByLabelText('Monthly allowance in US dollars')).toHaveValue('40.00'))
+    expect(screen.getByLabelText('Access to Prod')).toHaveValue('logs')
+  })
+
+  it.each([
+    [422, 'validation_failed', 'That tag does not exist.'],
+    [403, 'forbidden', 'Only admins can change this.'],
+  ])('shows an identity save error %s inline', async (status, code, message) => {
+    useAgentMocks()
+    server.use(http.put('/api/agent/identity', () => HttpResponse.json({ error: { code, message } }, { status })))
+    renderApp('/settings/agent')
+    await userEvent.selectOptions(await screen.findByLabelText('Access to Prod'), 'No access')
+    await userEvent.click(screen.getByRole('button', { name: 'Save access' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(message)
+    expect(screen.getByLabelText('Access to Prod')).toHaveValue('none')
+  })
+
+  it('keeps the loaded rows when Load more fails and offers Try again', async () => {
+    useAgentMocks()
+    let failing = true
+    server.use(
+      http.get('/api/agent/investigations', ({ request }) => {
+        if (!new URL(request.url).searchParams.get('cursor')) return HttpResponse.json({ items: [investigation(41)], next_cursor: 'abc' })
+        if (failing) return HttpResponse.json({ error: { code: 'internal', message: 'Something broke.' } }, { status: 500 })
+        return HttpResponse.json({ items: [investigation(40, { subject: { ...investigation(40).subject, service: 'auth' } })], next_cursor: '' })
+      }),
+    )
+    renderApp('/settings/agent')
+    await userEvent.click(await screen.findByRole('button', { name: 'Load more' }))
+    expect(await screen.findByText('Could not load more investigations.')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'payments-api' })).toBeInTheDocument()
+    failing = false
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(await screen.findByRole('link', { name: 'auth' })).toBeInTheDocument()
+  })
+
+  it('shows an unknown state as plain text', async () => {
+    useAgentMocks()
+    server.use(
+      http.get('/api/agent/investigations', () =>
+        HttpResponse.json({ items: [{ ...investigation(41), state: 'brand_new', reason: 'odd' }], next_cursor: '' }),
+      ),
+    )
+    renderApp('/settings/agent')
+    expect(await screen.findByText('Unknown')).toBeInTheDocument()
   })
 })

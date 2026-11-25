@@ -16,6 +16,7 @@ import {
   type NotificationRoute,
 } from '../../../api/notifications'
 import { useOffHoursTags } from '../../../api/offhours'
+import { useAuth } from '../../auth/AuthProvider'
 import { Banner } from '../../../components/Banner'
 import { BottomSheet } from '../../../components/BottomSheet'
 import { ConfirmDialog } from '../../../components/ConfirmDialog'
@@ -48,6 +49,7 @@ function messageOf(error: unknown): string {
 
 export function NotificationsPage() {
   const toast = useToast()
+  const agentEnabled = useAuth().me?.agent_enabled ?? false
   const phone = usePhone()
   const [params, setParams] = useSearchParams()
   const view: View = params.get('view') === 'log' ? 'log' : 'routes'
@@ -97,9 +99,12 @@ export function NotificationsPage() {
     delete body.signing_secret
     delete body.bot_token
     delete body.version
+    // The preview needs the switch as drafted, changed or not.
+    if (agentEnabled) body.investigate = draft.investigate
+    else delete body.investigate
     if (saved) body.route_id = saved.id
     return body
-  }, [draft, saved])
+  }, [draft, saved, agentEnabled])
   const preview = useNotificationPreview()
   const { mutate: requestPreview, reset: resetPreview } = preview
   useEffect(() => resetPreview(), [key, resetPreview])

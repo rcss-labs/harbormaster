@@ -1,0 +1,1 @@
+{"blocks":[{"text":{"text":"Test message from Harbormaster\nSeveral services are failing.","type":"mrkdwn"},"type":"section"},{"elements":[{"text":"core · prod-account / us-east-1 · \u003chttps://hm.example.com/clusters/MTExMTExMTExMTExfHVzLWVhc3QtMXxjb3Jl|Open in Harbormaster\u003e","type":"mrkdwn"}],"type":"context"}],"text":"Test message from Harbormaster"}

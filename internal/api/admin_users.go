@@ -128,6 +128,10 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, invalid("Use 2–32 lowercase letters, digits, dots, hyphens or underscores."))
 		return
 	}
+	if store.IsReservedUsername(body.Username) {
+		s.fail(w, invalid("That username is reserved."))
+		return
+	}
 	temp := auth.GenerateTemporaryPassword()
 	hash, err := auth.HashPassword(temp)
 	if err != nil {
@@ -172,7 +176,7 @@ func (s *Server) deleteUser(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, invalid("You cannot delete yourself."))
 		return
 	}
-	target, err := s.Store.GetUser(r.Context(), id)
+	target, err := s.Store.GetHumanUser(r.Context(), id)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -195,7 +199,7 @@ func (s *Server) resetUserPassword(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, store.ErrNotFound)
 		return
 	}
-	target, err := s.Store.GetUser(r.Context(), id)
+	target, err := s.Store.GetHumanUser(r.Context(), id)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -222,7 +226,7 @@ func (s *Server) setUserAdmin(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	target, err := s.Store.GetUser(r.Context(), id)
+	target, err := s.Store.GetHumanUser(r.Context(), id)
 	if err != nil {
 		s.fail(w, err)
 		return

@@ -65,6 +65,7 @@ function route(fields: Partial<NotificationRoute> & Pick<NotificationRoute, 'id'
     notify_resolved: true,
     scope: [],
     fallback: false,
+    investigate: false,
     matches_nothing: false,
     failing: false,
     version: 1,
@@ -213,6 +214,7 @@ export const NOTIFICATION_PREVIEW: NotificationPreview = {
   groups: [],
   notification_count: 2,
   pending: 0,
+  agent: null,
 }
 
 export const NOTIFICATION_PREVIEW_EMPTY: NotificationPreview = {
@@ -226,6 +228,7 @@ export const NOTIFICATION_PREVIEW_EMPTY: NotificationPreview = {
   groups: [],
   notification_count: 0,
   pending: 0,
+  agent: null,
 }
 
 /** A cluster draft: one entry open at its threshold, one below it, and one alert still inside the settle time. */
@@ -267,6 +270,7 @@ export const NOTIFICATION_PREVIEW_GROUPS: NotificationPreview = {
   ],
   notification_count: 1,
   pending: 1,
+  agent: null,
 }
 
 export const NOTIFICATION_PREVIEW_WEBHOOK: NotificationPreview = {

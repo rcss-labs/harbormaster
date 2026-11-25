@@ -102,7 +102,8 @@ func (a *Service) Logout(ctx context.Context, sessionID string) error {
 }
 
 // Authenticate resolves a raw session ID to its session and user, enforcing idle and absolute
-// timeouts and refreshing last-seen at most once a minute.
+// timeouts and refreshing last-seen at most once a minute. Only a human user holds a session: a row of any other kind is
+// deleted and answered as unauthenticated.
 func (a *Service) Authenticate(ctx context.Context, sessionID string) (store.Session, store.User, error) {
 	if sessionID == "" {
 		return store.Session{}, store.User{}, ErrUnauthenticated
@@ -130,6 +131,11 @@ func (a *Service) Authenticate(ctx context.Context, sessionID string) (store.Ses
 	if err != nil {
 		return store.Session{}, store.User{}, err
 	}
+	// Only a human holds a session. A row for any other kind (or one this code does not know) is ended, not honoured.
+	if user.Kind != store.UserKindHuman {
+		_ = a.store.DeleteSession(ctx, sess.IDHash)
+		return store.Session{}, store.User{}, ErrUnauthenticated
+	}
 	if now.Sub(sess.LastSeenAt) >= touchInterval {
 		expires := minTime(now.Add(a.cfg.SessionIdle), sess.CreatedAt.Add(a.cfg.SessionAbsolute))
 		if err := a.store.TouchSession(ctx, sess.IDHash, now, expires); err != nil {
@@ -143,7 +149,7 @@ func (a *Service) Authenticate(ctx context.Context, sessionID string) (store.Ses
 // ChangePassword verifies the current password, sets the new one and ends every session of the
 // user except the one carried in ctx (see SessionFrom), and every one of the user's access tokens.
 func (a *Service) ChangePassword(ctx context.Context, userID int64, current, next string) error {
-	user, err := a.store.GetUser(ctx, userID)
+	user, err := a.store.GetHumanUser(ctx, userID)
 	if err != nil {
 		return err
 	}
@@ -174,6 +180,9 @@ func (a *Service) ChangePassword(ctx context.Context, userID int64, current, nex
 // AdminResetPassword sets a new temporary password that must be changed at next sign-in and ends all sessions
 // and access tokens.
 func (a *Service) AdminResetPassword(ctx context.Context, userID int64) (string, error) {
+	if _, err := a.store.GetHumanUser(ctx, userID); err != nil {
+		return "", err
+	}
 	temp := GenerateTemporaryPassword()
 	hash, err := HashPassword(temp)
 	if err != nil {

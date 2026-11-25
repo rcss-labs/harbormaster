@@ -14,11 +14,11 @@ var ErrLastAdmin = errors.New("last global admin")
 // ErrLastBreakGlassAdmin is returned when SSO is enabled and a write would leave no break-glass admin.
 var ErrLastBreakGlassAdmin = errors.New("last break-glass admin")
 
-// lockAdminsTx locks every admin row for the rest of tx, so concurrent demotions and deletions
+// lockAdminsTx locks every human admin row for the rest of tx, so concurrent demotions and deletions
 // serialize and each one counts admins after the previous one committed. A single guarded UPDATE
 // is not enough: under READ COMMITTED two of them would both see two admins.
 func lockAdminsTx(ctx context.Context, tx pgx.Tx) (adminIDs map[int64]bool, err error) {
-	rows, err := tx.Query(ctx, `select id from users where is_admin order by id for update`)
+	rows, err := tx.Query(ctx, `select id from users where is_admin and kind = 'human' order by id for update`)
 	if err != nil {
 		return nil, fmt.Errorf("lock admins: %w", err)
 	}
@@ -46,7 +46,7 @@ func samlEnabledTx(ctx context.Context, tx pgx.Tx) (bool, error) {
 
 // breakGlassAdminsTx returns the IDs of admins flagged break-glass (admin rows are locked by lockAdminsTx).
 func breakGlassAdminsTx(ctx context.Context, tx pgx.Tx) (map[int64]bool, error) {
-	rows, err := tx.Query(ctx, `select id from users where is_admin and break_glass`)
+	rows, err := tx.Query(ctx, `select id from users where is_admin and break_glass and kind = 'human'`)
 	if err != nil {
 		return nil, fmt.Errorf("list break-glass admins: %w", err)
 	}
@@ -88,7 +88,7 @@ func (s *Store) SetBreakGlassChecked(ctx context.Context, id int64, on bool) (ch
 		return false, err
 	}
 	var current, hasPassword bool
-	if err := tx.QueryRow(ctx, `select break_glass, password_hash is not null from users where id = $1 for update`, id).
+	if err := tx.QueryRow(ctx, `select break_glass, password_hash is not null from users where id = $1 and kind = 'human' for update`, id).
 		Scan(&current, &hasPassword); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return false, ErrNotFound
@@ -110,7 +110,7 @@ func (s *Store) SetBreakGlassChecked(ctx context.Context, id int64, on bool) (ch
 			return false, ErrLastBreakGlassAdmin
 		}
 	}
-	if _, err := tx.Exec(ctx, `update users set break_glass = $2 where id = $1`, id, on); err != nil {
+	if _, err := tx.Exec(ctx, `update users set break_glass = $2 where id = $1 and kind = 'human'`, id, on); err != nil {
 		return false, fmt.Errorf("set break-glass: %w", err)
 	}
 	return true, tx.Commit(ctx)
@@ -133,7 +133,7 @@ func (s *Store) SetAdminChecked(ctx context.Context, id int64, admin bool) (chan
 		return false, err
 	}
 	var current bool
-	if err := tx.QueryRow(ctx, `select is_admin from users where id = $1 for update`, id).Scan(&current); err != nil {
+	if err := tx.QueryRow(ctx, `select is_admin from users where id = $1 and kind = 'human' for update`, id).Scan(&current); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return false, ErrNotFound
 		}
@@ -154,7 +154,7 @@ func (s *Store) SetAdminChecked(ctx context.Context, id int64, admin bool) (chan
 			return false, ErrLastBreakGlassAdmin
 		}
 	}
-	if _, err := tx.Exec(ctx, `update users set is_admin = $2 where id = $1`, id, admin); err != nil {
+	if _, err := tx.Exec(ctx, `update users set is_admin = $2 where id = $1 and kind = 'human'`, id, admin); err != nil {
 		return false, fmt.Errorf("set admin: %w", err)
 	}
 	if !admin {
@@ -192,7 +192,7 @@ func (s *Store) DeleteUserChecked(ctx context.Context, id int64) error {
 			return ErrLastBreakGlassAdmin
 		}
 	}
-	tag, err := tx.Exec(ctx, `delete from users where id = $1`, id)
+	tag, err := tx.Exec(ctx, `delete from users where id = $1 and kind = 'human'`, id)
 	if err != nil {
 		return fmt.Errorf("delete user: %w", err)
 	}

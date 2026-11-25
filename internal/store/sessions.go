@@ -25,15 +25,20 @@ type Session struct {
 	NotAfter *time.Time
 }
 
-// CreateSession stores a new session.
+// CreateSession stores a new session. Only a human user can hold one: the row is selected from the user's, so the agent
+// identity, an unknown kind or an absent user store nothing and return ErrNotFound.
 func (s *Store) CreateSession(ctx context.Context, sess Session) error {
-	_, err := s.Pool.Exec(ctx,
+	tag, err := s.Pool.Exec(ctx,
 		`insert into sessions (id_hash, user_id, csrf_token, created_at, last_seen_at, expires_at, ip, user_agent, auth_source, not_after)
-		 values ($1, $2, $3, $4, $5, $6, nullif($7, ''), nullif($8, ''), coalesce(nullif($9, ''), 'password'), $10)`,
+		 select $1, id, $3, $4, $5, $6, nullif($7, ''), nullif($8, ''), coalesce(nullif($9, ''), 'password'), $10
+		 from users where id = $2 and kind = 'human'`,
 		sess.IDHash, sess.UserID, sess.CSRFToken, sess.CreatedAt, sess.LastSeenAt, sess.ExpiresAt,
 		sess.IP, sess.UserAgent, sess.AuthSource, sess.NotAfter)
 	if err != nil {
 		return fmt.Errorf("create session: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
 	}
 	return nil
 }
@@ -67,7 +72,8 @@ func (s *Store) TouchSession(ctx context.Context, idHash string, lastSeen, expir
 
 // LastSessionActivity returns the most recent sign of a person or agent using Harbormaster: the newer of the
 // latest last_seen_at over unexpired sessions and the latest last_used_at over unexpired access tokens (owner's
-// decision 15: a token call wakes polling like a UI session). It returns false when neither exists. Authenticated
+// decision 15: a token call wakes polling like a UI session), but only a person's: a token of the agent identity is a background
+// run and must not wake or keep AWS polling awake (ruling P2-R18). It returns false when neither exists. Authenticated
 // requests refresh both at most once a minute, so it lags real activity by up to that.
 func (s *Store) LastSessionActivity(ctx context.Context, now time.Time) (time.Time, bool, error) {
 	var last *time.Time
@@ -75,7 +81,8 @@ func (s *Store) LastSessionActivity(ctx context.Context, now time.Time) (time.Ti
 		`select max(seen) from (
 		   select max(last_seen_at) as seen from sessions where expires_at >= $1
 		   union all
-		   select max(last_used_at) as seen from api_tokens where expires_at >= $1
+		   select max(t.last_used_at) as seen from api_tokens t join users u on u.id = t.user_id
+		   where t.expires_at >= $1 and u.kind = 'human'
 		 ) activity`, now).Scan(&last)
 	if err != nil {
 		return time.Time{}, false, fmt.Errorf("last session activity: %w", err)

@@ -38,6 +38,7 @@ type Store interface {
 		now time.Time, grace time.Duration, maxLifetime func(store.User) time.Duration) (store.OAuthGrant, error)
 	DeleteOAuthGrant(ctx context.Context, id, userID int64) error
 	GetUser(ctx context.Context, id int64) (store.User, error)
+	GetHumanUser(ctx context.Context, id int64) (store.User, error)
 	LoadSubject(ctx context.Context, userID int64) (authz.Subject, error)
 	Audit(ctx context.Context, e store.AuditEntry) error
 }

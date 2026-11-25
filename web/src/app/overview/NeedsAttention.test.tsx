@@ -6,6 +6,7 @@ import type { AlertDTO, AlertsDTO, ServiceDTO } from '../../api/types'
 import { ALERTS, ME_OMER, SERVICE_DETAILS } from '../../test/fixtures'
 import { server } from '../../test/msw'
 import { allSteadyList, listMatchingAlerts } from '../../test/attentionFixtures'
+import { INVESTIGATION_DONE, mockInvestigations } from '../../test/investigationFixtures'
 import { renderApp } from '../../test/renderApp'
 
 beforeEach(() => {
@@ -270,5 +271,57 @@ describe('NeedsAttention for non-admins', () => {
     expect(within(rows[1]).queryByRole('link', { name: ALERTS.items[1].title })).not.toBeInTheDocument()
     expect(rows[1]).toHaveTextContent(ALERTS.items[1].title)
     expect(within(rows[1]).queryByRole('link', { name: 'Open accounts' })).not.toBeInTheDocument()
+  })
+})
+
+describe('NeedsAttention investigations', () => {
+  const withInvestigation = (investigation: { id: number; state: string; reason: string } | null): AlertsDTO => ({
+    ...ALERTS,
+    items: ALERTS.items.map((alert, index) => (index === 0 ? { ...alert, investigation } : { ...alert, investigation: null })),
+  })
+
+  it('links the alert to its investigation', async () => {
+    mockInvestigations([{ ...INVESTIGATION_DONE, id: 7 }])
+    server.use(http.get('/api/alerts', () => HttpResponse.json(withInvestigation({ id: 7, state: 'done', reason: '' }))))
+    renderApp('/')
+    const user = userEvent.setup()
+    const region = await panel()
+
+    // The rows are read again after the link appears: the first paint comes from the services list, before the alerts arrive.
+    const link = await within(region).findByRole('link', { name: 'Diagnosis ready' })
+    const rows = rowsOf(region)
+    expect(within(rows[0]).getByRole('link', { name: 'Diagnosis ready' })).toBe(link)
+    expect(within(rows[1]).queryByRole('link', { name: /Diagnosis|investigat/i })).not.toBeInTheDocument()
+    await user.click(link)
+
+    const drawer = await screen.findByRole('dialog', { name: 'Investigation' })
+    expect(await within(drawer).findByText('CannotPullContainerError: manifest unknown')).toBeInTheDocument()
+    expect(screen.getByTestId('location')).toHaveTextContent('/')
+  })
+
+  it('shows the skipped-for-allowance text', async () => {
+    mockInvestigations()
+    server.use(http.get('/api/alerts', () => HttpResponse.json(withInvestigation({ id: 8, state: 'skipped', reason: 'budget' }))))
+    renderApp('/')
+    const region = await panel()
+
+    expect(await within(region).findByRole('link', { name: "Not investigated: this month's AI allowance is used up." })).toBeInTheDocument()
+  })
+
+  it('shows nothing when the agent is off, whatever the alert carries', async () => {
+    mockInvestigations([INVESTIGATION_DONE], false)
+    let served = false
+    server.use(
+      http.get('/api/alerts', () => {
+        served = true
+        return HttpResponse.json(withInvestigation({ id: 7, state: 'done', reason: '' }))
+      }),
+    )
+    renderApp('/')
+    const rows = rowsOf(await panel())
+    await waitFor(() => expect(served).toBe(true))
+    await new Promise((resolve) => setTimeout(resolve, 100))
+
+    expect(within(rows[0]).queryByText('Diagnosis ready')).not.toBeInTheDocument()
   })
 })

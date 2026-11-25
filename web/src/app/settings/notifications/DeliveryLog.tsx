@@ -37,7 +37,7 @@ function AlertCell({ row }: { row: NotificationDelivery }) {
   return (
     <>
       {link ? <Link to={link}>{row.alert}</Link> : <span>{row.alert}</span>}
-      {row.event === 'update' && <span className={styles.tag}>{eventLabel('update')}</span>}
+      {(row.event === 'update' || row.event === 'diagnosis') && <span className={styles.tag}>{eventLabel(row.event)}</span>}
     </>
   )
 }

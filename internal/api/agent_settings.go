@@ -485,7 +485,7 @@ func (s *Server) setUserAIChat(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, invalid("Say whether chat is on or off."))
 		return
 	}
-	target, err := s.Store.GetUser(r.Context(), id)
+	target, err := s.Store.GetHumanUser(r.Context(), id)
 	if err != nil {
 		s.fail(w, err)
 		return
