@@ -582,3 +582,173 @@ func TestCatalogue_RolesAndSupports(t *testing.T) {
 		})
 	}
 }
+
+func TestRun_SendsAReviewTask(t *testing.T) {
+	var gotBody struct {
+		Role string          `json:"role"`
+		Task json.RawMessage `json:"task"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		writeLines(w, `{"type":"done"}`)
+	}))
+	defer srv.Close()
+	c, _ := New(srv.URL, "")
+	req := sampleRequest()
+	req.Role = "reviewer"
+	req.Task = &Task{
+		Kind:   "review",
+		Review: &TaskReview{Type: "cost", Range: "7d", Period: "2026-11-17 to 2026-11-24"},
+		Scope: &TaskScope{
+			Entries: []ScopeEntry{
+				{Kind: "tag", TagID: "t1", Name: "payments"},
+				{Kind: "account", AccountID: "123456789012", Region: "eu-west-1"},
+			},
+			ServicesTotal: 3,
+		},
+	}
+	if err := c.Run(context.Background(), "tok", req, func(Event) {}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	const want = `{"kind":"review","review":{"type":"cost","range":"7d","period":"2026-11-17 to 2026-11-24"},"scope":{"entries":[{"kind":"tag","tag_id":"t1","name":"payments"},{"kind":"account","account_id":"123456789012","region":"eu-west-1"}],"services_total":3}}`
+	if gotBody.Role != "reviewer" {
+		t.Errorf("role on the wire = %q", gotBody.Role)
+	}
+	if string(gotBody.Task) != want {
+		t.Errorf("task on the wire =\n%s\nwant\n%s", gotBody.Task, want)
+	}
+}
+
+func TestRun_InvestigationTaskIsUnchanged(t *testing.T) {
+	var gotBody struct {
+		Task json.RawMessage `json:"task"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		writeLines(w, `{"type":"done"}`)
+	}))
+	defer srv.Close()
+	c, _ := New(srv.URL, "")
+	req := sampleRequest()
+	req.Role = "investigator"
+	req.Task = &Task{
+		Kind:    "investigate",
+		Subject: TaskSubject{Kind: "service", ServiceIDs: []string{"7f3c9a2e-41d0-4b8e-9c15-0a6d2e8f1b73-checkout-service"}, ClusterID: "cl-1", AccountID: "123456789012", Region: "eu-west-1"},
+		Alert:   TaskAlert{Kind: "down", Title: "Checkout is failing", Text: "5xx above 10 percent", OpenedAt: time.Date(2026, 11, 24, 10, 0, 0, 0, time.UTC)},
+	}
+	if err := c.Run(context.Background(), "tok", req, func(Event) {}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	const want = `{"kind":"investigate","subject":{"kind":"service","service_ids":["7f3c9a2e-41d0-4b8e-9c15-0a6d2e8f1b73-checkout-service"],"cluster_id":"cl-1","account_id":"123456789012","region":"eu-west-1"},"alert":{"kind":"down","title":"Checkout is failing","text":"5xx above 10 percent","opened_at":"2026-11-24T10:00:00Z"}}`
+	if string(gotBody.Task) != want {
+		t.Errorf("investigation task on the wire =\n%s\nwant\n%s", gotBody.Task, want)
+	}
+}
+
+func TestRun_InvestigationWithZeroOpenedAtKeepsItsAlert(t *testing.T) {
+	var gotBody struct {
+		Task json.RawMessage `json:"task"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		writeLines(w, `{"type":"done"}`)
+	}))
+	defer srv.Close()
+	c, _ := New(srv.URL, "")
+	req := sampleRequest()
+	req.Role = "investigator"
+	req.Task = &Task{
+		Kind:    "investigate",
+		Subject: TaskSubject{Kind: "cluster", ClusterID: "cl-1"},
+		Alert:   TaskAlert{Kind: "down", Title: "Checkout is failing"},
+	}
+	if err := c.Run(context.Background(), "tok", req, func(Event) {}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	const want = `{"kind":"investigate","subject":{"kind":"cluster","service_ids":null,"cluster_id":"cl-1","account_id":"","region":""},"alert":{"kind":"down","title":"Checkout is failing","text":"","opened_at":"0001-01-01T00:00:00Z"}}`
+	if string(gotBody.Task) != want {
+		t.Errorf("investigation task on the wire =\n%s\nwant\n%s", gotBody.Task, want)
+	}
+}
+
+func TestRun_WrongTypeResultLineIsUnavailable(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeLines(w,
+			`{"type":"result","summary":42,"summary_replaced":false,"evidence":[],"evidence_dropped":0}`,
+			`{"type":"done"}`,
+		)
+	}))
+	defer srv.Close()
+	c, _ := New(srv.URL, "")
+	var events []Event
+	err := c.Run(context.Background(), "tok", sampleRequest(), func(e Event) { events = append(events, e) })
+	if !errors.Is(err, ErrAgentUnavailable) {
+		t.Errorf("err = %v, want ErrAgentUnavailable", err)
+	}
+	for _, e := range events {
+		if e.Type == "result" {
+			t.Errorf("a result line of the wrong type was delivered: %+v", e)
+		}
+	}
+}
+
+func TestCatalogue_ReviewTypesAndSupportsReview(t *testing.T) {
+	cases := []struct {
+		name      string
+		body      string
+		wantTypes []string
+		supports  map[string]bool
+	}{
+		{
+			name:      "with the reviewer role and the list",
+			body:      `{"providers":[],"roles":["chat","investigator","reviewer","test"],"review_types":["cost","security","reliability","capacity"],"limits":{"max_run_tokens":1,"run_timeout_seconds":1}}`,
+			wantTypes: []string{"cost", "security", "reliability", "capacity"},
+			supports:  map[string]bool{"cost": true, "capacity": true, "unknown": false, "": false},
+		},
+		{
+			name:      "with the list but without the reviewer role",
+			body:      `{"providers":[],"roles":["chat","investigator","test"],"review_types":["cost"],"limits":{"max_run_tokens":1,"run_timeout_seconds":1}}`,
+			wantTypes: []string{"cost"},
+			supports:  map[string]bool{"cost": false},
+		},
+		{
+			name:      "with the reviewer role and no list",
+			body:      `{"providers":[],"roles":["chat","reviewer","test"],"limits":{"max_run_tokens":1,"run_timeout_seconds":1}}`,
+			wantTypes: nil,
+			supports:  map[string]bool{"cost": false},
+		},
+		{
+			name:      "with the reviewer role and an empty list",
+			body:      `{"providers":[],"roles":["chat","reviewer","test"],"review_types":[],"limits":{"max_run_tokens":1,"run_timeout_seconds":1}}`,
+			wantTypes: nil,
+			supports:  map[string]bool{"cost": false},
+		},
+		{
+			name:      "from a phase 1 agent with no roles",
+			body:      `{"providers":[],"limits":{"max_run_tokens":1,"run_timeout_seconds":1}}`,
+			wantTypes: nil,
+			supports:  map[string]bool{"cost": false},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+			c, _ := New(srv.URL, "")
+			cat, err := c.Catalogue(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(cat.ReviewTypes, tc.wantTypes) {
+				t.Errorf("review types = %v, want %v", cat.ReviewTypes, tc.wantTypes)
+			}
+			for reviewType, want := range tc.supports {
+				if got := cat.SupportsReview(reviewType); got != want {
+					t.Errorf("SupportsReview(%q) = %v, want %v", reviewType, got, want)
+				}
+			}
+		})
+	}
+}
