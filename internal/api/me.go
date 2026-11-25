@@ -61,6 +61,8 @@ func (s *Server) buildMe(ctx context.Context, user store.User, csrf string, subj
 		Email: user.Email, DisplayName: user.DisplayName,
 		AgentEnabled: s.Cfg.AgentEnabled(),
 		AIChat:       s.Cfg.AgentEnabled() && (subject.Admin || user.AIChat),
+		// Reviews have no setting of their own to turn them off yet; they follow the agent.
+		ReviewsEnabled: s.Cfg.AgentEnabled(),
 	}
 	for _, t := range tags {
 		dto.Tags = append(dto.Tags, MeTagDTO{ID: int64(t.ID), Name: t.Name, Color: t.Color, Builtin: t.Builtin, ServicesInEffect: counts[t.ID].ServicesEffective})

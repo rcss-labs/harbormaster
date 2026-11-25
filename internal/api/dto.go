@@ -56,6 +56,9 @@ type MeDTO struct {
 	// chat (an admin, or a user the admins allowed). Both are false while the agent is off.
 	AgentEnabled bool `json:"agent_enabled"`
 	AIChat       bool `json:"ai_chat"`
+	// ReviewsEnabled is true when the agent is on and scheduled reviews are not turned off; the web shows the Reviews
+	// entry by it.
+	ReviewsEnabled bool `json:"reviews_enabled"`
 }
 
 // ListResponse is the body of every paginated list endpoint. Next is null on the last page.
