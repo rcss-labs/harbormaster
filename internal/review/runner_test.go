@@ -71,7 +71,11 @@ func TestJob_PastTheLimitRecordsMissedWithoutARun(t *testing.T) {
 		stop := f.start(f.runner)
 		f.wait("the record", func() bool { return len(f.reviewRuns(rv.ID)) == 1 })
 		stop()
-		f.want(f.reviewRuns(rv.ID)[0], "skipped", "missed")
+		run := f.reviewRuns(rv.ID)[0]
+		f.want(run, "skipped", "missed")
+		if run.ClaimSeq != 0 {
+			t.Errorf("a row that came too late was claimed")
+		}
 		f.unspent()
 	})
 	t.Run("while the row waited", func(t *testing.T) {
