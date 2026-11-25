@@ -51,6 +51,35 @@ This release adds migrations `0216_agent_run_tokens` (run tokens: a new token ki
 
 To roll back, unset `HM_AGENT_URL` first, then roll the image back. Old tasks ignore run tokens and the new tables, so they run unchanged. Leave the schema as it is: the agent tables and columns stay, empty or unused, and a run token that was minted just before the rollback stops working after `HM_AGENT_RUN_TOKEN_TTL` (15 minutes by default). A later upgrade finds the migrations already applied. Conversations and the agent's run records stay in the database and are removed by the usual retention (`HM_RETENTION_AGENT_CONVERSATIONS`, 30 days by default) once the new release runs again. Restore from your backup only if you need the schema itself undone.
 
+## The release that adds automatic investigations
+
+This release adds migrations `0218_agent_identity` (a `kind` column on `users` and its checks), `0219_agent_investigations` (investigations, their evidence and their links to alert incidents) and `0220_notification_diagnosis` (the Diagnosis event and a due-time column on the notification delivery log). All only add. No agent identity row is made by a migration: it is created when the agent is on. Nothing changes for users until a route has **Investigate with AI** on.
+
+**Upgrade order.** Harbormaster and the agent service can be upgraded in either order. Until both are new, investigations are skipped as `not_configured` (an older agent does not offer the investigator role). Chat keeps working throughout. In split mode, the agent module must also admit the coordinator's security group: see [Install the AI agent](ai-agent.md).
+
+**During the rollout.** While an older release still runs against the new schema:
+
+- Its delivery summary and its "route failing" warning on **Settings > Notifications** count diagnosis messages, so a failed diagnosis can show up there as a failed delivery. Alerts themselves are not affected: an older task never claims, renders or sends a diagnosis row, and it still sends every Opened, Update, Repeat and Resolved message as before. The count is right again when the last older task is gone.
+- It may list the agent identity on its Users page. It cannot give it a privilege (the schema refuses an admin switch, a password, a break-glass flag or an SSO link for it, and the older task answers such an attempt with an error).
+
+**Migration 0220 takes a short exclusive lock** on the notification delivery log, with a lock timeout of 2 seconds, so that a waiting migration cannot make a sender's write time out and send an alert twice. If a long transaction holds the table at that moment, the migration times out and rolls back whole. The task then exits at start, ECS starts another and the migration is tried again from scratch. If tasks keep exiting at start after a rollout with a lock timeout in their log, find the long transaction on the delivery log and end it, then let the next task start:
+
+```sh
+psql "$DATABASE_URL" -c "select pid, state, now() - xact_start as open_for, left(query, 80) as query
+  from pg_stat_activity where xact_start is not null and pid <> pg_backend_pid() order by xact_start limit 10"
+```
+
+Use a read-only account for this query. Ending a transaction (`pg_terminate_backend`) is your call: first find out what it is.
+
+**Roll back.** Do this in order:
+
+1. Clear **Investigate with AI** on every route (or set `HM_AGENT_INVESTIGATIONS_PER_HOUR=0`, or unset `HM_AGENT_URL`). New requests stop.
+2. Roll the image back.
+
+An older release never sends a diagnosis row left behind. They stay in the delivery log, inert, and go with their incident after `HM_RETENTION_NOTIFICATION_LOG`. Investigations and their evidence stay in the database, unread, until the new release runs again and retention (`HM_RETENTION_AGENT_RUNS`) removes them. The schema stays as it is.
+
+An older release can list and delete the agent identity. Its permissions go with it. The new release creates it again, with no permissions, so set its access again in **Settings > AI agent**.
+
 ## Access role changes
 
 A release can add permissions to the `harbormaster-access` role. Features that need a new permission show a per-account message until you re-apply the access module in that account. Everything else keeps working. Known cases:
@@ -77,5 +106,6 @@ Rolling the image back is safe: old tasks cannot lead while a new task holds the
 ## Next steps
 
 - [Changelog](../community/changelog.md)
+- [AI agent runbook](../operations/runbooks/ai-agent.md)
 - [High availability](../operations/high-availability.md)
 - [Release process](../development/release-process.md)

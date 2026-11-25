@@ -17,6 +17,7 @@ This page records notable changes to Harbormaster. It follows [Keep a Changelog]
 - Image security scanning with Syft and Grype, a pre-deploy gate, and accepted-risk records.
 - Off-hours schedules that put services to sleep and wake them.
 - Alert notifications to Slack, Telegram, PagerDuty, webhook and email routes, with quiet hours.
+- Automatic AI investigations of alerts: a per-route switch, a read-only agent identity with its own access, a stored summary and evidence, and a Diagnosis message after the Opened message. Off unless the AI agent is set up. See [Automatic AI investigations](../guides/ai-agent-investigator.md).
 - Cost analytics, including Fargate Spot advice.
 - Networks and storage views.
 - Multiple AWS accounts and regions, connected through an assumed role with an external ID.
