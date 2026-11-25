@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -158,67 +160,141 @@ func TestReview_RunsOnceAndIsDelivered(t *testing.T) {
 	if len(rows) != 1 || rows[0].state != "done" || rows[0].reason != "" {
 		t.Fatalf("runs of the review = %+v, want exactly one, done", rows)
 	}
-	if got := countEvents(receivedEvents(t, me, path), "review"); got != 1 {
-		t.Fatalf("review messages at the receiver = %d, want 1", got)
+	// A second review due now is a later tick that scans the first review again after its run is done: when its own
+	// result has arrived, a duplicate of the first would have been recorded and sent by then.
+	secondID := createReviewDueNow(t, me, conn, "Cost, again", routeID)
+	within(t, 120*time.Second, "the second review's message at the receiver", func() bool {
+		return countEvents(receivedEvents(t, me, path), "review") >= 2
+	})
+	if rows = reviewRunRows(t, conn, reviewID); len(rows) != 1 || rows[0].state != "done" {
+		t.Fatalf("runs of the first review after a later tick = %+v, want the same one", rows)
+	}
+	if second := reviewRunRows(t, conn, secondID); len(second) != 1 || second[0].state != "done" {
+		t.Fatalf("runs of the second review = %+v, want one, done", second)
+	}
+	if got := countEvents(receivedEvents(t, me, path), "review"); got != 2 {
+		t.Fatalf("review messages at the receiver = %d, want 2 (one per review)", got)
 	}
 	var deliveries int
-	if err := conn.QueryRow(context.Background(), `select count(*) from notification_deliveries where kind = 'review' and route_id = $1`, routeID).Scan(&deliveries); err != nil || deliveries != 1 {
-		t.Fatalf("review deliveries = %d, %v; want 1", deliveries, err)
+	if err := conn.QueryRow(context.Background(), `select count(*) from notification_deliveries where kind = 'review' and route_id = $1`, routeID).Scan(&deliveries); err != nil || deliveries != 2 {
+		t.Fatalf("review deliveries = %d, %v; want 2", deliveries, err)
 	}
 }
 
-// The agent service is down. An alert on a route still arrives on time; the review is not run and nothing is sent
-// for it: its row waits for the agent or ends skipped, never done.
-func TestReview_AgentDownDelaysNoAlert(t *testing.T) {
-	schema := requireDB(t)
-	logs := &syncBuffer{}
-	base := startServeLogged(t, map[string]string{
-		"HM_DATABASE_URL": schema, "HM_SESSION_KEY": "review-down-session-key",
-		"HM_AGENT_URL":     "http://" + closedAddr(t),
-		"HM_POLL_SERVICES": "2s", "HM_POLL_RUNNING_TASKS": "2s", "HM_POLL_IDLE_AFTER": "0",
-		"HM_NOTIFY_INTERVAL": "1s", "HM_NOTIFY_SETTLE": "0s", "HM_FAKE_NOTIFY_DEMO": "false",
-	}, logs)
-	conn, err := pgx.Connect(context.Background(), schema)
+// hangingAddr is a loopback address that accepts connections and never answers them, as an agent that is up but
+// stuck does. Unlike a closed port it holds the review job's call for as long as the client allows.
+func hangingAddr(t *testing.T) string {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { conn.Close(context.Background()) })
-
-	me := signIn(t, base)
-	const path = "/fake-notify/webhook/reviewdown"
-	routeID := createRoute(t, me, base, "review down sink", path)
-	// The API refuses a review while the agent cannot say which types it offers, so the row is written directly.
-	var reviewID int64
-	fiveMinutesAgo := time.Now().UTC().Add(-5 * time.Minute)
-	if err := conn.QueryRow(context.Background(), `insert into agent_reviews (name, type, cadence, at_minute, timezone, schedule_changed_at)
-		values ('Cost, agent down', 'cost', 'daily', $1, 'UTC', now() - interval '2 days') returning id`, fiveMinutesAgo.Hour()*60+fiveMinutesAgo.Minute()).Scan(&reviewID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := conn.Exec(context.Background(), `insert into agent_review_routes (review_id, route_id) values ($1, $2)`, reviewID, routeID); err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if t.Failed() {
-			t.Logf("runs: %+v\nlog:\n%s", reviewRunRows(t, conn, reviewID), logs.String())
+	var mu sync.Mutex
+	var held []net.Conn
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			held = append(held, c)
+			mu.Unlock()
 		}
 	}()
-
-	within(t, degradedWindow, "alert.raised on the route", func() bool {
-		return countEvents(receivedEvents(t, me, path), "alert.raised") > 0
-	})
-	within(t, 90*time.Second, "the review was recorded and tried", func() bool {
-		rows := reviewRunRows(t, conn, reviewID)
-		return len(rows) == 1 && (rows[0].state != "requested" || rows[0].retryAt != nil)
-	})
-	for _, row := range reviewRunRows(t, conn, reviewID) {
-		if row.state == "done" || row.state == "running" {
-			t.Errorf("run %+v with no agent", row)
+	t.Cleanup(func() {
+		l.Close()
+		mu.Lock()
+		defer mu.Unlock()
+		for _, c := range held {
+			c.Close()
 		}
-	}
-	if got := countEvents(receivedEvents(t, me, path), "review"); got != 0 {
-		t.Errorf("review messages at the receiver = %d, want none", got)
-	}
-	if out := logs.String(); strings.Contains(out, "panic") {
-		t.Errorf("the process logged a panic:\n%s", out)
+	})
+	return l.Addr().String()
+}
+
+// The agent service is away, refusing at once or accepting and never answering. The review is claimed first; an
+// alert on another route raised after that still arrives within seconds, and nothing is sent for the review: its
+// row waits for the agent or ends skipped, never done.
+func TestReview_AgentDownDelaysNoAlert(t *testing.T) {
+	for name, agentAddr := range map[string]func(*testing.T) string{"port closed": closedAddr, "accepts and never answers": hangingAddr} {
+		t.Run(name, func(t *testing.T) {
+			schema := requireDB(t)
+			logs := &syncBuffer{}
+			base := startServeLogged(t, map[string]string{
+				"HM_DATABASE_URL": schema, "HM_SESSION_KEY": "review-down-session-key",
+				"HM_AGENT_URL":     "http://" + agentAddr(t),
+				"HM_POLL_SERVICES": "2s", "HM_POLL_RUNNING_TASKS": "2s", "HM_POLL_IDLE_AFTER": "0",
+				"HM_NOTIFY_INTERVAL": "1s", "HM_NOTIFY_SETTLE": "0s", "HM_FAKE_NOTIFY_DEMO": "false",
+			}, logs)
+			conn, err := pgx.Connect(context.Background(), schema)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { conn.Close(context.Background()) })
+
+			me := signIn(t, base)
+			const reviewPath, alertPath = "/fake-notify/webhook/reviewdown", "/fake-notify/webhook/alertdown"
+			// The review's own route takes no alert, so the alert route made later is the only one an alert reaches.
+			reviewRoute := degradedRoute(base)
+			reviewRoute["name"], reviewRoute["url"], reviewRoute["kinds"], reviewRoute["min_severity"] = "review down sink", base+reviewPath, []string{"account_unreachable"}, "critical"
+			status, body := me.send(http.MethodPost, "/api/notifications/routes", reviewRoute)
+			var created struct {
+				ID int64 `json:"id"`
+			}
+			if (status != http.StatusOK && status != http.StatusCreated) || json.Unmarshal([]byte(body), &created) != nil || created.ID == 0 {
+				t.Fatalf("create route = %d %s", status, body)
+			}
+			// The API refuses a review while the agent cannot say which types it offers, so the row is written directly.
+			var reviewID int64
+			fiveMinutesAgo := time.Now().UTC().Add(-5 * time.Minute)
+			if err := conn.QueryRow(context.Background(), `insert into agent_reviews (name, type, cadence, at_minute, timezone, schedule_changed_at)
+				values ('Cost, agent down', 'cost', 'daily', $1, 'UTC', now() - interval '2 days') returning id`, fiveMinutesAgo.Hour()*60+fiveMinutesAgo.Minute()).Scan(&reviewID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := conn.Exec(context.Background(), `insert into agent_review_routes (review_id, route_id) values ($1, $2)`, reviewID, created.ID); err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if t.Failed() {
+					t.Logf("runs: %+v\nlog:\n%s", reviewRunRows(t, conn, reviewID), logs.String())
+				}
+			}()
+
+			// The job has the row in hand (running) or has given it back (requested with a retry time) before the alert exists.
+			within(t, 90*time.Second, "the review was claimed", func() bool {
+				rows := reviewRunRows(t, conn, reviewID)
+				return len(rows) == 1 && (rows[0].state != "requested" || rows[0].retryAt != nil)
+			})
+			routeAt := time.Now()
+			if status, body := me.send(http.MethodPost, "/api/notifications/routes", func() map[string]any {
+				r := degradedRoute(base)
+				r["name"], r["url"] = "alert down sink", base+alertPath
+				return r
+			}()); status != http.StatusOK && status != http.StatusCreated {
+				t.Fatalf("create alert route = %d %s", status, body)
+			}
+			within(t, 5*time.Second, "alert.raised on the alert route, with the review job stuck or failing", func() bool {
+				return countEvents(receivedEvents(t, me, alertPath), "alert.raised") > 0
+			})
+			t.Logf("alert arrived %v after its route was made", time.Since(routeAt).Round(100*time.Millisecond))
+
+			// Waiting for the agent is requested with a retry time; running means the call is still in flight.
+			within(t, 90*time.Second, "the review waits for a retry or is skipped", func() bool {
+				rows := reviewRunRows(t, conn, reviewID)
+				return len(rows) == 1 && ((rows[0].state == "requested" && rows[0].retryAt != nil) || rows[0].state == "skipped")
+			})
+			for _, row := range reviewRunRows(t, conn, reviewID) {
+				if row.state == "done" || row.state == "running" {
+					t.Errorf("run %+v with no agent", row)
+				}
+			}
+			if got := countEvents(receivedEvents(t, me, reviewPath), "review"); got != 0 {
+				t.Errorf("review messages at the receiver = %d, want none", got)
+			}
+			if out := logs.String(); strings.Contains(out, "panic") {
+				t.Errorf("the process logged a panic:\n%s", out)
+			}
+		})
 	}
 }
