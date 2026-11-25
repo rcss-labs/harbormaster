@@ -105,7 +105,7 @@ func (d *Dispatcher) freeFollowUps() (free int, exclude []int64) {
 // given away, because another diagnosis may be waiting for it, and nothing is left when the claim failed.
 func (d *Dispatcher) diagnosisStep(ctx context.Context, now time.Time, names map[string]string) (free int, exclude []int64) {
 	planCtx, cancelPlan := context.WithTimeout(ctx, d.investigateTimeout()/2)
-	_, err := d.Store.PlanDiagnosisDeliveries(planCtx, now, heldAt(now), diagnosisPlanLimit)
+	_, err := d.Store.PlanDiagnosisDeliveries(planCtx, now, d.investigationWindow(), heldAt(now), diagnosisPlanLimit)
 	cancelPlan()
 	if ctx.Err() != nil {
 		return 0, nil

@@ -54,7 +54,7 @@ func (f *planFixture) finish() {
 
 func (f *planFixture) plan(held func(store.NotificationRoute, string) (time.Time, bool)) int {
 	f.t.Helper()
-	n, err := f.s.PlanDiagnosisDeliveries(context.Background(), invNow, held, 100)
+	n, err := f.s.PlanDiagnosisDeliveries(context.Background(), invNow, invWindow, held, 100)
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -198,7 +198,7 @@ func TestPlanDiagnosis_SkipsFailedSkippedAndRunningInvestigations(t *testing.T) 
 	invRecord(t, f.s, invNow)
 	states := map[string]string{"a": "failed", "b": "skipped", "c": "running", "d": "requested", "e": "done"}
 	for service, state := range states {
-		f.exec(`update agent_investigations set state = $1, summary = 'a summary' where service_name = $2`, state, service)
+		f.exec(`update agent_investigations set state = $1, summary = 'a summary', finished_at = $3 where service_name = $2`, state, service, invNow)
 	}
 	if n := f.plan(never); n != 1 {
 		t.Fatalf("planned %d, want 1 (the done investigation only)", n)
@@ -285,7 +285,7 @@ func TestPlanDiagnosis_IdempotentAcrossCyclesAndHolders(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			n, err := f.s.PlanDiagnosisDeliveries(context.Background(), invNow, never, 100)
+			n, err := f.s.PlanDiagnosisDeliveries(context.Background(), invNow, invWindow, never, 100)
 			if err != nil {
 				t.Error(err)
 			}
@@ -306,7 +306,7 @@ func TestPlanDiagnosis_LimitBoundsOneCall(t *testing.T) {
 	f.addRoute("a", "delivered", f.incident)
 	f.addRoute("b", "delivered", f.incident)
 	f.finish()
-	n, err := f.s.PlanDiagnosisDeliveries(context.Background(), invNow, never, 1)
+	n, err := f.s.PlanDiagnosisDeliveries(context.Background(), invNow, invWindow, never, 1)
 	if err != nil || n != 1 {
 		t.Fatalf("limit 1 planned %d, %v, want 1", n, err)
 	}
@@ -334,7 +334,7 @@ func TestPlanDiagnosis_PlannedRowsDoNotUseUpTheLimit(t *testing.T) {
 	}
 	f.finish()
 	for i := range 3 {
-		n, err := f.s.PlanDiagnosisDeliveries(context.Background(), invNow, never, 1)
+		n, err := f.s.PlanDiagnosisDeliveries(context.Background(), invNow, invWindow, never, 1)
 		if err != nil || n != 1 {
 			t.Fatalf("call %d with limit 1 planned %d, %v, want 1: earlier rows use up the limit", i+1, n, err)
 		}
@@ -353,7 +353,7 @@ func TestPlanDiagnosis_OneFailingInsertDoesNotStopTheRest(t *testing.T) {
 	f.exec(`create function refuse_bad() returns trigger language plpgsql as $$ begin raise exception 'refused'; end $$`)
 	f.exec(`create trigger refuse_bad before insert on notification_deliveries for each row
 		when (new.event = 'diagnosis' and new.route_name = 'bad') execute function refuse_bad()`)
-	n, err := f.s.PlanDiagnosisDeliveries(context.Background(), invNow, never, 100)
+	n, err := f.s.PlanDiagnosisDeliveries(context.Background(), invNow, invWindow, never, 100)
 	if err == nil || n != 2 {
 		t.Fatalf("planned %d, err %v, want 2 and the failed insert's error", n, err)
 	}
@@ -371,13 +371,43 @@ func TestPlanDiagnosis_StopsOnACancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	asked := 0
-	n, err := f.s.PlanDiagnosisDeliveries(ctx, invNow, func(store.NotificationRoute, string) (time.Time, bool) {
+	n, err := f.s.PlanDiagnosisDeliveries(ctx, invNow, invWindow, func(store.NotificationRoute, string) (time.Time, bool) {
 		asked++
 		cancel()
 		return time.Time{}, false
 	}, 100)
 	if err == nil || n != 0 || asked != 1 {
 		t.Fatalf("planned %d, err %v, rows tried %d, want an error after the first row", n, err, asked)
+	}
+}
+
+// A route whose switch is turned on later gets no old diagnosis. The age is that of the later of the two things a
+// diagnosis waits for, so an opened held through quiet hours still gets its diagnosis in the morning.
+func TestPlanDiagnosis_OnlyWhileTheInvestigationOrTheOpenedIsRecent(t *testing.T) {
+	day := 24 * time.Hour
+	for name, tc := range map[string]struct {
+		finishedAgo  time.Duration
+		deliveredAgo time.Duration
+		want         int
+	}{
+		"both just now":                    {0, time.Minute, 1},
+		"inside the window":                {invWindow - time.Second, day, 1},
+		"at the edge of the window":        {invWindow, day, 0},
+		"outside the window":               {invWindow + time.Second, day, 0},
+		"days old":                         {3 * day, 3 * day, 0},
+		"delivered late, inside":           {9 * time.Hour, invWindow - time.Second, 1},
+		"delivered late, then switched on": {9 * time.Hour, invWindow + time.Second, 0},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, _ := newPlanFixture(t)
+			route := f.addRoute("r", "delivered", f.incident)
+			f.finish()
+			f.exec(`update agent_investigations set finished_at = $1`, invNow.Add(-tc.finishedAgo))
+			f.exec(`update notification_deliveries set finished_at = $1 where event = 'opened'`, invNow.Add(-tc.deliveredAgo))
+			if n := f.plan(never); n != tc.want || f.hasDiagnosis(route, f.incident) != (tc.want == 1) {
+				t.Fatalf("planned %d, want %d", n, tc.want)
+			}
+		})
 	}
 }
 

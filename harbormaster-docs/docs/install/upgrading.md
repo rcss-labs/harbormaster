@@ -55,6 +55,8 @@ To roll back, unset `HM_AGENT_URL` first, then roll the image back. Old tasks ig
 
 This release adds migrations `0218_agent_identity` (a `kind` column on `users` and its checks), `0219_agent_investigations` (investigations, their evidence and their links to alert incidents) and `0220_notification_diagnosis` (the Diagnosis event and a due-time column on the notification delivery log). All only add. No agent identity row is made by a migration: it is created when the agent is on. Nothing changes for users until a route has **Investigate with AI** on.
 
+**Check `HM_RETENTION_AGENT_RUNS` first.** This release checks it at start. A negative value (older releases read it as "keep everything") and any non-zero value below `48h` are refused: the task logs the setting's name and exits, so a rollout that still carries such a value fails at start, where you see it, instead of deleting history later. Use `0` to keep everything, or `48h` or more. The same setting covers finished chat runs as well as investigations, so it also decides how long the chat's run records (who, model, tokens, cost) are kept. The current UTC month's runs are never deleted.
+
 **Upgrade order.** Harbormaster and the agent service can be upgraded in either order. Until both are new, investigations are skipped as `not_configured` (an older agent does not offer the investigator role). Chat keeps working throughout. In split mode, the agent module must also admit the coordinator's security group: see [Install the AI agent](ai-agent.md).
 
 **During the rollout.** While an older release still runs against the new schema:
