@@ -98,10 +98,16 @@ type AgentCatalogueProviderDTO struct {
 
 // AgentChatModelDTO is the model chosen for chat. Available is false when the agent is reachable and no longer
 // offers it; while the agent cannot be asked it stays true, so a model is not called gone for want of an answer.
+//
+// MaxQuestionUSD is what one question reserves with this model, rounded up to the cent; it is empty while the model
+// is not known (the agent cannot be asked, or no longer offers it). AllowanceBelowQuestion is true when the allowance
+// left this month cannot cover that reservation, so every question is refused although nothing may have been spent.
 type AgentChatModelDTO struct {
-	Provider  string `json:"provider"`
-	Model     string `json:"model"`
-	Available bool   `json:"available"`
+	Provider               string `json:"provider"`
+	Model                  string `json:"model"`
+	Available              bool   `json:"available"`
+	MaxQuestionUSD         string `json:"max_question_usd"`
+	AllowanceBelowQuestion bool   `json:"allowance_below_question"`
 }
 
 type AgentRoleModelsDTO struct {
@@ -156,8 +162,14 @@ func (s *Server) agentSettingsDTO(r *http.Request) (AgentSettingsDTO, error) {
 		out.Catalogue.Providers = append(out.Catalogue.Providers, dto)
 	}
 	if ref, ok := settings.RoleModels[chatRoleName]; ok {
-		_, offered := findModel(cat, ref)
-		out.RoleModels.Chat = &AgentChatModelDTO{Provider: ref.Provider, Model: ref.Model, Available: offered || catErr != nil}
+		known, offered := findModel(cat, ref)
+		chat := &AgentChatModelDTO{Provider: ref.Provider, Model: ref.Model, Available: offered || catErr != nil}
+		if offered {
+			reservation := known.MaxRunCostMicroUSD(cat.MaxRunTokens)
+			chat.MaxQuestionUSD = formatUSD(reservation, true)
+			chat.AllowanceBelowQuestion = settings.MonthlyBudgetMicroUSD-settled-reserved < reservation
+		}
+		out.RoleModels.Chat = chat
 	}
 	return out, nil
 }

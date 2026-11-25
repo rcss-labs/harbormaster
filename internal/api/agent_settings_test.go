@@ -1090,3 +1090,38 @@ func TestAgentTest_NotStartedWhileDraining(t *testing.T) {
 	}
 	wantTestRun(t, env, "failed", 0)
 }
+
+// The page needs what one question reserves with the chosen model, and whether the allowance left cannot cover it.
+func TestAgentSettings_ReportsWhatOneQuestionReserves(t *testing.T) {
+	env := newSettingsEnv(t, false)
+	check := func(name string, wantBelow bool) {
+		t.Helper()
+		chat := getSettings(t, env.sam).RoleModels["chat"]
+		if chat["max_question_usd"] != "0.60" || chat["allowance_below_question"] != wantBelow {
+			t.Errorf("%s: chat = %v, want max_question_usd 0.60 and allowance_below_question %v", name, chat, wantBelow)
+		}
+	}
+	check("plenty", false)
+	setChatSettings(t, env.st, 600_000, "fake", "fake-1", nil)
+	check("exactly one question", false)
+	setChatSettings(t, env.st, 500_000, "fake", "fake-1", nil)
+	check("allowance smaller than a question", true)
+	setChatSettings(t, env.st, 1_000_000, "fake", "fake-1", nil)
+	seedRun(t, env.st, "chat", "done", 500_000, env.api.now())
+	check("what is left is smaller than a question", true)
+}
+
+func TestAgentSettings_NothingToReserveWhenTheModelIsNotKnown(t *testing.T) {
+	env := newSettingsEnv(t, true)
+	chat := getSettings0(t, env.sam)["role_models"].(map[string]any)["chat"].(map[string]any)
+	if chat["max_question_usd"] != "" || chat["allowance_below_question"] != false {
+		t.Errorf("chat = %v, want an empty max_question_usd and no warning while the agent cannot be asked", chat)
+	}
+}
+
+func getSettings0(t *testing.T, c *apiClient) map[string]any {
+	t.Helper()
+	var out map[string]any
+	decode(t, c.get("/api/agent/settings"), &out)
+	return out
+}
