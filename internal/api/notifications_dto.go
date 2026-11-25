@@ -188,6 +188,8 @@ type NotificationDeliveryDTO struct {
 	ClusterID string `json:"cluster_id"`
 	AccountID string `json:"account_id"`
 	Region    string `json:"region"`
+	// ReviewRunID is the review run a review row reports; absent on every other row (the web type is optional).
+	ReviewRunID *int64 `json:"review_run_id,omitempty"`
 }
 
 // NotificationTargetAccountDTO is a connected account the scope picker can offer.
