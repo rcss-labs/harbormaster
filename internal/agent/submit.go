@@ -119,9 +119,9 @@ func parseSubmission(call provider.ToolCall) (sub submission, problem string) {
 // buildResult makes the result of a run. The model's words reach it only as the
 // checked summary and notes; the rest comes from units. A reference that is not
 // a unit the model was shown, or is repeated, is dropped.
-func buildResult(sub submission, units map[string]citedUnit, corpus *agentresult.Corpus) agentresult.Result {
+func buildResult(sub submission, units map[string]citedUnit, corpus *agentresult.ReadCorpus) agentresult.Result {
 	result := agentresult.Result{Evidence: []agentresult.Evidence{}}
-	result.Summary, result.SummaryReplaced = agentresult.CheckSummary(sub.summary, corpus)
+	result.Summary, result.SummaryReplaced = agentresult.CheckReadSummary(sub.summary, corpus)
 	cited := map[string]bool{}
 	for _, c := range sub.evidence {
 		unit, known := units[c.ref]
@@ -132,7 +132,7 @@ func buildResult(sub submission, units map[string]citedUnit, corpus *agentresult
 		cited[c.ref] = true
 		result.Evidence = append(result.Evidence, agentresult.Evidence{
 			Tool: unit.tool, ServiceID: unit.serviceID, Action: unit.action,
-			Note: agentresult.CheckNote(c.note, corpus), Excerpt: unit.excerpt,
+			Note: agentresult.CheckReadNote(c.note, corpus), Excerpt: unit.excerpt,
 		})
 	}
 	return result

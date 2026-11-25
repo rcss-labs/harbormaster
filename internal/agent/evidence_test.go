@@ -13,6 +13,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/agent/provider/fake"
 	"github.com/rcss-labs/harbormaster/internal/agentresult"
 	"github.com/rcss-labs/harbormaster/internal/hmtools"
+	"github.com/rcss-labs/harbormaster/internal/model"
 )
 
 func TestInvestigator_ToolResultIsShownAsNumberedUnits(t *testing.T) {
@@ -183,6 +184,67 @@ func TestInvestigator_AnswerCutByTheReadCapStillCountsAsRead(t *testing.T) {
 	runner := replies(map[string]string{"get_service_logs": `{"events":["` + line + `","cut he` + answerTooLargeNote})
 	if res := requireResult(t, investigate(t, newLoop(p, runner), p, investigatorInput())); !res.SummaryReplaced {
 		t.Errorf("a line copied from a capped answer passed: %+v", res)
+	}
+}
+
+func TestInvestigator_TheToolDecidesHowLongACopyMayBe(t *testing.T) {
+	text := "the order ledger refused a new connection"
+	summary := "It seems the order ledger refused a new connection today."
+	for name, c := range map[string]struct {
+		tool, body string
+		replaced   bool
+	}{
+		"an event of the service": {"get_service", `{"recent_events":[{"text":"` + text + `"}]}`, false},
+		"a stop reason":           {"list_service_tasks", `{"items":[{"stopped_reason":"` + text + `"}]}`, false},
+		"a log line":              {"get_service_logs", `{"lines":[{"container":"app","message":"` + text + `"}]}`, true},
+		"an event in a log tool":  {"get_service_logs", `{"recent_events":[{"text":"` + text + `"}]}`, true},
+		"an environment value":    {"get_task_definition", `{"definition":{"containerDefinitions":[{"environment":[{"name":"A","value":"` + text + `"}]}]}}`, true},
+		"a member nobody named":   {"get_service", `{"message":"` + text + `"}`, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := fake.New(tool("c1", c.tool), calls(submitCall(summary, map[string]any{"ref": "e1", "note": summary})))
+			res := requireResult(t, investigate(t, newLoop(p, replies(map[string]string{c.tool: c.body})), p, investigatorInput()))
+			if res.SummaryReplaced != c.replaced {
+				t.Errorf("replaced = %v: %q", res.SummaryReplaced, res.Summary)
+			}
+			if len(res.Evidence) != 1 || (res.Evidence[0].Note == agentresult.ReplacementNote) != c.replaced {
+				t.Errorf("evidence = %+v", res.Evidence)
+			}
+		})
+	}
+}
+
+func TestInvestigator_TheSubjectsOwnNamesMayBeWritten(t *testing.T) {
+	cluster := model.ClusterKey{AccountID: "123456789012", Region: "eu-west-1", Cluster: "platform-production-eu-central-1-shared"}
+	const name, second, stranger = "prod-payments-checkout-api-service", "prod-payments-settlement-worker-service", "prod-payments-reconciliation-service"
+	id := func(service string) string { return model.ServiceKey{ClusterKey: cluster, Service: service}.ID() }
+	logs := `{"lines":[{"message":"` + name + `: down"},{"message":"` + second + `: down"},{"message":"` + stranger + `: down"},{"message":"on ` + cluster.Cluster + `"}]}`
+	for label, c := range map[string]struct {
+		subject  TaskSubject
+		summary  string
+		replaced bool
+	}{
+		"the service":       {TaskSubject{Kind: "service", ServiceIDs: []string{id(name)}}, "The service " + name + " fails.", false},
+		"its cluster":       {TaskSubject{Kind: "service", ServiceIDs: []string{id(name)}}, "The cluster " + cluster.Cluster + " fails.", false},
+		"another service":   {TaskSubject{Kind: "service", ServiceIDs: []string{id(name)}}, "The service " + stranger + " fails.", true},
+		"each of a group":   {TaskSubject{Kind: "cluster", ServiceIDs: []string{id(name), id(second)}, ClusterID: cluster.ID()}, "Both " + name + " and " + second + " fail.", false},
+		"outside the group": {TaskSubject{Kind: "cluster", ServiceIDs: []string{id(name), id(second)}, ClusterID: cluster.ID()}, "Both " + name + " and " + stranger + " fail.", true},
+		"the cluster alone": {TaskSubject{Kind: "cluster", ClusterID: cluster.ID()}, "The cluster " + cluster.Cluster + " fails.", false},
+		"no such cluster":   {TaskSubject{Kind: "account", AccountID: "123456789012"}, "The cluster " + cluster.Cluster + " fails.", true},
+		"an id that is not": {TaskSubject{Kind: "service", ServiceIDs: []string{name}, ClusterID: cluster.Cluster}, "The service " + name + " fails.", true},
+		"the log beside it": {TaskSubject{Kind: "service", ServiceIDs: []string{id(name)}}, "It logs " + name + ": down.", true},
+	} {
+		t.Run(label, func(t *testing.T) {
+			in := investigatorInput()
+			task := *in.Task
+			task.Subject = c.subject
+			in.Task = &task
+			p := fake.New(tool("c1", "get_service_logs"), calls(submitCall(c.summary)))
+			res := requireResult(t, investigate(t, newLoop(p, replies(map[string]string{"get_service_logs": logs})), p, in))
+			if res.SummaryReplaced != c.replaced {
+				t.Errorf("replaced = %v: %q", res.SummaryReplaced, res.Summary)
+			}
+		})
 	}
 }
 
