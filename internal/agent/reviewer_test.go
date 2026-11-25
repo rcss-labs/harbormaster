@@ -353,6 +353,29 @@ func TestInvestigator_LongNameStillReplaces(t *testing.T) {
 	}
 }
 
+// A name over the loose run, in members that are loose only: the same rules hold for it there.
+func TestReviewer_ANameOverTheLooseRun(t *testing.T) {
+	name := longService + "-" + longService // 97 characters
+	if len(name) < agentresult.LooseRun || len(name) > 128 {
+		t.Fatalf("setup: %d characters", len(name))
+	}
+	id := model.ServiceKey{ClusterKey: prodCluster, Service: name}.ID()
+	named := strings.NewReplacer(longServiceID, id, longService, name)
+	body, summary := named.Replace(costBody), named.Replace(reviewSummary)
+	res := reviewed(t, body, submitCall(summary, map[string]any{"ref": "e1", "note": "It is " + name}))
+	if res.Summary != summary || res.SummaryReplaced {
+		t.Errorf("summary = %q", res.Summary)
+	}
+	if len(res.Evidence) != 1 || res.Evidence[0].ServiceID != id || res.Evidence[0].Note != agentresult.ReplacementNote {
+		t.Errorf("evidence = %+v", res.Evidence)
+	}
+	p := fake.New(calls(costCall("c1")), calls(submitCall(summary)))
+	res = requireResult(t, investigate(t, newLoop(p, replies(map[string]string{"get_cost_analytics": body})), p, investigatorInput()))
+	if !res.SummaryReplaced || res.Summary != agentresult.ReplacementSummary {
+		t.Errorf("an investigator: result = %+v", res)
+	}
+}
+
 func TestReviewer_TheToolDecidesHowLongACopyMayBe(t *testing.T) {
 	text := "the order ledger refused a new connection"
 	summary := "It seems the order ledger refused a new connection today."
