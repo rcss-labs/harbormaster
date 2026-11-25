@@ -28,19 +28,15 @@ var lineBreaks = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ", "\v", " 
 func flatten(text string) string { return lineBreaks.Replace(text) }
 
 // isHiddenRune reports a rune a reader cannot see or that reorders what they see: control characters other than
-// line feed and tab, every format character (zero-width, bidi, tags), and the default-ignorable fillers and selectors.
+// line feed and tab, every format character (zero-width, bidi, tags), variation selectors, and the rest of Unicode's
+// default-ignorable set (fillers, reserved format code points). Text with a zero-width joiner is refused too: failing
+// closed there costs a few emoji and some scripts, and is documented.
 func isHiddenRune(r rune) bool {
-	switch {
-	case r == '\n' || r == '\t':
+	if r == '\n' || r == '\t' {
 		return false
-	case unicode.Is(unicode.Cc, r), unicode.Is(unicode.Cf, r), unicode.Is(unicode.Variation_Selector, r):
-		return true
-	case r == 0x034F, r == 0x115F, r == 0x1160, r == 0x17B4, r == 0x17B5, r == 0x3164, r == 0xFFA0:
-		return true
-	case r >= 0xE0000 && r <= 0xE0FFF: // tags and the variation selector supplement
-		return true
 	}
-	return false
+	return unicode.Is(unicode.Cc, r) || unicode.Is(unicode.Cf, r) || unicode.Is(unicode.Variation_Selector, r) ||
+		unicode.Is(unicode.Other_Default_Ignorable_Code_Point, r)
 }
 
 // passesBasics holds the tests a repeat can make without the logs: valid UTF-8, nothing hidden, not empty, within the
@@ -92,7 +88,7 @@ func RecheckNote(note string) string {
 	return note
 }
 
-// dropsFromExcerpt reports what an excerpt never shows: control characters other than line feed and tab, bidi
+// dropsFromExcerpt reports what an excerpt never shows (it is replaced by a space): control characters other than line feed and tab, bidi
 // controls and tag characters.
 func dropsFromExcerpt(r rune) bool {
 	switch {
@@ -107,12 +103,13 @@ func dropsFromExcerpt(r rune) bool {
 }
 
 // CutExcerpt keeps at most ExcerptCap bytes, cut on a rune boundary, with CutMarker at the end when it was shortened.
-// Invalid bytes become U+FFFD and hidden control characters are dropped first, so the cap counts what is kept.
+// Invalid bytes become U+FFFD and hidden control characters become spaces first, so nothing joins and the cap counts
+// what is kept.
 func CutExcerpt(text string) string {
 	text = strings.ToValidUTF8(text, "\uFFFD")
 	text = strings.Map(func(r rune) rune {
 		if dropsFromExcerpt(r) {
-			return -1
+			return ' '
 		}
 		return r
 	}, text)

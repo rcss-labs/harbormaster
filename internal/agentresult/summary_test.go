@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -236,15 +237,45 @@ func TestCheckSummary_RefusesALateCopy(t *testing.T) {
 	}
 }
 
-func TestCutExcerpt_DropsControlBidiAndTagCharacters(t *testing.T) {
-	in := "a\x00b\x1bc\x7fd\u202ee\u2067f\u200eg\u061ch\U000e0041i\U000e007fj\nk\tl"
-	if got, want := CutExcerpt(in), "abcdefghij\nk\tl"; got != want {
+func TestCutExcerpt_ReplacesControlBidiAndTagCharactersWithSpaces(t *testing.T) {
+	in := "a\u0000b\u001bc\u007fd\u202ee\u2067f\u200eg\u061ch\U000e0041i\U000e007fj\nk\tl"
+	if got, want := CutExcerpt(in), "a b c d e f g h i j\nk\tl"; got != want {
 		t.Errorf("CutExcerpt(%q) = %q, want %q", in, got, want)
 	}
-	// What is dropped does not count against the cap.
-	padded := strings.Repeat("a\x00", ExcerptCap)
-	if got := CutExcerpt(padded); got != strings.Repeat("a", ExcerptCap) {
-		t.Errorf("padding counted: %d bytes", len(got))
+	// Nothing joins across a dropped character.
+	if got := CutExcerpt("ev\u202eil"); got != "ev il" {
+		t.Errorf("joined: %q", got)
+	}
+	// A replacement counts against the cap, so the result stays inside it.
+	padded := strings.Repeat("a\u0000", ExcerptCap)
+	if got := CutExcerpt(padded); len(got) > ExcerptCap || !strings.HasSuffix(got, CutMarker) || strings.ContainsRune(got, 0) {
+		t.Errorf("padded: %d bytes", len(got))
+	}
+}
+
+func TestCheck_RefusesEveryOtherDefaultIgnorableRune(t *testing.T) {
+	corpus := corpusOf("unrelated")
+	var runes []rune
+	for r := rune(0xFFF0); r <= 0xFFF8; r++ {
+		runes = append(runes, r)
+	}
+	runes = append(runes, 0x2065)
+	for r := rune(0); r <= unicode.MaxRune; r++ {
+		if unicode.Is(unicode.Other_Default_Ignorable_Code_Point, r) {
+			runes = append(runes, r)
+		}
+	}
+	for _, r := range runes {
+		text := "a" + string(r) + "b"
+		if _, replaced := CheckSummary(text, corpus); !replaced {
+			t.Errorf("U+%04X passed the summary check", r)
+		}
+		if _, replaced := RecheckSummary(text); !replaced {
+			t.Errorf("U+%04X passed the repeat", r)
+		}
+		if got := RecheckNote(text); got != ReplacementNote {
+			t.Errorf("U+%04X passed the note repeat", r)
+		}
 	}
 }
 
@@ -260,8 +291,8 @@ func TestChecksAndCut_LinearOnLargeInput(t *testing.T) {
 		"image-ish":    func(n int) string { return strings.Repeat("<i", n/2) },
 	}
 	corpus := corpusOf(words(12, 300_000))
-	for name, make := range inputs {
-		small, big := make(25_000), make(200_000)
+	for name, build := range inputs {
+		small, big := build(25_000), build(200_000)
 		run := func(text string) func() {
 			return func() {
 				CheckSummary(text, corpus)

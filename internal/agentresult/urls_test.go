@@ -11,7 +11,7 @@ const ownBase = "https://harbormaster.example"
 // A link is kept only when the whole token is the base, or the base and a plain path.
 func TestStripForeignURLs_KeepsOnlyPlainOwnLinksAndOrdinaryText(t *testing.T) {
 	kept := []string{
-		"nothing", "checkout-api.", "e.g.", "i.e.,", "v1.2.3", "and/or", "a/b", "1.5/2", "10.0.1/3", "(1.5/2)", "12/34",
+		"nothing", "checkout-api.", "e.g.", "metadata:", "hotel:", "metadata:x", "stel:", "i.e.,", "v1.2.3", "and/or", "a/b", "1.5/2", "10.0.1/3", "(1.5/2)", "12/34",
 		ownBase,
 		ownBase + "/",
 		ownBase + "/services/1",
@@ -60,7 +60,7 @@ func TestStripForeignURLs_RemovesEverythingElse(t *testing.T) {
 		"evil.xn--p1ai/x", "пример.рф/x", "evil。com/x", "evil．com/x", "evil｡com/x", "evil․com/x", "evil.example./x",
 		"my_evil.example.com/x", "EVIL.EXAMPLE/x", "evil.example?x=1", "evil.example#a", "evil.example:8080",
 		"ｅｖｉｌ．ｅｘａｍｐｌｅ／x", "ｈｔｔｐｓ：／／ｅｖｉｌ．ｅｘａｍｐｌｅ", "ｗｗｗ．ｅｖｉｌ．ｅｘａｍｐｌｅ", "बुरा.भारत/x",
-		"(see:https://evil.example/x)", "a.b/c", "x.y.z/", "1.5/2/evil.example/x",
+		"x(tel:1", "x(javascript:alert(1)", "(data:text/html,x", ";mailto:a@b", "\U0001F4A9.la/x", "\u24d4\u24e5\u24d8\u24db.com/x", "evil..example/x", "evil...example/x", "(see:https://evil.example/x)", "a.b/c", "x.y.z/", "1.5/2/evil.example/x",
 	}
 	for _, token := range removed {
 		for _, base := range []string{ownBase, ""} {

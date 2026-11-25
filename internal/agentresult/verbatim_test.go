@@ -236,12 +236,12 @@ func TestCorpus_DuplicateKeysAndEscapedText(t *testing.T) {
 	}
 	// A log line that carries JSON escapes is also compared with its unescaped form.
 	var d Corpus
-	d.Add(`{"level":"error"} line: connection reset by peer while reading\nheaders from upstream`)
+	d.Add(`{"level":"error"} line: connection\u0020reset\u0020by\u0020peer\u0020while\u0020reading\nheaders from upstream`)
 	if !d.HasRunIn("The connection reset by peer while reading") {
-		t.Error("an escaped \\u0020 log line was not compared unescaped")
+		t.Error("an escaped \u0020 log line was not compared unescaped")
 	}
 	if !d.HasRunIn("while reading headers from upstream") {
-		t.Error("an escaped \\n log line was not compared unescaped")
+		t.Error("an escaped backslash-n log line was not compared unescaped")
 	}
 	// Invalid JSON is kept whole.
 	var e Corpus
@@ -274,5 +274,35 @@ func TestCorpusAndNormalize_LinearOnLargeInput(t *testing.T) {
 	}
 	if got := Normalize(strings.Repeat("a!", 100_000)); len(got) != 199_999 {
 		t.Errorf("normalised length %d", len(got))
+	}
+}
+
+// The model reads a JSON body as written, escapes included, and may copy it that way: the candidate is also compared
+// with one level of escapes removed.
+func TestHasRunIn_CopyOfAnEscapedJSONBodyAsShown(t *testing.T) {
+	var c Corpus
+	c.Add(`{"url":"https://a.io/s?q=alpha&region=eu-west&page=2&sort=latest-first","stack":"Err: boom\n\tat x.A.run(A.java:1)\n\tat x.B.call(B.java:2)\n\tat x.C.go(C.java:3)"}`)
+	asShown := `It called https://a.io/s?q=alpha\u0026region=eu-west\u0026page=2\u0026sort=latest-first and failed`
+	if !c.HasRunIn(asShown) {
+		t.Error("a query string copied with its \\u0026 escapes passed")
+	}
+	trace := `Err: boom\n\tat x.A.run(A.java:1)\n\tat x.B.call(B.java:2)\n\tat x.C.go(C.java:3)`
+	if !c.HasRunIn(trace) {
+		t.Error("a stack trace copied with its backslash-n escapes passed")
+	}
+	if c.HasRunIn(`a harmless sentence about \n and \u0026 that shares nothing with the body at all, really`) {
+		t.Error("an unrelated text with escape-looking characters was refused")
+	}
+}
+
+func TestCorpus_LongSecondKeyIsNotAValue(t *testing.T) {
+	longKey := "a_second_key_that_is_much_longer_than_thirty_two_characters"
+	var c Corpus
+	c.Add(`{"first":"value one","` + longKey + `":"` + sharedRun + `","third":["x"]}`)
+	if c.HasRunIn(strings.ReplaceAll(longKey, "_", " ")) {
+		t.Error("a long second key was kept as a value")
+	}
+	if !c.HasRunIn(sharedRun) {
+		t.Error("the value after a long second key was dropped")
 	}
 }

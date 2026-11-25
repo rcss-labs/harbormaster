@@ -14,7 +14,10 @@ import (
 var baseShape = regexp.MustCompile(`^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]*)?$`)
 
 // linkMarkers make a token a link wherever they appear, after folding.
-var linkMarkers = []string{"://", ":/", "//", "www.", "mailto:", "tel:", "javascript:", "data:", "]("}
+var linkMarkers = []string{"://", ":/", "//", "www.", "]("}
+
+// wordMarkers make a token a link only at its start or after a non-letter, so "metadata:" and "hotel:" survive.
+var wordMarkers = []string{"mailto:", "tel:", "javascript:", "data:"}
 
 // StripForeignURLs replaces every link that is not baseURL's own with URLPlaceholder. An empty or unusable baseURL
 // removes all of them.
@@ -95,11 +98,34 @@ func looksLikeLink(token string) bool {
 			return true
 		}
 	}
+	for _, marker := range wordMarkers {
+		if hasWordMarker(folded, marker) {
+			return true
+		}
+	}
 	return hasHostRun(folded)
 }
 
+// hasWordMarker reports marker at the start of folded or right after a rune that is not a letter.
+func hasWordMarker(folded, marker string) bool {
+	for from := 0; from < len(folded); {
+		i := strings.Index(folded[from:], marker)
+		if i < 0 {
+			return false
+		}
+		i += from
+		if before, _ := utf8.DecodeLastRuneInString(folded[:i]); i == 0 || !unicode.IsLetter(before) {
+			return true
+		}
+		from = i + 1
+	}
+	return false
+}
+
+// isLabelRune takes ASCII letters, digits, "-" and "_", and any non-ASCII rune: hosts can be written with symbols,
+// emoji and enclosed letters, and tokens never hold spaces.
 func isLabelRune(r rune) bool {
-	return unicode.IsLetter(r) || unicode.IsDigit(r) || unicode.IsMark(r) || r == '-' || r == '_'
+	return r >= 0x80 || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-' || r == '_'
 }
 
 // hasHostRun reports a run of two or more dot-joined labels (optionally ending in a dot) followed by "/", "?", "#" or
@@ -117,7 +143,7 @@ func hasHostRun(folded string) bool {
 				labels++
 			}
 			digitsOnly = digitsOnly && r >= '0' && r <= '9'
-		case r == '.' && inLabel:
+		case r == '.' && labels > 0: // a doubled dot stays inside the run
 			inLabel = false
 			dots++
 		default:

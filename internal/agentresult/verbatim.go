@@ -33,7 +33,8 @@ func Normalize(text string) string {
 // valueSeparator joins stored values. Normalised text never holds it, so no run spans two values.
 const valueSeparator = '\n'
 
-// Corpus indexes the text a run read, for the copy check.
+// Corpus indexes the text a run read, for the copy check. CorpusCap counts the raw bytes offered once; text that carries
+// JSON escapes is stored a second time with them decoded, so the stored size can reach twice the cap.
 type Corpus struct {
 	text []byte // normalised values, each followed by valueSeparator
 	raw  int    // raw bytes offered so far
@@ -175,7 +176,15 @@ func (w *window) slide(out, r rune) {
 // candidate's windows are indexed once; the corpus is rolled over once. Time is linear in the corpus, memory in the
 // candidate.
 func (c *Corpus) HasRunIn(candidate string) bool {
-	cand := Normalize(candidate)
+	if c.hasRun(Normalize(candidate)) {
+		return true
+	}
+	// The model may copy a JSON body as it was shown, escapes and all: compare it with one level of escapes removed too.
+	return strings.IndexByte(candidate, '\\') >= 0 && c.hasRun(Normalize(unescapeJSON(candidate)))
+}
+
+// hasRun is HasRunIn for a candidate that is already normalised.
+func (c *Corpus) hasRun(cand string) bool {
 	candRunes := []rune(cand)
 	if len(candRunes) < VerbatimRun || len(c.text) < VerbatimRun {
 		return false
