@@ -94,6 +94,8 @@ const (
 	EventTest     Event = "test"
 	// EventDiagnosis carries the AI-written diagnosis of an alert, sent after the alert itself.
 	EventDiagnosis Event = "diagnosis"
+	// EventReview carries the AI-written message of one finished review run.
+	EventReview Event = "review"
 )
 
 // Diagnosis is the model-written summary of one investigation. Its text is untrusted: every renderer cleans it
@@ -101,6 +103,13 @@ const (
 type Diagnosis struct {
 	InvestigationID int64
 	Summary         string
+}
+
+// Review is the model-written summary of one review run. Its summary is untrusted: every renderer cleans it with
+// CleanReviewSummary at send time. Type is one of cost, security, reliability, capacity; any other value is refused.
+type Review struct {
+	RunID                            int64
+	Name, Type, PeriodLabel, Summary string
 }
 
 // Message is one notification to render and send.
@@ -112,6 +121,8 @@ type Message struct {
 	RouteName  string
 	// Diagnosis is set for EventDiagnosis only.
 	Diagnosis *Diagnosis
+	// Review is set for EventReview only.
+	Review *Review
 	// IncidentID is the notification incident the message belongs to; Investigate is the route's switch. Together
 	// they point a PagerDuty Opened event at the incident's investigation page.
 	IncidentID  int64

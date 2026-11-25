@@ -1,0 +1,16 @@
+[Harbormaster] Diagnosis: api: service failing
+From: hm@example.com
+To: ops@example.com
+Subject: [Harbormaster] Diagnosis: api: service failing
+Date: Sat, 21 Nov 2026 12:00:00 +0000
+Message-ID: <hm-42-1795262400@harbormaster.invalid>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+Written by AI. Check it before acting.
+
+The task ran out of memory.
+Restart it.
+
+https://hm.example.com/investigations/77

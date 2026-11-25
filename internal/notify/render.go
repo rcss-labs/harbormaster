@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Link is where the message points: the cluster page or the account's overview for a group, the service page for an
@@ -22,6 +23,9 @@ func (m Message) Link() string {
 	base := strings.TrimRight(m.BaseURL, "/")
 	if m.isDiagnosis() && m.Diagnosis != nil {
 		return base + "/investigations/" + strconv.FormatInt(m.Diagnosis.InvestigationID, 10)
+	}
+	if m.isReview() && m.Review != nil {
+		return base + "/reviews/runs/" + strconv.FormatInt(m.Review.RunID, 10)
 	}
 	switch m.Subject.Scope {
 	case "cluster":
@@ -78,6 +82,10 @@ func (m Message) plainHeadline() string {
 		return "Update: " + m.Subject.Title
 	case EventDiagnosis:
 		return "Diagnosis: " + m.Subject.Title
+	case EventReview:
+		if m.Review != nil {
+			return m.reviewTitle()
+		}
 	case EventTest:
 		return "Test message from Harbormaster"
 	}
@@ -97,11 +105,11 @@ var slackEscape = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
 
 // SlackBody renders an incoming-webhook payload: a section (title, then text) and a context line.
 func SlackBody(m Message) ([]byte, error) {
-	if err := m.checkDiagnosis(); err != nil {
+	if err := m.checkMessage(); err != nil {
 		return nil, err
 	}
-	if m.isDiagnosis() {
-		return slackDiagnosisBody(m)
+	if m.isAI() {
+		return slackAIBody(m)
 	}
 	var title string
 	switch {
@@ -133,8 +141,8 @@ const pagerDutySummaryMax = 1024
 // PagerDutyBody renders an Events API v2 event. Trigger and resolve share the dedup key so a resolve closes the
 // incident the trigger opened.
 func PagerDutyBody(m Message, routingKey string) ([]byte, error) {
-	if m.isDiagnosis() {
-		return nil, errors.New("PagerDuty does not receive diagnosis messages")
+	if m.isAI() {
+		return nil, errors.New("PagerDuty does not receive AI-written messages")
 	}
 	s := m.Subject
 	action, dedup := "trigger", DedupKey(s)
@@ -188,12 +196,12 @@ func PagerDutyBody(m Message, routingKey string) ([]byte, error) {
 
 // WebhookBody renders the flat JSON object posted to a webhook.
 func WebhookBody(m Message) ([]byte, error) {
-	if err := m.checkDiagnosis(); err != nil {
+	if err := m.checkMessage(); err != nil {
 		return nil, err
 	}
 	s := m.Subject
 	event := map[Event]string{EventOpened: "alert.raised", EventRepeat: "alert.repeated", EventUpdate: "alert.updated",
-		EventResolved: "alert.resolved", EventTest: "test", EventDiagnosis: "diagnosis"}[m.Event]
+		EventResolved: "alert.resolved", EventTest: "test", EventDiagnosis: "diagnosis", EventReview: "review"}[m.Event]
 	scope := s.Scope
 	switch {
 	case scope != "":
@@ -209,6 +217,12 @@ func WebhookBody(m Message) ([]byte, error) {
 	}
 	if m.isDiagnosis() {
 		body["summary"], body["investigation_id"], body["ai_generated"] = m.summary(), m.Diagnosis.InvestigationID, true
+	}
+	if m.isReview() {
+		body["scope"], body["title"] = "review", m.plainHeadline()
+		body["summary"], body["ai_generated"] = m.summary(), true
+		body["review_run_id"], body["review_name"], body["review_type"], body["period"] =
+			m.Review.RunID, m.reviewName(), m.Review.Type, m.Review.PeriodLabel
 	}
 	if s.Scope != "" {
 		services := make([]map[string]any, len(s.Members))
@@ -245,6 +259,10 @@ func crlf(text string) string {
 // emailText is the body: title, text, where it happened and the link.
 func emailText(m Message) string {
 	var b strings.Builder
+	if m.isReview() {
+		b.WriteString(diagnosisNotice + "\r\n\r\n" + headerValue(m.Review.PeriodLabel) + "\r\n\r\n" + crlf(m.summary()) + "\r\n\r\n" + m.Link() + "\r\n")
+		return b.String()
+	}
 	if m.isDiagnosis() {
 		b.WriteString(diagnosisNotice + "\r\n\r\n" + crlf(m.summary()) + "\r\n\r\n" + m.Link() + "\r\n")
 		return b.String()
@@ -266,6 +284,45 @@ func emailText(m Message) string {
 	return b.String()
 }
 
+// foldedSubject Q-encodes subject as a run of encoded words of at most 75 characters, folded onto continuation
+// lines, so no header line passes the 998 octets SMTP allows however long the subject is. A short ASCII subject is
+// written as it is, unless it holds "=?": a recipient would decode that as an encoded word of its own.
+func foldedSubject(subject string) string {
+	const maxPlain, maxWordBytes = 900, 21 // 21 bytes encode to at most 63 characters, plus 12 for the word's frame
+	if len(subject) <= maxPlain && !strings.Contains(subject, "=?") && mime.QEncoding.Encode("utf-8", subject) == subject {
+		return subject
+	}
+	var words []string
+	start := 0
+	for i := range subject {
+		if i-start > maxWordBytes-utf8.UTFMax {
+			words = append(words, qWord(subject[start:i]))
+			start = i
+		}
+	}
+	words = append(words, qWord(subject[start:]))
+	return strings.Join(words, "\r\n ")
+}
+
+// qWord is one RFC 2047 Q encoded word. Every word is encoded, even an all-ASCII one, because white space between
+// two encoded words is dropped on decoding and white space between a plain word and an encoded one is not.
+func qWord(s string) string {
+	var b strings.Builder
+	b.WriteString("=?utf-8?q?")
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == ' ':
+			b.WriteByte('_')
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+			b.WriteByte(c)
+		default:
+			fmt.Fprintf(&b, "=%02X", c)
+		}
+	}
+	b.WriteString("?=")
+	return b.String()
+}
+
 // Email renders a complete RFC 5322 message (text/plain, UTF-8) and the plain subject. Every header value has its
 // line breaks stripped, and a non-ASCII subject is Q-encoded.
 func Email(m Message, from string, to []string) (subject string, body []byte) {
@@ -277,12 +334,16 @@ func Email(m Message, from string, to []string) (subject string, body []byte) {
 	var b bytes.Buffer
 	fmt.Fprintf(&b, "From: %s\r\n", headerValue(from))
 	fmt.Fprintf(&b, "To: %s\r\n", strings.Join(cleanTo, ", "))
-	fmt.Fprintf(&b, "Subject: %s\r\n", mime.QEncoding.Encode("utf-8", subject))
+	encodedSubject := mime.QEncoding.Encode("utf-8", subject)
+	if m.isReview() {
+		encodedSubject = foldedSubject(subject)
+	}
+	fmt.Fprintf(&b, "Subject: %s\r\n", encodedSubject)
 	fmt.Fprintf(&b, "Date: %s\r\n", m.Subject.At.UTC().Format(time.RFC1123Z))
 	fmt.Fprintf(&b, "Message-ID: <hm-%d-%d@harbormaster.invalid>\r\n", m.DeliveryID, m.Subject.At.Unix())
 	b.WriteString("MIME-Version: 1.0\r\n")
 	b.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
-	if m.isDiagnosis() {
+	if m.isAI() {
 		// Model text can hold lines of any length; quoted-printable keeps every line short and safe.
 		b.WriteString("Content-Transfer-Encoding: quoted-printable\r\n\r\n")
 		encoder := quotedprintable.NewWriter(&b)
@@ -301,7 +362,7 @@ type Preview struct{ Destination, Title, Body, JSON string }
 
 // RenderPreview renders m the way the destination's sender would, so the preview cannot drift from what is sent.
 func RenderPreview(destination string, m Message) (Preview, error) {
-	if err := m.checkDiagnosis(); err != nil {
+	if err := m.checkMessage(); err != nil {
 		return Preview{}, err
 	}
 	p := Preview{Destination: destination}
@@ -312,7 +373,7 @@ func RenderPreview(destination string, m Message) (Preview, error) {
 		}
 		p.Title = m.plainHeadline()
 		text := m.Subject.Text
-		if m.isDiagnosis() {
+		if m.isAI() {
 			text = diagnosisNotice + "\n" + m.summary()
 		}
 		p.Body = strings.TrimSpace(text + "\n" + m.where())
