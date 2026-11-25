@@ -100,6 +100,14 @@ var reviewTools = map[string]bool{
 // reviewing reports whether the run is a reviewer's.
 func (r *session) reviewing() bool { return r.in.Role == roleReviewer }
 
+// kind is what the run calls its work.
+func (r *session) kind() string {
+	if r.reviewing() {
+		return "review"
+	}
+	return "investigation"
+}
+
 // lookupTool finds a tool that this run's role has. What it does not find is
 // neither offered nor run.
 func (r *session) lookupTool(name string) (hmtools.Tool, bool) {

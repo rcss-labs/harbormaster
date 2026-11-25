@@ -843,6 +843,38 @@ func TestDispatcher_ReviewDeletedBeforeSendCancels(t *testing.T) {
 	e.cancelledReview("This route is no longer on the review.")
 }
 
+func TestDispatcher_ReviewTurnedOffBeforeSendCancels(t *testing.T) {
+	e := newReviewEnv(t)
+	review, _ := e.stageReview(e.route("one"))
+	e.review("Another", e.route("two")) // it stays on: that does not count
+	e.exec(`update agent_reviews set enabled = false where id = $1`, review)
+	e.cancelledReview("The review is off.")
+}
+
+// "Run now" works on a review that is off, and its result is sent.
+func TestDispatcher_ManualRunOfAReviewThatIsOffIsSent(t *testing.T) {
+	e := newReviewEnv(t)
+	review := e.review("Monthly spend", e.route("one"))
+	run := e.finishReview(review)
+	e.exec(`update agent_review_runs set manual = true where id = $1`, run)
+	e.exec(`update agent_reviews set enabled = false where id = $1`, review)
+	e.cycle()
+	if row := e.reviewRow(); row.Status != "delivered" || e.reviewsSent("one") != 1 {
+		t.Fatalf("row = %+v, sent %d, want it delivered", row, e.reviewsSent("one"))
+	}
+}
+
+// A manual run is excused from the switch only: the route must still be on the review.
+func TestDispatcher_ManualRunOfADeletedReviewIsCancelled(t *testing.T) {
+	e := newReviewEnv(t)
+	review, run := e.stageReview(e.route("one"))
+	e.exec(`update agent_review_runs set manual = true where id = $1`, run)
+	if err := e.st.DeleteReview(context.Background(), review); err != nil {
+		t.Fatal(err)
+	}
+	e.cancelledReview("This route is no longer on the review.")
+}
+
 func TestDispatcher_RunDeletedBeforeSendCancels(t *testing.T) {
 	for name, change := range map[string]string{
 		"deleted":    `delete from agent_review_runs`,
@@ -857,6 +889,78 @@ func TestDispatcher_RunDeletedBeforeSendCancels(t *testing.T) {
 			e.exec(`delete from agent_review_routes`) // the run is checked before the review
 			e.cancelledReview("The review result is no longer available.")
 		})
+	}
+}
+
+// A row that waited while reviews were off (or after a rollback) is not sent as if it were news.
+func TestDispatcher_AnOldReviewResultIsCancelled(t *testing.T) {
+	const note = "The review result is too old to send."
+	for name, age := range map[string]time.Duration{"just past the bound": 48*time.Hour + time.Second, "ten days": 240 * time.Hour} {
+		t.Run(name, func(t *testing.T) {
+			e := newReviewEnv(t)
+			e.stageReview(e.route("one"))
+			e.advance(age - time.Second) // cancelledReview adds the second
+			e.cancelledReview(note)
+		})
+	}
+	t.Run("no finish time", func(t *testing.T) {
+		e := newReviewEnv(t)
+		e.stageReview(e.route("one"))
+		e.exec(`update agent_review_runs set finished_at = null`)
+		e.cancelledReview(note)
+	})
+}
+
+func TestDispatcher_AReviewResultAtTheAgeBoundIsSent(t *testing.T) {
+	e := newReviewEnv(t)
+	e.stageReview(e.route("one"))
+	e.advance(48 * time.Hour)
+	e.cycle()
+	if row := e.reviewRow(); row.Status != "delivered" || e.reviewsSent("one") != 1 {
+		t.Fatalf("row = %+v, sent %d, want it delivered 48 hours after the run finished", row, e.reviewsSent("one"))
+	}
+}
+
+// The oldest row the dispatcher makes itself: planned 24 hours after the run finished, then held through the longest
+// quiet hours there are (the clocks of Antarctica/Troll go back two hours in that night), and then tried three times.
+func TestDispatcher_AReviewHeldThroughTheLongestQuietHoursIsSent(t *testing.T) {
+	e := newReviewEnv(t)
+	var fails atomic.Int32
+	e.sender.reply = func(_ string, event Event, _ int) Result {
+		if event == EventReview && fails.Add(1) < maxAttempts {
+			return Result{Retryable: true, StatusCode: 500, Note: "HTTP 500"}
+		}
+		return Result{Delivered: true, StatusCode: 200}
+	}
+	night := e.route("night", func(r *store.NotificationRoute) { r.QuietEnabled, r.QuietTimezone = true, "Antarctica/Troll" })
+	planned := time.Date(2026, 10, 24, 20, 0, 0, 0, time.UTC) // 22:00 local
+	e.clock = planned.Add(-24 * time.Hour)
+	e.finishReview(e.review("Monthly spend", night))
+	e.clock = planned
+	e.cycle()
+	if row := e.reviewRow(); row.HeldUntil == nil || row.HeldUntil.Sub(planned) != 12*time.Hour {
+		t.Fatalf("row = %+v, want it held for 12 hours", row)
+	}
+	e.clock = planned.Add(12 * time.Hour)
+	for range maxAttempts {
+		e.cycle()
+		e.advance(3 * time.Minute)
+	}
+	if row := e.reviewRow(); row.Status != "delivered" || row.Attempts != maxAttempts {
+		t.Fatalf("row = %+v, want it delivered by the last attempt", row)
+	}
+}
+
+func TestDispatcher_AnOldDiagnosisIsStillSent(t *testing.T) {
+	e := newReviewEnv(t)
+	e.switched("one")
+	e.setAlerts(alert(svcX, "service_failing", model.AlertDanger))
+	e.stageDiagnosis()
+	e.exec(`update agent_investigations set finished_at = $1`, e.clock.Add(-240*time.Hour))
+	e.advance(time.Second)
+	e.cycle()
+	if row := e.diagnosisRow(); row == nil || row.Status != "delivered" {
+		t.Fatalf("diagnosis row = %+v, want it delivered: the age bound is for reviews", row)
 	}
 }
 

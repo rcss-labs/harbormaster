@@ -133,6 +133,41 @@ func TestRecordDue_IdempotentAcrossTicks(t *testing.T) {
 	}
 }
 
+// The scan sends every due review again at each tick: a period that is recorded must not take a run id each time.
+func TestRecordDue_TicksTakeNoRunIDs(t *testing.T) {
+	s, ctx := storetest.Open(t), context.Background()
+	route := reviewRoute(t, s, "r")
+	a, b := oldReview(t, s, "a", route.ID), oldReview(t, s, "b", route.ID)
+	due := []store.DueReview{dueFor(a, "d:2026-11-24", revT0), dueFor(b, "d:2026-11-24", revT0)}
+	record := func(want int, due ...store.DueReview) {
+		t.Helper()
+		if n, err := s.RecordDueReviewRuns(ctx, due, revNow); err != nil || n != want {
+			t.Fatalf("created = %d, %v, want %d", n, err, want)
+		}
+	}
+	lastID := func() (id int64) {
+		t.Helper()
+		if err := s.Pool.QueryRow(ctx, `select last_value from agent_review_runs_id_seq`).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	record(2, due...)
+	before := lastID()
+	for range 100 {
+		record(0, due...)
+	}
+	if after := lastID(); after != before {
+		t.Fatalf("100 ticks moved the run ids from %d to %d", before, after)
+	}
+	// The same period of another review and another period of the same one are still recorded.
+	c := oldReview(t, s, "c", route.ID)
+	record(2, dueFor(c, "d:2026-11-24", revT0), dueFor(a, "d:2026-11-25", revT0.Add(time.Hour)))
+	if after := lastID(); after != before+2 {
+		t.Fatalf("two new runs moved the run ids from %d to %d", before, after)
+	}
+}
+
 func TestRecordDue_IgnoresADisabledOrChangedReview(t *testing.T) {
 	s, ctx := storetest.Open(t), context.Background()
 	route := reviewRoute(t, s, "r")

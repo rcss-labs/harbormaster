@@ -314,7 +314,7 @@ Startup fails when any of these hold:
 - `HM_OAUTH=true` without `HM_API_TOKENS=true` or `HM_MCP_PUBLIC_URL`.
 - `HM_SMTP_HOST` is set without a valid `HM_SMTP_FROM`, or only one of `HM_SMTP_USERNAME` and `HM_SMTP_PASSWORD` is set.
 - `HM_AGENT_URL` is not a valid base URL, `HM_AGENT_CA_PEM` holds no certificate, or `HM_AGENT_RUN_TOKEN_TTL` is outside 1 minute to 1 hour.
-- `HM_AGENT_INVESTIGATION_WINDOW` or `HM_AGENT_INVESTIGATION_MAX_WAIT` is outside 1 minute to 24 hours, `HM_AGENT_INVESTIGATIONS_CONCURRENT` is outside 1 to 8, `HM_AGENT_INVESTIGATIONS_PER_HOUR` is negative, `HM_AGENT_IDENTITY_RATE_PER_SECOND` is outside 1 to 50, or an `HM_AGENT_IDENTITY_LOG_SEARCH_*` value is negative or above 1000000, `HM_AGENT_REVIEWS_PER_DAY` is outside 0 to 200, or `HM_AGENT_REVIEW_MAX_LATE` is outside 15 minutes to 12 hours. These are checked whether or not `HM_AGENT_URL` is set.
+- `HM_AGENT_INVESTIGATION_WINDOW` or `HM_AGENT_INVESTIGATION_MAX_WAIT` is outside 1 minute to 24 hours, `HM_AGENT_INVESTIGATIONS_CONCURRENT` is outside 1 to 8, `HM_AGENT_INVESTIGATIONS_PER_HOUR` is negative, `HM_AGENT_IDENTITY_RATE_PER_SECOND` is outside 1 to 50, an `HM_AGENT_IDENTITY_LOG_SEARCH_*` value is negative or above 1000000, `HM_AGENT_REVIEWS_PER_DAY` is outside 0 to 200, or `HM_AGENT_REVIEW_MAX_LATE` is outside 15 minutes to 12 hours. These are checked whether or not `HM_AGENT_URL` is set.
 - `HM_RETENTION_AGENT_RUNS` is negative, or non-zero and below 48 hours.
 - The agent has no `HM_AGENT_PROVIDERS`, a provider without its key or region (or the reverse), or `HM_AGENT_FAKE_PROVIDER=true` against a non-loopback upstream.
 - `HM_SCAN_ENABLED=true` (outside fake mode) on a coordinating task with any of the five launch settings missing.

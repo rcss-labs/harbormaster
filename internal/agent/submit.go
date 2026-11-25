@@ -11,12 +11,11 @@ import (
 // it is in no tool table and never reaches Harbormaster.
 const submitTool = "submit_result"
 
-const notRunBesideSubmit = "This tool was not run: submit_result ends the investigation, so call it alone."
-
-func submitToolDef() provider.ToolDef {
+// submitToolDef describes submit_result to a run of the given kind.
+func submitToolDef(kind string) provider.ToolDef {
 	return provider.ToolDef{
 		Name: submitTool,
-		Description: "Finish the investigation with your conclusion and the evidence for it. Call it once, alone: nothing runs after it. " +
+		Description: "Finish the " + kind + " with your conclusion and the evidence for it. Call it once, alone: nothing runs after it. " +
 			"The text of each piece of evidence is taken from what you read; you only name it.",
 		InputSchema: map[string]any{
 			"type": "object",
@@ -175,7 +174,7 @@ func (r *session) refuse(call provider.ToolCall, problem string) (provider.Messa
 	if tool, known := r.lookupTool(call.Name); known {
 		name = tool.Name
 	}
-	return r.resultMessage(call, name, notRunBesideSubmit, true)
+	return r.resultMessage(call, name, "This tool was not run: submit_result ends the "+r.kind()+", so call it alone.", true)
 }
 
 // remind prepares the one reminder turn after a reply without a tool call, or
@@ -187,7 +186,7 @@ func (r *session) remind(resp provider.Response) (again bool) {
 		if resp.StopReason == "max_tokens" {
 			r.stop("The reply was cut short by the output limit.")
 		} else {
-			r.fail("no_result", "The investigation ended without a result.")
+			r.fail("no_result", "The "+r.kind()+" ended without a result.")
 		}
 		return false
 	}

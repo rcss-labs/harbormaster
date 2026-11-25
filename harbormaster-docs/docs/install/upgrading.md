@@ -97,7 +97,7 @@ This release adds migrations `0221_agent_reviews` (the reviews, their scopes and
 1. Turn reviews off: set `HM_AGENT_REVIEWS_PER_DAY=0`, or switch off each review under **Settings > AI agent > Reviews**. Nothing new starts.
 2. Roll the image back.
 
-Review rows left in the delivery log are inert and go after `HM_RETENTION_NOTIFICATION_LOG`. Reviews, results and evidence stay in the database, unread, until the new release runs again and retention (`HM_RETENTION_AGENT_RUNS`) removes the results. No migration is undone, and the schema stays as it is. See the [runbook](../operations/runbooks/ai-agent.md#16-reviews-upgrade-and-rollback).
+Review rows still waiting in the delivery log are not sent by an older release, but they are not dead either. When the new release runs again with reviews on, it sends a waiting row if its result finished less than 48 hours ago, and cancels an older one with the note "The review result is too old to send." Rows go after `HM_RETENTION_NOTIFICATION_LOG` in any case. Reviews, results and evidence stay in the database, unread, until the new release runs again and retention (`HM_RETENTION_AGENT_RUNS`) removes the results. No migration is undone, and the schema stays as it is. See the [runbook](../operations/runbooks/ai-agent.md#16-reviews-upgrade-and-rollback).
 
 ## The release that adds custom reviews
 

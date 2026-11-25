@@ -9,15 +9,16 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// reviewMessageMaxAge is how long after a run finished its messages may still be planned. A task that was down longer
+// ReviewMessageMaxAge is how long after a run finished its messages may still be planned. A task that was down longer
 // than that does not send yesterday's result, and a run whose rows were already deleted is never planned again.
-const reviewMessageMaxAge = 24 * time.Hour
+const ReviewMessageMaxAge = 24 * time.Hour
 
 // PlanReviewDeliveries plans the messages of finished review runs, exactly once per run. Each run that is done, has a
 // summary and has no delivery_planned_at is handled in one transaction that locks its row: for every route on its
 // review that is enabled and not PagerDuty it inserts a review row, due at now or at the end of quiet hours when
 // heldUntil says severity info is held for that route, and then it sets delivery_planned_at. A run whose review is
-// gone, or that finished more than 24 hours ago, is marked with no rows. A run another planner holds is left to it.
+// gone, or that finished more than 24 hours ago, is marked with no rows, and so is a scheduled run whose review is off
+// now; a manual run of it is planned. A run another planner holds is left to it.
 // It handles at most limit runs, on one connection at a time, and returns how many rows it inserted; a run that fails
 // leaves nothing behind, is tried again by the next call, and does not stop the others.
 func (s *Store) PlanReviewDeliveries(ctx context.Context, now time.Time, heldUntil func(r NotificationRoute, severity string) (time.Time, bool), limit int) (int, error) {
@@ -57,10 +58,11 @@ func (s *Store) PlanReviewDeliveries(ctx context.Context, now time.Time, heldUnt
 func (t Tx) planReviewRun(ctx context.Context, runID int64, now time.Time, heldUntil func(r NotificationRoute, severity string) (time.Time, bool)) (int, error) {
 	var reviewID *int64
 	var name string
+	var manual bool
 	var finishedAt *time.Time
-	err := t.tx.QueryRow(ctx, `select review_id, review_name, finished_at from agent_review_runs
+	err := t.tx.QueryRow(ctx, `select review_id, review_name, manual, finished_at from agent_review_runs
 		where id = $1 and state = 'done' and summary <> '' and delivery_planned_at is null
-		for update skip locked`, runID).Scan(&reviewID, &name, &finishedAt)
+		for update skip locked`, runID).Scan(&reviewID, &name, &manual, &finishedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, nil // another planner has it, or had it
 	}
@@ -68,10 +70,10 @@ func (t Tx) planReviewRun(ctx context.Context, runID int64, now time.Time, heldU
 		return 0, err
 	}
 	var routes []NotificationRoute
-	if reviewID != nil && finishedAt != nil && now.Sub(*finishedAt) <= reviewMessageMaxAge {
+	if reviewID != nil && finishedAt != nil && now.Sub(*finishedAt) <= ReviewMessageMaxAge {
 		rows, err := t.tx.Query(ctx, `select `+prefixColumns("r", notificationRouteColumns)+` from notification_routes r
-			join agent_review_routes l on l.route_id = r.id
-			where l.review_id = $1 and r.enabled and r.destination <> 'pagerduty' order by r.id`, *reviewID)
+			join agent_review_routes l on l.route_id = r.id join agent_reviews v on v.id = l.review_id
+			where v.id = $1 and (v.enabled or $2) and r.enabled and r.destination <> 'pagerduty' order by r.id`, *reviewID, manual)
 		if err != nil {
 			return 0, err
 		}
@@ -103,12 +105,12 @@ func (t Tx) planReviewRun(ctx context.Context, runID int64, now time.Time, heldU
 	return inserted, nil
 }
 
-// ReviewHasRoute reports whether the review exists and sends to the route.
-func (s *Store) ReviewHasRoute(ctx context.Context, reviewID, routeID int64) (bool, error) {
-	var has bool
-	if err := s.Pool.QueryRow(ctx, `select exists (select 1 from agent_review_routes where review_id = $1 and route_id = $2)`,
-		reviewID, routeID).Scan(&has); err != nil {
-		return false, fmt.Errorf("review has route: %w", err)
+// ReviewHasRoute reports whether the review exists and sends to the route, and whether it is on.
+func (s *Store) ReviewHasRoute(ctx context.Context, reviewID, routeID int64) (has, enabled bool, err error) {
+	err = s.Pool.QueryRow(ctx, `select enabled, exists (select 1 from agent_review_routes where review_id = r.id and route_id = $2)
+		from agent_reviews r where id = $1`, reviewID, routeID).Scan(&enabled, &has)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return false, false, fmt.Errorf("review has route: %w", err)
 	}
-	return has, nil
+	return has, enabled, nil
 }

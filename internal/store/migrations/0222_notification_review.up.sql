@@ -9,24 +9,26 @@
 -- leftover rows are inert and age out with the notification log. review_run_id has no foreign key: the log outlives
 -- the run rows it reports.
 --
--- The alters take an exclusive lock on a table older tasks keep writing to, and every statement that arrives while
--- they wait queues behind them. The 2 seconds must stay well below the dispatcher's 5 second writeTimeout: otherwise
+-- The alter takes an exclusive lock on a table older tasks keep writing to, and every statement that arrives while
+-- it waits queues behind it. The 2 seconds must stay well below the dispatcher's 5 second writeTimeout: otherwise
 -- an older sender's result write times out behind the waiting ALTER and a delivered alert is sent again. The runner
 -- applies each migration in one transaction, so a timeout rolls the whole file back, records nothing, and the next
 -- start retries it from scratch; `set local` ends with the transaction.
 set local lock_timeout = '2s';
-alter table notification_deliveries drop constraint notification_deliveries_event_check;
-alter table notification_deliveries add constraint notification_deliveries_event_check
-  check (event in ('opened', 'repeat', 'update', 'resolved', 'test', 'diagnosis', 'review'));
-alter table notification_deliveries drop constraint notification_deliveries_diagnosis_due;
-alter table notification_deliveries add constraint notification_deliveries_diagnosis_due check (
-  (event not in ('diagnosis', 'review') or (next_attempt_at is null and status <> 'held'))
-  and (event in ('diagnosis', 'review') or diagnosis_due_at is null));
-alter table notification_deliveries add column review_run_id bigint;
-alter table notification_deliveries add constraint notification_deliveries_review_run
-  check ((event = 'review') = (review_run_id is not null));
-alter table notification_deliveries add constraint notification_deliveries_review_no_incident
-  check (event <> 'review' or incident_id is null);
+-- One statement, so the checks are validated in one scan of the log under the lock, not one scan each.
+alter table notification_deliveries
+  add column review_run_id bigint,
+  drop constraint notification_deliveries_event_check,
+  add constraint notification_deliveries_event_check
+    check (event in ('opened', 'repeat', 'update', 'resolved', 'test', 'diagnosis', 'review')),
+  drop constraint notification_deliveries_diagnosis_due,
+  add constraint notification_deliveries_diagnosis_due check (
+    (event not in ('diagnosis', 'review') or (next_attempt_at is null and status <> 'held'))
+    and (event in ('diagnosis', 'review') or diagnosis_due_at is null)),
+  add constraint notification_deliveries_review_run
+    check ((event = 'review') = (review_run_id is not null)),
+  add constraint notification_deliveries_review_no_incident
+    check (event <> 'review' or incident_id is null);
 create unique index notification_deliveries_review_key_idx on notification_deliveries (route_id, review_run_id)
   where review_run_id is not null and route_id is not null;
 create index notification_deliveries_review_due_idx on notification_deliveries (diagnosis_due_at)
