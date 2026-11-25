@@ -24,7 +24,7 @@ The tasks have outbound 443 to `0.0.0.0/0`, because security groups cannot filte
 ## Prerequisites
 
 - The harbormaster module with `internal = true` (a precondition rejects `HM_AGENT_URL` otherwise), the agent's `task_security_group_id` in its `alb_ingress_security_group_ids` (this module opens no rule on Harbormaster's load balancer group; the harbormaster module owns that group's rules, so the ingress comes from that input), and `HM_AGENT_URL` in its `extra_env` set to this module's `agent_url`.
-- `harbormaster_task_security_group_ids`: the harbormaster module's `security_group_ids.web` and `security_group_ids.coordinator` (the chat tasks and the coordinator, which runs investigations), or `security_group_ids.server` in single-service mode, the tasks that call the agent.
+- `harbormaster_task_security_group_ids`: the tasks that call the agent. Single-service mode (`split_services = false`): the harbormaster module's `security_group_ids.server`. Split services (`split_services = true`): `security_group_ids.web` and `security_group_ids.coordinator`, the chat tasks and the coordinator, which runs investigations.
 - A private DNS name for the agent that matches `certificate_arn`, pointing at `alb_dns_name`, passed as `hostname` so `agent_url` carries it. If the certificate comes from a private CA, set `HM_AGENT_CA_PEM` in the harbormaster module's `extra_env` to that CA's PEM.
 - A private DNS name for `upstream_url` that matches Harbormaster's internal certificate.
 - Private subnets that route to a NAT gateway; the agent image pinned to a tag or digest (no tag or digest, or `latest` in any case, is rejected), matching `cpu_architecture`.
@@ -48,7 +48,7 @@ The tasks have outbound 443 to `0.0.0.0/0`, because security groups cannot filte
 | `upstream_url` | string | required | `HM_AGENT_UPSTREAM_URL`; `https://`. |
 | `upstream_ca_pem` | string | `null` | `HM_AGENT_UPSTREAM_CA_PEM`, a plain value (a CA certificate is public). |
 | `harbormaster_alb_security_group_id` | string | required | The harbormaster module's `security_group_ids.alb`. |
-| `harbormaster_task_security_group_ids` | list(string) | required | The only callers of the load balancer: the web and coordinator groups (`server` in single-service mode); at least one. |
+| `harbormaster_task_security_group_ids` | list(string) | required | The only callers of the load balancer: `server` in single-service mode, `web` and `coordinator` with split services; at least one. |
 | `model_providers` | list(object) | required | The catalogue, serialised as `HM_AGENT_PROVIDERS`: `provider` (`anthropic`, `openai`, `google`, `bedrock`) and `models` (`id`, `input_per_mtok_usd` and `output_per_mtok_usd` as decimal strings, `context_tokens`). |
 | `api_key_secret_arns` | map(string) | `{}` | Provider (`anthropic`, `openai`, `google`) to Secrets Manager ARN. Must match the non-Bedrock providers exactly. |
 | `bedrock_region` | string | `null` | `HM_AGENT_BEDROCK_REGION`; required with a `bedrock` provider. |

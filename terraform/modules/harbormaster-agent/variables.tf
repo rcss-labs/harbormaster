@@ -101,7 +101,7 @@ variable "harbormaster_alb_security_group_id" {
 }
 
 variable "harbormaster_task_security_group_ids" {
-  description = "Security groups of the Harbormaster tasks that call the agent: the only callers the agent's load balancer admits on 443. Use the harbormaster module's security_group_ids.web and security_group_ids.coordinator (the chat tasks and the coordinator, which runs investigations), or security_group_ids.server in single-service mode, where that one group covers both."
+  description = "Security groups of the Harbormaster tasks that call the agent: the only callers the agent's load balancer admits on 443. Use the harbormaster module's security_group_ids.server in single-service mode (split_services = false), or security_group_ids.web and security_group_ids.coordinator with split_services = true (the chat tasks and the coordinator, which runs investigations)."
   type        = list(string)
 
   validation {
