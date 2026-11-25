@@ -24,7 +24,7 @@ An alert that has no service, such as an unreachable account, starts no investig
 
 ### Group alerts
 
-A cluster or account entry that aggregates several services is investigated as one subject. Harbormaster records up to 50 services of the group as they were when it was requested. For a cluster or account alert, the agent is told the counts and the failing services that the agent identity may View at that moment, at most ten of them, and never the names of any others. An account entry that has no region is not investigated (`not_visible`).
+A cluster or account entry that aggregates several services is investigated as one subject. Harbormaster records up to 50 services of the group as they were when it was requested. For a cluster or account alert, Harbormaster does not send the alert's own title and text. It writes them anew: the place (the cluster name, or the account id and region, never a display name), the counts from the alert (for example "2 of 5 services failing", which may include services the identity cannot see, or "unreachable"), and a list of the services that were failing when the alert was raised and that the agent identity may View now, at most ten, then "and K more". The AWS error text in the alert is not sent. The subject also carries the ids of up to 20 of those visible services; an id contains the service's name. The names of services the identity may not View are never sent. An account entry that has no region is not investigated (`not_visible`).
 
 ## Turn it on
 
@@ -115,7 +115,7 @@ See [Permissions reference](../reference/permissions.md#the-agent-identity).
 
 For each investigation, the following go to the provider of the investigator model:
 
-- the instructions, the subject (the account, region, cluster and service of a service alert; for a cluster or account alert the counts and at most ten failing services that the identity may View, never the names of others), and the alert's kind, title, text and opening time, after secret scrubbing and a length cut;
+- the instructions, the subject (the account, region, cluster and service of a service alert; for a group alert, its account id, region and cluster, and the ids, which contain the names, of up to 20 services the identity may View), and the alert's kind and opening time. For a service alert, its title and text go as stored. For a group alert, they are the ones Harbormaster writes anew (see [Group alerts](#group-alerts)). All of it passes secret scrubbing and a length cut;
 - the tool definitions, and the scrubbed results of the tools the agent called, including log lines if the identity has Logs.
 
 Environment values in task definitions are redacted unless an admin lifted that for the provider, as for the chat. `HM_TOKEN_REDACT_ENV=true` overrides the lift. Secret-looking values are always redacted, best effort. The provider keeps what it keeps under its own terms. Because nobody asks for these runs, check the provider terms before you set the investigator model, and prefer a provider inside your own AWS account (Amazon Bedrock) for sensitive estates.
