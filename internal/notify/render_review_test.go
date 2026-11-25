@@ -489,3 +489,35 @@ func TestReview_EmailSubjectFoldsEveryHeaderLine(t *testing.T) {
 		}
 	}
 }
+
+func TestReview_NameThatLooksLikeAnEncodedWordIsNotDecoded(t *testing.T) {
+	for _, name := range []string{
+		"=?utf-8?q?=E2=80=AE_evil?=",
+		"=?utf-8?q?=0D=0ABcc:_x@y.z?=",
+		"a =?utf-8?q?b?= =?utf-8?q?c?=",
+	} {
+		m := reviewMessage("x")
+		m.Review.Name = name
+		_, raw := Email(m, "hm@example.com", []string{"ops@example.com"})
+		head, _ := decodedEmailBody(t, raw)
+		decoded, err := new(mime.WordDecoder).DecodeHeader(head.Get("Subject"))
+		if want := "[Harbormaster] Cost review: " + CleanReviewName(name); err != nil || decoded != want || head.Get("Bcc") != "" {
+			t.Errorf("%q: Subject decodes to %q (%v), want %q", name, decoded, err, want)
+		}
+	}
+}
+
+func TestCleanReviewName_IsTheOneCleaning(t *testing.T) {
+	for in, want := range map[string]string{
+		"x*\nChecked": "x* Checked", "  a ‮ b  ": "a b", "​\r\n": "", "plain": "plain",
+	} {
+		if got := CleanReviewName(in); got != want {
+			t.Errorf("CleanReviewName(%q) = %q, want %q", in, got, want)
+		}
+	}
+	m := reviewMessage("x")
+	m.Review.Name = "a\nb"
+	if m.reviewName() != CleanReviewName(m.Review.Name) {
+		t.Error("the message must use the exported cleaning")
+	}
+}

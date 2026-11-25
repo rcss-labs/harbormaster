@@ -286,10 +286,10 @@ func emailText(m Message) string {
 
 // foldedSubject Q-encodes subject as a run of encoded words of at most 75 characters, folded onto continuation
 // lines, so no header line passes the 998 octets SMTP allows however long the subject is. A short ASCII subject is
-// written as it is.
+// written as it is, unless it holds "=?": a recipient would decode that as an encoded word of its own.
 func foldedSubject(subject string) string {
 	const maxPlain, maxWordBytes = 900, 21 // 21 bytes encode to at most 63 characters, plus 12 for the word's frame
-	if len(subject) <= maxPlain && mime.QEncoding.Encode("utf-8", subject) == subject {
+	if len(subject) <= maxPlain && !strings.Contains(subject, "=?") && mime.QEncoding.Encode("utf-8", subject) == subject {
 		return subject
 	}
 	var words []string

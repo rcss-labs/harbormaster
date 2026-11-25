@@ -106,15 +106,21 @@ func (m Message) summary() string {
 // reviewTitle is the headline of a review: the fixed type label and the name, which is admin text.
 func (m Message) reviewTitle() string { return m.reviewLabel() + " review: " + m.reviewName() }
 
-// reviewName is the admin-written name reduced to one visible line: breaks and other white space become single
+// reviewName is the admin-written name, cleaned by CleanReviewName: reduced to one visible line: breaks and other white space become single
 // spaces, and control, format (bidi, zero-width), line and paragraph separator and default-ignorable runes are
 // dropped, so a name cannot start a line of its own above the AI notice or reorder what follows it.
 func (m Message) reviewName() string {
 	if m.Review == nil {
 		return ""
 	}
+	return CleanReviewName(m.Review.Name)
+}
+
+// CleanReviewName is the cleaning a review message applies to a name. It is exported so a caller that stores names
+// can refuse one that is empty after cleaning, the same rule the senders apply.
+func CleanReviewName(name string) string {
 	var b strings.Builder
-	for _, r := range m.Review.Name {
+	for _, r := range name {
 		switch {
 		case unicode.IsSpace(r):
 			b.WriteByte(' ')
