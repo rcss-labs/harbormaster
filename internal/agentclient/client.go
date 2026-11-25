@@ -61,8 +61,33 @@ type Page struct {
 // Task is the investigation an investigator run works on. It mirrors the agent service's wire type.
 type Task struct {
 	Kind    string      `json:"kind"`
-	Subject TaskSubject `json:"subject"`
-	Alert   TaskAlert   `json:"alert"`
+	Subject TaskSubject `json:"subject,omitzero"`
+	Alert   TaskAlert   `json:"alert,omitzero"`
+	Review  *TaskReview `json:"review,omitempty"`
+	Scope   *TaskScope  `json:"scope,omitempty"`
+}
+
+// TaskReview is what a review task asks for.
+type TaskReview struct {
+	Type   string `json:"type"`
+	Range  string `json:"range"`
+	Period string `json:"period"`
+}
+
+// TaskScope is the set of services a review covers.
+type TaskScope struct {
+	Entries       []ScopeEntry `json:"entries"`
+	ServicesTotal int          `json:"services_total"`
+}
+
+// ScopeEntry is one tag, cluster or account a review covers.
+type ScopeEntry struct {
+	Kind      string `json:"kind"`
+	TagID     string `json:"tag_id,omitempty"`
+	Name      string `json:"name,omitempty"`
+	ClusterID string `json:"cluster_id,omitempty"`
+	AccountID string `json:"account_id,omitempty"`
+	Region    string `json:"region,omitempty"`
 }
 
 // TaskSubject is what an investigation is about.
@@ -140,6 +165,7 @@ type Catalogue struct {
 	MaxRunTokens int64
 	RunTimeout   time.Duration
 	Roles        []string
+	ReviewTypes  []string
 }
 
 // Supports reports whether the agent offers role.
@@ -149,6 +175,11 @@ func (c Catalogue) Supports(role string) bool {
 		return role == "chat" || role == "test"
 	}
 	return slices.Contains(c.Roles, role)
+}
+
+// SupportsReview reports whether the agent offers the reviewer role and the review type.
+func (c Catalogue) SupportsReview(reviewType string) bool {
+	return c.Supports("reviewer") && slices.Contains(c.ReviewTypes, reviewType)
 }
 
 // Find returns the model the agent offers under a provider and model id.
@@ -304,8 +335,9 @@ type catalogueWire struct {
 			ContextTokens int64  `json:"context_tokens"`
 		} `json:"models"`
 	} `json:"providers"`
-	Roles  []string `json:"roles"`
-	Limits struct {
+	Roles       []string `json:"roles"`
+	ReviewTypes []string `json:"review_types"`
+	Limits      struct {
 		MaxRunTokens      int64 `json:"max_run_tokens"`
 		RunTimeoutSeconds int64 `json:"run_timeout_seconds"`
 	} `json:"limits"`
@@ -350,6 +382,7 @@ func (c *Client) Catalogue(ctx context.Context) (Catalogue, error) {
 		MaxRunTokens: wire.Limits.MaxRunTokens,
 		RunTimeout:   time.Duration(wire.Limits.RunTimeoutSeconds) * time.Second,
 		Roles:        wire.Roles,
+		ReviewTypes:  wire.ReviewTypes,
 	}
 	for _, p := range wire.Providers {
 		pm := ProviderModels{Provider: p.Provider}
