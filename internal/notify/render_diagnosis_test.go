@@ -38,7 +38,8 @@ type slackBlock struct {
 		Verbatim *bool  `json:"verbatim"`
 	} `json:"text"`
 	Elements []struct {
-		Text string `json:"text"`
+		Text     string `json:"text"`
+		Verbatim *bool  `json:"verbatim"`
 	} `json:"elements"`
 }
 
@@ -83,6 +84,9 @@ func TestDiagnosis_Slack_EscapesAndDisablesUnfurl(t *testing.T) {
 	// The summary is plain text: nothing in it is interpreted, so nothing in it is escaped either.
 	if sum.Type != "section" || sum.Text.Type != "plain_text" || sum.Text.Emoji == nil || *sum.Text.Emoji || sum.Text.Text != summary {
 		t.Errorf("summary section = %+v %q", sum.Text, sum.Text.Text)
+	}
+	if v := got.Blocks[2].Elements[0].Verbatim; v == nil || !*v {
+		t.Error("the context line must be verbatim")
 	}
 	if want := "<" + ownInvestigation + "|Open the investigation>"; !strings.Contains(context, want) {
 		t.Errorf("context %q lacks %q", context, want)
@@ -327,7 +331,8 @@ func TestDiagnosis_PagerDutyIsRefused(t *testing.T) {
 }
 
 func TestDiagnosis_ForeignURLsRemovedOwnURLKept(t *testing.T) {
-	summary := "See https://evil.example/x and " + ownInvestigation + " for details."
+	ownService := "https://hm.example.com/services/x"
+	summary := "See https://evil.example/x and " + ownInvestigation + " and " + ownService + " for details."
 	m := diagnosisMessage(summary)
 	slack, _ := SlackBody(m)
 	hook, _ := WebhookBody(m)
@@ -342,7 +347,7 @@ func TestDiagnosis_ForeignURLsRemovedOwnURLKept(t *testing.T) {
 		if !strings.Contains(out, agentresult.URLPlaceholder) {
 			t.Errorf("%s: no placeholder in %s", name, out)
 		}
-		if !strings.Contains(out, ownInvestigation) {
+		if !strings.Contains(out, ownInvestigation) || !strings.Contains(out, ownService) {
 			t.Errorf("%s: own URL gone from %s", name, out)
 		}
 	}
@@ -359,6 +364,20 @@ func TestCleanSummary_OwnLinksAndForeignLinks(t *testing.T) {
 	} {
 		if got := CleanSummary(tc.in, tc.base); got != tc.want {
 			t.Errorf("%s: CleanSummary(%q, %q) = %q, want %q", tc.name, tc.in, tc.base, got, tc.want)
+		}
+	}
+}
+
+func TestCleanSummary_ScrubsBeforeLinksAreRemoved(t *testing.T) {
+	for _, in := range []string{
+		"db.example.com:5432/password: Hunter2Secret9x",
+		"//x-api-key: Zx81kq02mmLw93hhTT",
+		"http://x/Bearer abcdefghijklmnop1234567890ABCDEF",
+		"//Authorization: Basic dXNlcjpwYXNzd29yZDEyMzQ1Ng==",
+		"//-----BEGIN RSA PRIVATE KEY----- MIIEow",
+	} {
+		if got := CleanSummary(in, "https://hm.example.com"); got != agentresult.ReplacementSummary {
+			t.Errorf("CleanSummary(%q) = %q, want the replacement summary", in, got)
 		}
 	}
 }

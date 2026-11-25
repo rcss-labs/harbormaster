@@ -21,13 +21,19 @@ const (
 	slackMaxSection = 3000 // characters Slack accepts in one section's text
 )
 
-// CleanSummary is the last check before a model-written summary leaves Harbormaster: every link that is not
-// baseURL's own is removed, then the stored text is checked again (cap and scrubber). The order matters: the check
-// comes last so replacing links with a longer placeholder can never push the result past the cap, and the result is
-// a fixed point, CleanSummary(CleanSummary(x)) == CleanSummary(x). It runs at send time, so a text stored before a
-// rule was tightened is still held to the current rule. Callers pass the stored summary through unchanged.
+// CleanSummary is the last check before a model-written summary leaves Harbormaster. The stored text is checked
+// (cap and scrubber) on the raw text first, because removing a link can hide the key name that tells the scrubber
+// a value is a secret; then every link that is not baseURL's own is removed; then the result is checked again,
+// because the placeholder is longer than a short link and could push it past the cap. A failure at either check
+// replaces the whole text. The result is a fixed point, CleanSummary(CleanSummary(x)) == CleanSummary(x), and at
+// most 1200 runes. It runs at send time, so a text stored before a rule was tightened is still held to the current
+// rule. Callers pass the stored summary through unchanged.
 func CleanSummary(summary, baseURL string) string {
-	clean, _ := agentresult.RecheckSummary(agentresult.StripForeignURLs(summary, baseURL))
+	raw, replaced := agentresult.RecheckSummary(summary)
+	if replaced {
+		return raw
+	}
+	clean, _ := agentresult.RecheckSummary(agentresult.StripForeignURLs(raw, baseURL))
 	return clean
 }
 
