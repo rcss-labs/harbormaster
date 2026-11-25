@@ -1,23 +1,27 @@
 package agentresult
 
 import (
-	"net/url"
+	"regexp"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 )
 
-const peeledChars = "()<>[]\"'"
+// A link is judged by one blunt rule over whitespace-separated tokens: it is kept only when the whole token is Harbormaster's
+// own base, or the base and a plain path. Any other token that looks like a link, in any spelling a reader's client may
+// turn into one, is replaced whole. Bare hosts without a path or port are the documented residual.
 
-// StripForeignURLs replaces every link that is not baseURL's own with URLPlaceholder, in one pass over the
-// whitespace-separated tokens. A token is a link when it holds "://", starts with "www." or "mailto:", or begins with a
-// dotted host followed by "/". Brackets and quotes around it are peeled first, so Markdown and Slack forms are caught.
-// Only a token that parses and has baseURL's scheme and host, with no user info, is kept. An empty or unparsable
-// baseURL removes all. Best effort: it cannot see a link a reader's client builds from pieces.
+var baseShape = regexp.MustCompile(`^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]*)?$`)
+
+// linkMarkers make a token a link wherever they appear, after folding.
+var linkMarkers = []string{"://", ":/", "//", "www.", "mailto:", "tel:", "javascript:", "data:", "]("}
+
+// StripForeignURLs replaces every link that is not baseURL's own with URLPlaceholder. An empty or unusable baseURL
+// removes all of them.
 func StripForeignURLs(text, baseURL string) string {
-	base, err := url.Parse(baseURL)
-	if err != nil || base.Scheme == "" || base.Host == "" {
-		base = nil
+	base := strings.TrimRight(baseURL, "/")
+	if !baseShape.MatchString(base) {
+		base = ""
 	}
 	var out strings.Builder
 	out.Grow(len(text))
@@ -40,58 +44,101 @@ func StripForeignURLs(text, baseURL string) string {
 	return out.String()
 }
 
-// stripToken peels brackets and quotes, and replaces what is left when it is a link that is not base's own.
-func stripToken(token string, base *url.URL) string {
-	core := strings.TrimLeft(token, peeledChars)
-	lead := token[:len(token)-len(core)]
-	trimmed := strings.TrimRight(core, peeledChars)
-	trail := core[len(trimmed):]
-	if !looksLikeLink(trimmed) || isOwnLink(trimmed, base) {
+func stripToken(token, base string) string {
+	if isPlainOwnLink(strings.TrimRight(token, ".,;:!?)"), base) || !looksLikeLink(token) {
 		return token
 	}
-	return lead + URLPlaceholder + trail
+	return URLPlaceholder
 }
 
-func looksLikeLink(token string) bool {
-	if strings.Contains(token, "://") {
-		return true
-	}
-	lower := strings.ToLower(token[:min(len(token), 7)])
-	if strings.HasPrefix(lower, "www.") || strings.HasPrefix(lower, "mailto:") {
-		return true
-	}
-	slash := strings.IndexByte(token, '/')
-	return slash > 0 && isDottedHost(token[:slash])
-}
-
-// isDottedHost reports a name like "evil.example" or "a.b:8080": letters, digits, hyphens and dots, ending in a
-// letters-only label of two or more characters, so "1.5" is not a host.
-func isDottedHost(s string) bool {
-	if i := strings.LastIndexByte(s, ':'); i >= 0 {
-		s = s[:i]
-	}
-	dot := strings.LastIndexByte(s, '.')
-	if dot <= 0 || len(s)-dot-1 < 2 {
+// isPlainOwnLink reports the base alone, or the base and a path of plain characters: no query, hash, escape or user info.
+func isPlainOwnLink(token, base string) bool {
+	if base == "" || !strings.HasPrefix(token, base) {
 		return false
 	}
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		letter := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
-		if i > dot && !letter || !(letter || c >= '0' && c <= '9' || c == '-' || c == '.') {
+	path := token[len(base):]
+	if path == "" {
+		return true
+	}
+	if path[0] != '/' {
+		return false
+	}
+	for i := 1; i < len(path); i++ {
+		c := path[i]
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.IndexByte("._~/-", c) >= 0) {
 			return false
 		}
 	}
 	return true
 }
 
-// isOwnLink reports a parsed link with base's scheme and host (port included) and no user info.
-func isOwnLink(token string, base *url.URL) bool {
-	if base == nil {
-		return false
+// fold lowercases and maps the look-alikes of "." and the fullwidth ASCII forms to their plain characters.
+func fold(token string) string {
+	var out strings.Builder
+	out.Grow(len(token))
+	for _, r := range token {
+		switch {
+		case r == 0x3002 || r == 0xFF0E || r == 0xFF61 || r == 0x2024:
+			r = '.'
+		case r >= 0xFF01 && r <= 0xFF5E:
+			r -= 0xFEE0
+		}
+		out.WriteRune(unicode.ToLower(r))
 	}
-	u, err := url.Parse(token)
-	if err != nil || u.User != nil || u.Opaque != "" {
-		return false
+	return out.String()
+}
+
+func looksLikeLink(token string) bool {
+	folded := fold(token)
+	for _, marker := range linkMarkers {
+		if strings.Contains(folded, marker) {
+			return true
+		}
 	}
-	return strings.EqualFold(u.Scheme, base.Scheme) && strings.EqualFold(u.Host, base.Host)
+	return hasHostRun(folded)
+}
+
+func isLabelRune(r rune) bool {
+	return unicode.IsLetter(r) || unicode.IsDigit(r) || unicode.IsMark(r) || r == '-' || r == '_'
+}
+
+// hasHostRun reports a run of two or more dot-joined labels (optionally ending in a dot) followed by "/", "?", "#" or
+// ":" and a digit. The run is found in one pass. Plain fractions and short versions such as "1.5/2" are not links.
+func hasHostRun(folded string) bool {
+	labels, dots := 0, 0
+	inLabel, digitsOnly := false, true
+	reset := func() { labels, dots, inLabel, digitsOnly = 0, 0, false, true }
+	for i := 0; i < len(folded); {
+		r, size := utf8.DecodeRuneInString(folded[i:])
+		switch {
+		case isLabelRune(r):
+			if !inLabel {
+				inLabel = true
+				labels++
+			}
+			digitsOnly = digitsOnly && r >= '0' && r <= '9'
+		case r == '.' && inLabel:
+			inLabel = false
+			dots++
+		default:
+			next := i + size
+			ends := r == '/' || r == '?' || r == '#' || r == ':' && next < len(folded) && folded[next] >= '0' && folded[next] <= '9'
+			if ends && labels >= 2 && !(digitsOnly && dots <= 2 && r == '/' && allDigits(folded[next:])) {
+				return true
+			}
+			reset()
+		}
+		i += size
+	}
+	return false
+}
+
+// allDigits reports ASCII digits, at least one, then at most closing punctuation, up to the end of s. It stops at the
+// first byte that is neither.
+func allDigits(s string) bool {
+	digits := 0
+	for digits < len(s) && s[digits] >= '0' && s[digits] <= '9' {
+		digits++
+	}
+	return digits > 0 && strings.Trim(s[digits:], ".,;:!?)") == ""
 }

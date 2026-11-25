@@ -3,6 +3,7 @@ package agentresult
 import (
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 )
 
@@ -155,5 +156,130 @@ func TestCutExcerpt_RuneBoundaryMarkerAndCap(t *testing.T) {
 	}
 	if got := CutExcerpt(strings.Repeat("\xff", 2000)); len(got) > ExcerptCap || !utf8.ValidString(got) {
 		t.Errorf("invalid bytes: %d bytes", len(got))
+	}
+}
+
+func TestCheck_RefusesInvisibleAndControlCharacters(t *testing.T) {
+	tricks := map[string]string{
+		"NUL": "a\x00b", "escape": "a\x1bb", "carriage return": "a\rb", "vertical tab": "a\vb", "form feed": "a\fb", "DEL": "a\x7fb",
+		"C1 control": "a\u0085b", "zero width space": "a\u200bb", "zero width joiner": "a\u200db", "bidi override": "a\u202eb",
+		"bidi isolate": "a\u2066b", "word joiner": "a\u2060b", "BOM": "a\ufeffb", "soft hyphen": "a\u00adb",
+		"combining grapheme joiner": "a\u034fb", "hangul choseong filler": "a\u115fb", "hangul jungseong filler": "a\u1160b",
+		"hangul filler": "a\u3164b", "halfwidth hangul filler": "a\uffa0b", "variation selector": "a\ufe0fb",
+		"variation selector supplement": "a\U000e0100b", "tag character": "a\U000e0041b", "tag begin": "a\U000e0001b",
+		"mongolian selector": "a\u180bb", "invalid UTF-8": "a\xffb", "truncated rune": "a\xe2\x82",
+	}
+	corpus := corpusOf("unrelated")
+	for name, text := range tricks {
+		if got, replaced := CheckSummary(text, corpus); !replaced || got != ReplacementSummary {
+			t.Errorf("summary with %s: got %q, replaced %v", name, got, replaced)
+		}
+		if got, replaced := RecheckSummary(text); !replaced || got != ReplacementSummary {
+			t.Errorf("recheck of a summary with %s: got %q, replaced %v", name, got, replaced)
+		}
+		if name == "vertical tab" || name == "form feed" || name == "C1 control" || name == "carriage return" {
+			continue // line breaks in a note, flattened below
+		}
+		if got := CheckNote(text, corpus); got != ReplacementNote {
+			t.Errorf("note with %s: got %q", name, got)
+		}
+		if got := RecheckNote(text); got != ReplacementNote {
+			t.Errorf("recheck of a note with %s: got %q", name, got)
+		}
+	}
+	// Line feed, tab, and the unusual line separators are ordinary.
+	const plain = "line one\nline two\tcolumn\u2028next\u2029last"
+	if got, replaced := CheckSummary(plain, corpus); replaced || got != plain {
+		t.Errorf("ordinary whitespace refused: %q, replaced %v", got, replaced)
+	}
+}
+
+func TestCheckNote_FlattensEveryLineBreak(t *testing.T) {
+	in := "a\nb\rc\r\nd\ve\ff\u0085g\u2028h\u2029i"
+	want := "a b c d e f g h i"
+	if got := CheckNote(in, corpusOf("unrelated")); got != want {
+		t.Errorf("CheckNote: %q", got)
+	}
+	if got := RecheckNote(in); got != want {
+		t.Errorf("RecheckNote: %q", got)
+	}
+}
+
+func TestCheckNote_RefusesFullCorpusAndImages(t *testing.T) {
+	full := &Corpus{}
+	full.Add(strings.Repeat("x", CorpusCap+1))
+	if got := CheckNote("a harmless note", full); got != ReplacementNote {
+		t.Errorf("full corpus: %q", got)
+	}
+	for _, note := range []string{"see ![x](y)", "<IMG src=x>", "<svg onload=x>", "<picture>", "<video src=x>", "<iframe src=x>", "<object data=x>", "<embed src=x>"} {
+		if got := CheckNote(note, corpusOf("unrelated")); got != ReplacementNote {
+			t.Errorf("note %q: %q", note, got)
+		}
+		if got, replaced := CheckSummary(note, corpusOf("unrelated")); !replaced || got != ReplacementSummary {
+			t.Errorf("summary %q: %q", note, got)
+		}
+	}
+	if got, replaced := CheckSummary("a < b and a <b> c", corpusOf("unrelated")); replaced {
+		t.Errorf("ordinary angle brackets refused: %q", got)
+	}
+}
+
+func TestCheckSummary_RefusesALateCopy(t *testing.T) {
+	line := "Ошибка соединения с базой данных: тайм-аут при чтении ответа сервера"
+	corpus := corpusOf("header\n" + line + "\nfooter")
+	summary := words(9, 500) + " " + line
+	if got, replaced := CheckSummary(summary, corpus); !replaced || got != ReplacementSummary {
+		t.Errorf("a copy after character 400 passed: replaced %v", replaced)
+	}
+	if got, replaced := CheckSummary(words(9, 500), corpus); replaced {
+		t.Errorf("unrelated text refused: %q", got)
+	}
+}
+
+func TestCutExcerpt_DropsControlBidiAndTagCharacters(t *testing.T) {
+	in := "a\x00b\x1bc\x7fd\u202ee\u2067f\u200eg\u061ch\U000e0041i\U000e007fj\nk\tl"
+	if got, want := CutExcerpt(in), "abcdefghij\nk\tl"; got != want {
+		t.Errorf("CutExcerpt(%q) = %q, want %q", in, got, want)
+	}
+	// What is dropped does not count against the cap.
+	padded := strings.Repeat("a\x00", ExcerptCap)
+	if got := CutExcerpt(padded); got != strings.Repeat("a", ExcerptCap) {
+		t.Errorf("padding counted: %d bytes", len(got))
+	}
+}
+
+func TestChecksAndCut_LinearOnLargeInput(t *testing.T) {
+	inputs := map[string]func(n int) string{
+		"one word":     func(n int) string { return strings.Repeat("a", n) },
+		"words":        func(n int) string { return words(11, n) },
+		"controls":     func(n int) string { return strings.Repeat("a\x00\u202e", n/5) },
+		"invalid":      func(n int) string { return strings.Repeat("\xff", n) },
+		"multi-byte":   func(n int) string { return strings.Repeat("€", n/3) },
+		"scrub-shaped": func(n int) string { return strings.Repeat("password=aB3-", n/13) },
+		"line breaks":  func(n int) string { return strings.Repeat("a\r\n", n/3) },
+		"image-ish":    func(n int) string { return strings.Repeat("<i", n/2) },
+	}
+	corpus := corpusOf(words(12, 300_000))
+	for name, make := range inputs {
+		small, big := make(25_000), make(200_000)
+		run := func(text string) func() {
+			return func() {
+				CheckSummary(text, corpus)
+				CheckNote(text, corpus)
+				RecheckSummary(text)
+				RecheckNote(text)
+				CutExcerpt(text)
+			}
+		}
+		ts, tb := timeOf(run(small)), timeOf(run(big))
+		if tb > 30*ts+20*time.Millisecond || tb > 2*time.Second {
+			t.Errorf("%s: 200 KB took %v against %v for 25 KB", name, tb, ts)
+		}
+		if got, replaced := CheckSummary(big, corpus); !replaced || got != ReplacementSummary {
+			t.Errorf("%s: a 200 KB summary passed", name)
+		}
+		if got := CutExcerpt(big); len(got) > ExcerptCap || !utf8.ValidString(got) {
+			t.Errorf("%s: excerpt %d bytes, valid %v", name, len(got), utf8.ValidString(got))
+		}
 	}
 }

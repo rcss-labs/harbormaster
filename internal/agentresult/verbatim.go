@@ -2,7 +2,9 @@ package agentresult
 
 import (
 	"encoding/json"
+	"io"
 	"math/rand/v2"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -52,34 +54,95 @@ func (c *Corpus) Add(text string) {
 	}
 	trimmed := strings.TrimSpace(text)
 	if trimmed != "" && (trimmed[0] == '{' || trimmed[0] == '[') {
-		var body any
-		if json.Unmarshal([]byte(trimmed), &body) == nil {
-			c.addValues(body)
+		if values, ok := jsonStringValues(trimmed); ok {
+			for _, v := range values {
+				c.store(v)
+			}
 			return
 		}
 	}
 	c.store(text)
 }
 
-func (c *Corpus) addValues(node any) {
-	switch v := node.(type) {
-	case string:
-		c.store(v)
-	case []any:
-		for _, item := range v {
-			c.addValues(item)
+// jsonStringValues returns every string value of the JSON in text, in order, with duplicate keys' values all kept
+// and keys left out. ok is false when text is not JSON.
+func jsonStringValues(text string) (values []string, ok bool) {
+	dec := json.NewDecoder(strings.NewReader(text))
+	var inObject, expectKey []bool // one entry per open container
+	valueDone := func() {
+		if n := len(inObject); n > 0 && inObject[n-1] {
+			expectKey[n-1] = true
 		}
-	case map[string]any:
-		for _, item := range v {
-			c.addValues(item)
+	}
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			return values, len(inObject) == 0
+		}
+		if err != nil {
+			return nil, false
+		}
+		switch v := tok.(type) {
+		case json.Delim:
+			if v == '{' || v == '[' {
+				inObject = append(inObject, v == '{')
+				expectKey = append(expectKey, v == '{')
+				continue
+			}
+			inObject, expectKey = inObject[:len(inObject)-1], expectKey[:len(expectKey)-1]
+			valueDone()
+		case string:
+			if n := len(inObject); n > 0 && inObject[n-1] && expectKey[n-1] {
+				expectKey[n-1] = false // a key
+				continue
+			}
+			values = append(values, v)
+			valueDone()
+		default:
+			valueDone()
 		}
 	}
 }
 
+// store keeps the normalised text, and the normalised text with one level of JSON escapes decoded when that differs,
+// so a log line that carries \u0020 or \n is compared as it reads.
 func (c *Corpus) store(text string) {
 	if n := Normalize(text); n != "" {
 		c.text = append(append(c.text, n...), valueSeparator)
 	}
+	if strings.IndexByte(text, '\\') >= 0 {
+		if n := Normalize(unescapeJSON(text)); n != "" {
+			c.text = append(append(c.text, n...), valueSeparator)
+		}
+	}
+}
+
+var jsonEscapes = map[byte]string{'n': "\n", 't': "\t", 'r': "\r", 'b': "\b", 'f': "\f", '"': "\"", '\\': "\\", '/': "/"}
+
+// unescapeJSON decodes the escapes of a JSON string without its quotes; anything unrecognised stays as it is.
+func unescapeJSON(text string) string {
+	var out strings.Builder
+	out.Grow(len(text))
+	for i := 0; i < len(text); i++ {
+		if text[i] != '\\' || i+1 == len(text) {
+			out.WriteByte(text[i])
+			continue
+		}
+		if rep, ok := jsonEscapes[text[i+1]]; ok {
+			out.WriteString(rep)
+			i++
+		} else if text[i+1] == 'u' && i+6 <= len(text) {
+			if n, err := strconv.ParseUint(text[i+2:i+6], 16, 32); err == nil {
+				out.WriteRune(rune(n))
+				i += 5
+				continue
+			}
+			out.WriteByte(text[i])
+		} else {
+			out.WriteByte(text[i])
+		}
+	}
+	return out.String()
 }
 
 // Full reports that the corpus passed its cap, so the copy check cannot vouch for anything.

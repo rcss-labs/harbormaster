@@ -6,61 +6,115 @@ import (
 	"time"
 )
 
-func TestStripForeignURLs_Table(t *testing.T) {
-	const base = "https://harbormaster.example"
-	const gone = URLPlaceholder
-	cases := []struct{ name, in, base, want string }{
-		{"plain text", "nothing to see here", base, "nothing to see here"},
-		{"http foreign", "see http://evil.example/x now", base, "see " + gone + " now"},
-		{"https foreign", "see https://evil.example/x now", base, "see " + gone + " now"},
-		{"other scheme", "ftp://evil.example/x and javascript://x and file:///etc/passwd", base, gone + " and " + gone + " and " + gone},
-		{"www", "go to www.evil.example now", base, "go to " + gone + " now"},
-		{"mailto", "write mailto:a@evil.example", base, "write " + gone},
-		{"bare host with path", "open evil.example/path?q=1 please", base, "open " + gone + " please"},
-		{"markdown link", "[click here](https://evil.example/x) ok", base, "[click " + gone + ") ok"},
-		{"markdown single token", "[x](https://evil.example/x)", base, "[" + gone + ")"},
-		{"slack form", "<https://evil.example/x|text> ok", base, "<" + gone + "> ok"},
-		{"in brackets", "(see https://evil.example/x) and [www.evil.example]", base, "(see " + gone + ") and [" + gone + "]"},
-		{"quoted", `"https://evil.example/x" 'http://evil.example'`, base, `"` + gone + `" '` + gone + `'`},
-		{"own url kept", "open https://harbormaster.example/services/1 now", base, "open https://harbormaster.example/services/1 now"},
-		{"own url in markdown", "(https://harbormaster.example/a)", base, "(https://harbormaster.example/a)"},
-		{"own host upper case", "HTTPS://Harbormaster.Example/a", base, "HTTPS://Harbormaster.Example/a"},
-		{"other scheme same host", "http://harbormaster.example/a", base, gone},
-		{"other port", "https://harbormaster.example:8443/a", base, gone},
-		{"prefix host", "https://harbormaster.example.evil.example/a", base, gone},
-		{"suffix host", "https://evilharbormaster.example/a", base, gone},
-		{"userinfo trick", "https://harbormaster.example@evil.example/", base, gone},
-		{"userinfo on own host", "https://user:pw@harbormaster.example/", base, gone},
-		{"junk after scheme", "https://", base, gone},
-		{"empty base removes all", "https://harbormaster.example/a and evil.example/x", "", gone + " and " + gone},
-		{"unparsable base removes all", "https://harbormaster.example/a", "://nope", gone},
-		{"version number kept", "version 1.5/2 and and/or", base, "version 1.5/2 and and/or"},
-		{"whitespace kept", "a\n\nhttps://evil.example/x\tb  c", base, "a\n\n" + gone + "\tb  c"},
-		{"with port base", "https://hm.example:8443/a https://hm.example/b", "https://hm.example:8443", "https://hm.example:8443/a " + gone},
+const ownBase = "https://harbormaster.example"
+
+// A link is kept only when the whole token is the base, or the base and a plain path.
+func TestStripForeignURLs_KeepsOnlyPlainOwnLinksAndOrdinaryText(t *testing.T) {
+	kept := []string{
+		"nothing", "checkout-api.", "e.g.", "i.e.,", "v1.2.3", "and/or", "a/b", "1.5/2", "10.0.1/3", "(1.5/2)", "12/34",
+		ownBase,
+		ownBase + "/",
+		ownBase + "/services/1",
+		ownBase + "/services/svc-1/timeline",
+		ownBase + "/a.b_c~d",
+		ownBase + "/a.",
+		ownBase + "/a),",
+		ownBase + "/a;",
+		ownBase + "/a!?",
 	}
-	for _, c := range cases {
-		if got := StripForeignURLs(c.in, c.base); got != c.want {
-			t.Errorf("%s: StripForeignURLs(%q) = %q, want %q", c.name, c.in, got, c.want)
+	for _, token := range kept {
+		in := "see " + token + " now"
+		if got := StripForeignURLs(in, ownBase); got != in {
+			t.Errorf("StripForeignURLs(%q) = %q, want it unchanged", in, got)
+		}
+	}
+	if got := StripForeignURLs("a https://hm.example:8443/a b", "https://hm.example:8443"); got != "a https://hm.example:8443/a b" {
+		t.Errorf("base with port: %q", got)
+	}
+	if got := StripForeignURLs("a https://hm.example/b", "https://hm.example/"); got != "a https://hm.example/b" {
+		t.Errorf("base with trailing slash: %q", got)
+	}
+}
+
+func TestStripForeignURLs_RemovesEverythingElse(t *testing.T) {
+	removed := []string{
+		// plain foreign links
+		"http://evil.example/x", "https://evil.example/x", "ftp://evil.example/x", "file:///etc/passwd", "javascript://x",
+		"www.evil.example", "WWW.EVIL.EXAMPLE", "mailto:a@evil.example", "tel:+123456", "javascript:alert(1)",
+		"data:text/html,x", "//evil.example/p", "https:/x", "https://", "evil.example/path?q=1",
+		// own link with something extra
+		ownBase + "/a?x=1", ownBase + "/a#f", ownBase + "/a%2e", ownBase + "/a%2Fb", ownBase + `/a"`, ownBase + "/a>",
+		ownBase + "/a,https://evil.example/x", ownBase + "/a;www.evil.example", ownBase + "/a)[x](https://evil.example/x",
+		ownBase + `"evil.example/x`, ownBase + ">evil.example/x", ownBase + ",evil.example/x", ownBase + ";www.evil.example",
+		ownBase + "#evil.example/x", ownBase + "?evil.example/x", ownBase + ":8443/a", ownBase + "@evil.example/x",
+		"http://harbormaster.example/a", "HTTPS://harbormaster.example/a", "https://Harbormaster.example/a",
+		"https://harbormaster.example:8443/a", "https://harbormaster.example.evil.example/a",
+		"https://evilharbormaster.example/a", "https://harbormaster.example@evil.example/",
+		"https://user@harbormaster.example/", "https://user:pw@harbormaster.example/a",
+		"https://harbormaster.example\\@evil.example/", "https://harbormaster.example/a\\b",
+		// link shapes the review found
+		"[https://harbormaster.example/](https://evil.example/x)", "<https://harbormaster.example/a|https://evil.example/x>",
+		"<https://evil.example/x|text>", "[x](https://evil.example/x)", "[x](evil.example/p)", "[x](//evil.example/p)",
+		"**evil.example/p**", "`evil.example/p`", "link:evil.example/p", "a,www.evil.example", "{www.evil.example",
+		"1.2.3.4/leak", "1.2.3.4/5", "10.0.0.1:8080", "user@evil.example/x", "user:pw@evil.example/x",
+		"evil.xn--p1ai/x", "пример.рф/x", "evil。com/x", "evil．com/x", "evil｡com/x", "evil․com/x", "evil.example./x",
+		"my_evil.example.com/x", "EVIL.EXAMPLE/x", "evil.example?x=1", "evil.example#a", "evil.example:8080",
+		"ｅｖｉｌ．ｅｘａｍｐｌｅ／x", "ｈｔｔｐｓ：／／ｅｖｉｌ．ｅｘａｍｐｌｅ", "ｗｗｗ．ｅｖｉｌ．ｅｘａｍｐｌｅ", "बुरा.भारत/x",
+		"(see:https://evil.example/x)", "a.b/c", "x.y.z/", "1.5/2/evil.example/x",
+	}
+	for _, token := range removed {
+		for _, base := range []string{ownBase, ""} {
+			in := "see " + token + " now"
+			if got := StripForeignURLs(in, base); got != "see "+URLPlaceholder+" now" {
+				t.Errorf("base %q: StripForeignURLs(%q) = %q, want the token replaced whole", base, in, got)
+			}
+		}
+	}
+	// Whitespace between tokens is kept; every kind of space separates.
+	in := "a\n\nhttps://evil.example/x\tb  c\u00a0evil.example/x\u2028ok\u0085www.evil.example"
+	want := "a\n\n" + URLPlaceholder + "\tb  c\u00a0" + URLPlaceholder + "\u2028ok\u0085" + URLPlaceholder
+	if got := StripForeignURLs(in, ownBase); got != want {
+		t.Errorf("spacing: %q, want %q", got, want)
+	}
+	// An unusable base removes every link, its own included.
+	for _, base := range []string{"", "://nope", "harbormaster.example", "https://", "https://harbormaster.example/a b", "javascript:x"} {
+		if got := StripForeignURLs(ownBase+"/a", base); got != URLPlaceholder {
+			t.Errorf("base %q kept the link: %q", base, got)
 		}
 	}
 }
 
 func TestStripForeignURLs_LinearOnLongInput(t *testing.T) {
-	const base = "https://harbormaster.example"
-	inputs := map[string]func(n int) string{
-		"no spaces":        func(n int) string { return strings.Repeat("a", n) },
-		"scheme markers":   func(n int) string { return strings.Repeat("://", n/3) },
-		"brackets":         func(n int) string { return strings.Repeat("([<\"'", n/5) },
-		"dots and slashes": func(n int) string { return strings.Repeat("a./", n/3) },
-		"many tokens":      func(n int) string { return strings.Repeat("http://e.example ", n/17) },
+	cases := []struct {
+		name string
+		make func(n int) string
+		want func(in string) string
+	}{
+		{"no spaces", func(n int) string { return strings.Repeat("a", n) }, func(in string) string { return in }},
+		{"scheme markers", func(n int) string { return strings.Repeat("://", n/3) }, func(string) string { return URLPlaceholder }},
+		{"brackets", func(n int) string { return strings.Repeat("([<\"'", n/5) }, func(in string) string { return in }},
+		{"dots and slashes", func(n int) string { return strings.Repeat("a./", n/3) }, func(in string) string { return in }},
+		{"dots only", func(n int) string { return strings.Repeat("a.", n/2) }, func(in string) string { return in }},
+		{"digits and dots", func(n int) string { return strings.Repeat("1.", n/2) + "/" + strings.Repeat("9", 10) }, func(string) string { return URLPlaceholder }},
+		{"many fractions", func(n int) string { return strings.Repeat("1.5/1.5/", n/8) }, func(string) string { return URLPlaceholder }},
+		{"many tokens", func(n int) string { return strings.Repeat("http://e.example ", n/17) }, func(in string) string {
+			return strings.Repeat(URLPlaceholder+" ", len(in)/17)[:len(in)/17*(len(URLPlaceholder)+1)-1] + in[len(in)/17*17-1:]
+		}},
+		{"own links", func(n int) string { return strings.Repeat(ownBase+"/a ", n/len(ownBase+"/a ")) }, func(in string) string { return in }},
 	}
-	for name, make := range inputs {
-		small, big := make(25_000), make(200_000)
-		ts := timeOf(func() { StripForeignURLs(small, base) })
-		tb := timeOf(func() { StripForeignURLs(big, base) })
-		// Linear grows 8x; quadratic 64x.
-		if tb > 30*ts+5*time.Millisecond {
-			t.Errorf("%s: 8x the input took %v against %v", name, tb, ts)
+	for _, c := range cases {
+		small, big := c.make(25_000), c.make(200_000)
+		if got := StripForeignURLs(big, ownBase); got != c.want(big) {
+			t.Errorf("%s: wrong result for 200 KB (%d bytes out)", c.name, len(got))
+		}
+		ts := timeOf(func() { StripForeignURLs(small, ownBase) })
+		tb := timeOf(func() { StripForeignURLs(big, ownBase) })
+		// 8x the input: linear grows 8x, quadratic 64x.
+		if tb > 30*ts+20*time.Millisecond {
+			t.Errorf("%s: 8x the input took %v against %v", c.name, tb, ts)
+		}
+		if tb > 2*time.Second {
+			t.Errorf("%s: 200 KB took %v", c.name, tb)
 		}
 	}
 }
