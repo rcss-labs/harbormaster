@@ -114,6 +114,7 @@ export default defineConfig({
         HM_BASE_URL: baseURL,
         HM_DATABASE_URL: databaseURL,
         HM_AGENT_URL: agentURL, // switches the AI agent on; devseed then gives sam the chat and the fake model
+        HM_AGENT_CUSTOM_REVIEWS: 'true', // offers admin-written reviews; devseed adds the disabled "Idle services" one
       },
       url: `${baseURL}/healthz`,
       reuseExistingServer: false,

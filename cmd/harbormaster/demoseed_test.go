@@ -67,3 +67,44 @@ func TestDemoSeedOptions_ReviewNeedsTheAgentAndASessionKey(t *testing.T) {
 		})
 	}
 }
+
+// The custom review is seeded only with the agent on, a session key and HM_AGENT_CUSTOM_REVIEWS.
+func TestDemoSeedOptions_CustomReviewNeedsItsSwitch(t *testing.T) {
+	box, err := secretbox.New("dev-session-key", secretbox.PurposeNotifySecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name         string
+		agentURL     string
+		custom       bool
+		wantCustoms  int
+		wantComplete int
+	}{
+		{"switch off", "http://127.0.0.1:8484", false, 0, 1},
+		{"switch on, agent off", "", true, 0, 0},
+		{"switch on", "http://127.0.0.1:8484", true, 1, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			st := storetest.Open(t)
+			cfg := config.Config{AgentURL: tc.agentURL, AgentCustomReviews: tc.custom, BaseURL: "http://127.0.0.1:8480"}
+			if err := devseed.Apply(ctx, st, false, demoSeedOptions(cfg, box)...); err != nil {
+				t.Fatalf("apply: %v", err)
+			}
+			reviews, err := st.ListReviews(ctx)
+			if err != nil || len(reviews) != tc.wantComplete {
+				t.Fatalf("reviews = %+v, %v; want %d", reviews, err, tc.wantComplete)
+			}
+			customs := 0
+			for _, review := range reviews {
+				if review.Type == "custom" {
+					customs++
+				}
+			}
+			if customs != tc.wantCustoms {
+				t.Fatalf("custom reviews = %d, want %d", customs, tc.wantCustoms)
+			}
+		})
+	}
+}

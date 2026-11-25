@@ -53,7 +53,7 @@ test-kv:
 	@echo "export HM_TEST_KV_URLS=redis://127.0.0.1:63791,redis://127.0.0.1:63792"
 
 run:
-	HM_FAKE_AWS=1 $(if $(filter 1,$(HM_AGENT)),HM_AGENT_URL=http://127.0.0.1:8484 )HM_LISTEN=127.0.0.1:8480 HM_COOKIE_SECURE=false HM_SESSION_KEY=dev-session-key HM_DATABASE_URL="$(HM_TEST_DATABASE_URL)" go run ./cmd/harbormaster serve
+	HM_FAKE_AWS=1 $(if $(filter 1,$(HM_AGENT)),HM_AGENT_URL=http://127.0.0.1:8484 HM_AGENT_CUSTOM_REVIEWS=true )HM_LISTEN=127.0.0.1:8480 HM_COOKIE_SECURE=false HM_SESSION_KEY=dev-session-key HM_DATABASE_URL="$(HM_TEST_DATABASE_URL)" go run ./cmd/harbormaster serve
 
 # run-mcp runs the MCP gateway against a local `make run` (Harbormaster on 8480); see README "Run the gateway locally".
 run-mcp:
