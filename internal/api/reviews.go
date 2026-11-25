@@ -17,16 +17,6 @@ const (
 	reviewRunPageSize = 50
 )
 
-// knownReviewType is the closed set of review types this code renders. Any other type is answered as not found for
-// everyone, admins included.
-func knownReviewType(typ string) bool {
-	switch typ {
-	case "cost", "security", "reliability", "capacity":
-		return true
-	}
-	return false
-}
-
 // reviewReader decides who may read a review run. It wraps the phase 2 reader, whose evidence rule it shares, and adds
 // the tags that exist now. It is built for each request and never kept.
 type reviewReader struct {
@@ -62,16 +52,16 @@ func (rd reviewReader) viewableTags() []int64 {
 }
 
 // mayRead applies the read rule of a run: an unknown state or type is for nobody; an admin reads everything else; any
-// other reader needs View on every tag the run covered, as the tags are now. A run that covered no tag, or a tag that
-// is gone, is for admins only.
+// other reader needs View on every tag the run covered, as the tags are now. A test run, a run that covered no tag, or
+// a tag that is gone, is for admins only. The known sets are the ones the list's query uses.
 func (rd reviewReader) mayRead(v store.ReviewRun) bool {
-	if !knownInvestigationState(v.State) || !knownReviewType(v.ReviewType) {
+	if !store.KnownReviewRunState(v.State) || !store.KnownReviewType(v.ReviewType) {
 		return false
 	}
 	if rd.subject.Admin {
 		return true
 	}
-	if len(v.CoveredTags) == 0 {
+	if v.Test || len(v.CoveredTags) == 0 {
 		return false
 	}
 	for _, tag := range v.CoveredTags {

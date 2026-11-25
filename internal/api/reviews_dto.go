@@ -7,7 +7,8 @@ import (
 )
 
 // ReviewRunDTO is one scheduled review run without its evidence. Summary is empty unless the state is done.
-// ReviewID is null once the review itself is deleted.
+// ReviewID is null once the review itself is deleted. It holds nothing of the instructions of a custom review: readers
+// never receive them.
 type ReviewRunDTO struct {
 	ID              int64      `json:"id"`
 	ReviewID        *int64     `json:"review_id"`
@@ -25,6 +26,7 @@ type ReviewRunDTO struct {
 	FinishedAt      *time.Time `json:"finished_at"`
 	Summary         string     `json:"summary"`
 	SummaryReplaced bool       `json:"summary_replaced"`
+	Test            bool       `json:"test"`
 }
 
 // ReviewRunDetailDTO adds the evidence filtered for this reader. EvidenceHidden counts the items the reader may not
@@ -45,7 +47,7 @@ func reviewRunDTO(v store.ReviewRun) ReviewRunDTO {
 	out := ReviewRunDTO{
 		ID: v.ID, ReviewID: v.ReviewID, Name: v.ReviewName, Type: v.ReviewType, Manual: v.Manual, State: v.State, Reason: v.Reason,
 		PeriodLabel: v.PeriodLabel, ScopeLabel: v.ScopeLabel, ServicesTotal: v.ServicesTotal, ScheduledFor: v.ScheduledFor,
-		RequestedAt: v.RequestedAt, StartedAt: v.StartedAt, FinishedAt: v.FinishedAt,
+		RequestedAt: v.RequestedAt, StartedAt: v.StartedAt, FinishedAt: v.FinishedAt, Test: v.Test,
 	}
 	if v.State == store.InvestigationDone {
 		out.Summary, out.SummaryReplaced = v.Summary, v.SummaryReplaced

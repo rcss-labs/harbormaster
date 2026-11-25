@@ -18,6 +18,8 @@ type reviewSeed struct {
 	covered             []authz.TagID
 	requested           time.Time
 	replaced            bool
+	test                bool
+	instructions        string
 }
 
 // seedRun writes a review run row directly, so each test states exactly the row it needs. The review is unlinked.
@@ -39,10 +41,10 @@ func (e *invEnv) seedRun(t *testing.T, s reviewSeed) int64 {
 	var id int64
 	err := e.st.Pool.QueryRow(t.Context(), `insert into agent_review_runs
 		(review_name, review_type, period_key, period_label, scheduled_for, state, summary, summary_replaced, covered_tags,
-		 services_total, scope_label, requested_at, finished_at)
+		 services_total, scope_label, requested_at, finished_at, manual, test, instructions)
 		values ('Weekly cost', $1, 'x:' || gen_random_uuid()::text, 'Week 47', $2::timestamptz, $3::text, $4, $5, $6, 3, 'Everything',
-		 $2::timestamptz, case when $3::text in ('done', 'failed', 'skipped') then $2::timestamptz else null end)
-		returning id`, s.typ, s.requested, s.state, s.summary, s.replaced, covered).Scan(&id)
+		 $2::timestamptz, case when $3::text in ('done', 'failed', 'skipped') then $2::timestamptz else null end, $7, $7, $8)
+		returning id`, s.typ, s.requested, s.state, s.summary, s.replaced, covered, s.test, s.instructions).Scan(&id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +244,7 @@ func TestReviewRun_UnknownStateOrTypeIs404ForEveryone(t *testing.T) {
 	e.dropChecks(t, "agent_review_runs", "state")
 	dev := []authz.TagID{e.tagID(t, "Dev")}
 	badState := e.seedRun(t, reviewSeed{state: "archived", covered: dev, summary: "Findings."})
-	badType := e.seedRun(t, reviewSeed{typ: "custom", covered: dev, summary: "Findings."})
+	badType := e.seedRun(t, reviewSeed{typ: "tailored", covered: dev, summary: "Findings."})
 	good := e.seedRun(t, reviewSeed{covered: dev, summary: "Findings."})
 	reader := e.reader(t, "vera", map[string]authz.ActionSet{"Dev": viewOnly})
 	for name, c := range map[string]*apiClient{"admin": e.sam, "reader": reader} {
@@ -554,5 +556,104 @@ func TestReviewRuns_CursorIsTheLastReadableRunOfThePage(t *testing.T) {
 	}
 	if ids, _ := walkReviewRuns(t, reader, "?limit=2"); !slices.Equal(ids, []int64{r1, r2, r3, r4, r5, r6}) {
 		t.Errorf("walk with limit 2: %v, want every readable run and nothing else", ids)
+	}
+}
+
+// ---- custom reviews and test runs ----
+
+func TestReviewRun_CustomTypeIsReadableByTheReaderRule(t *testing.T) {
+	e := newInvEnv(t)
+	id := e.seedRun(t, reviewSeed{typ: "custom", summary: "Findings.", covered: []authz.TagID{e.tagID(t, "Dev"), e.tagID(t, "Prod")}})
+	one := e.reader(t, "vera", map[string]authz.ActionSet{"Dev": viewOnly})
+	both := e.reader(t, "wade", map[string]authz.ActionSet{"Dev": viewOnly, "Prod": viewOnly})
+	wantNotFound(t, one, runPath(id))
+	if got := listReviewRunsPage(t, one, ""); len(got.Items) != 0 {
+		t.Errorf("reader with one of the tags: list %v, want none", runIDs(got.Items))
+	}
+	for name, c := range map[string]*apiClient{"admin": e.sam, "reader with both tags": both} {
+		if got := getReviewRunDetail(t, c, id); got.Summary != "Findings." || got.Type != "custom" || got.Test {
+			t.Errorf("%s: %+v", name, got)
+		}
+		if got := listReviewRunsPage(t, c, ""); !slices.Equal(runIDs(got.Items), []int64{id}) {
+			t.Errorf("%s: list %v, want [%d]", name, runIDs(got.Items), id)
+		}
+	}
+}
+
+func TestReviewRun_TestRunIsAdminOnly(t *testing.T) {
+	e := newInvEnv(t)
+	dev := []authz.TagID{e.tagID(t, "Dev")}
+	// The rows hold the covered tag, so nothing but the test mark keeps the reader out.
+	test := e.seedRun(t, reviewSeed{summary: "Findings.", covered: dev, test: true})
+	custom := e.seedRun(t, reviewSeed{typ: "custom", summary: "Findings.", covered: dev, test: true})
+	normal := e.seedRun(t, reviewSeed{summary: "Findings.", covered: dev})
+	reader := e.reader(t, "vera", map[string]authz.ActionSet{"Dev": viewOnly, "Prod": viewOnly, "Staging": viewOnly})
+	for _, id := range []int64{test, custom} {
+		wantNotFound(t, reader, runPath(id))
+		if got := getReviewRunDetail(t, e.sam, id); !got.Test || !got.Manual {
+			t.Errorf("admin: %+v, want the test mark", got)
+		}
+	}
+	if got := listReviewRunsPage(t, reader, ""); !slices.Equal(runIDs(got.Items), []int64{normal}) || got.Items[0].Test {
+		t.Errorf("reader: list %+v, want only the normal run %d", got.Items, normal)
+	}
+	marks := map[int64]bool{}
+	for _, item := range listReviewRunsPage(t, e.sam, "").Items {
+		marks[item.ID] = item.Test
+	}
+	if len(marks) != 3 || !marks[test] || !marks[custom] || marks[normal] {
+		t.Errorf("admin: test marks %v", marks)
+	}
+}
+
+func TestReviewRun_ReadBodiesNeverHoldInstructions(t *testing.T) {
+	e := newInvEnv(t)
+	dev := []authz.TagID{e.tagID(t, "Dev")}
+	id := e.seedRun(t, reviewSeed{typ: "custom", summary: "Findings.", covered: dev, instructions: "ZEBRAMARKER look here"})
+	test := e.seedRun(t, reviewSeed{typ: "custom", summary: "Findings.", covered: dev, test: true, instructions: "ZEBRAMARKER look here"})
+	reader := e.reader(t, "vera", map[string]authz.ActionSet{"Dev": viewOnly})
+	check := func(who string, c *apiClient, path string) {
+		t.Helper()
+		status, body := invBody(t, c, path)
+		if status != http.StatusOK || !strings.Contains(body, `"test":`) {
+			t.Errorf("%s: GET %s: status %d body %s, want 200 with the test mark", who, path, status, body)
+		}
+		if strings.Contains(body, "ZEBRAMARKER") || strings.Contains(strings.ToLower(body), "instructions") {
+			t.Errorf("%s: GET %s holds instructions: %s", who, path, body)
+		}
+	}
+	for _, path := range reviewPaths(id) {
+		check("admin", e.sam, path)
+		check("reader", reader, path)
+	}
+	check("admin", e.sam, runPath(test))
+}
+
+func TestReviewRun_UnknownTypeIsStill404ForEveryone(t *testing.T) {
+	e := newInvEnv(t)
+	dev := []authz.TagID{e.tagID(t, "Dev")}
+	known := map[int64]bool{}
+	for _, typ := range []string{"cost", "security", "reliability", "capacity", "custom"} {
+		known[e.seedRun(t, reviewSeed{typ: typ, covered: dev})] = true
+	}
+	unknown := []int64{}
+	for _, typ := range []string{"tailored", "Custom", "custom ", "customs"} {
+		unknown = append(unknown, e.seedRun(t, reviewSeed{typ: typ, covered: dev}))
+	}
+	reader := e.reader(t, "vera", map[string]authz.ActionSet{"Dev": viewOnly})
+	for name, c := range map[string]*apiClient{"admin": e.sam, "reader": reader} {
+		for _, id := range unknown {
+			wantNotFound(t, c, runPath(id))
+		}
+		got := listReviewRunsPage(t, c, "").Items
+		if len(got) != len(known) {
+			t.Errorf("%s: list %v, want the %d runs of a known type", name, runIDs(got), len(known))
+		}
+		for _, item := range got {
+			if !known[item.ID] {
+				t.Errorf("%s: run %d of type %q is listed", name, item.ID, item.Type)
+			}
+			getReviewRunDetail(t, c, item.ID)
+		}
 	}
 }

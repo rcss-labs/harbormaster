@@ -19,10 +19,10 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/store/storetest"
 )
 
-// reviewCatalogue offers fake-1 (a run reserves 0.60 USD) and the reviewer role for three of the four types, listed
+// reviewCatalogue offers fake-1 (a run reserves 0.60 USD) and the reviewer role for three of the four built-in types and custom, listed
 // out of order on purpose.
 const reviewCatalogue = `{"providers":[{"provider":"fake","models":[{"id":"fake-1","input_per_mtok_micro_usd":1000000,"output_per_mtok_micro_usd":3000000,"context_tokens":8000},{"id":"fake-2","input_per_mtok_micro_usd":2000000,"output_per_mtok_micro_usd":6000000,"context_tokens":8000}]}],` +
-	`"roles":["chat","investigator","reviewer","test"],"review_types":["reliability","cost","security"],"limits":{"max_run_tokens":200000,"run_timeout_seconds":300}}`
+	`"roles":["chat","investigator","reviewer","test"],"review_types":["custom","reliability","cost","security"],"limits":{"max_run_tokens":200000,"run_timeout_seconds":300}}`
 
 // reviewsEnv is the notification test server with the agent on, reviews on (24 a day) and a fake agent that serves the
 // catalogue and counts every other request, so a test can prove an endpoint made no model call.
