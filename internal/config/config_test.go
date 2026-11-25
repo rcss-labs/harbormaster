@@ -103,6 +103,7 @@ func TestLoad_Defaults(t *testing.T) {
 		OAuthAccessTTL: time.Hour, AgentRunTokenTTL: 15 * time.Minute,
 		AgentIdentityRatePerSecond: 5, AgentIdentityLogSearchMaxGB: 2, AgentIdentityLogSearchDailyGB: 20,
 		AgentInvestigationWindow: 15 * time.Minute, AgentInvestigationsConcurrent: 2, AgentInvestigationsPerHour: 20, AgentInvestigationMaxWait: 15 * time.Minute,
+		AgentReviewsPerDay: 24, AgentReviewMaxLate: 6 * time.Hour,
 		OAuthClientHosts: []string{"claude.ai"},
 		OAuthRedirectURIs: []string{
 			"https://claude.ai/api/mcp/auth_callback", "https://claude.com/api/mcp/auth_callback",
@@ -1096,5 +1097,37 @@ func TestLoad_AgentIdentityLimitsValidation(t *testing.T) {
 				t.Fatalf("err = %v, want it to name %s", err, tc.key)
 			}
 		})
+	}
+}
+
+func TestLoad_AgentReviewSettings(t *testing.T) {
+	load := func(env map[string]string) (Config, error) {
+		env["HM_DATABASE_URL"] = "postgres://example"
+		return Load(envFromMap(env))
+	}
+	cfg, err := load(map[string]string{})
+	if err != nil || cfg.AgentReviewsPerDay != 24 || cfg.AgentReviewMaxLate != 6*time.Hour {
+		t.Errorf("defaults = %d, %v, %v; want 24 and 6h", cfg.AgentReviewsPerDay, cfg.AgentReviewMaxLate, err)
+	}
+	for _, tc := range []struct {
+		name, raw string
+		valid     bool
+	}{
+		{"HM_AGENT_REVIEWS_PER_DAY", "0", true}, {"HM_AGENT_REVIEWS_PER_DAY", "200", true}, {"HM_AGENT_REVIEWS_PER_DAY", "201", false},
+		{"HM_AGENT_REVIEWS_PER_DAY", "-1", false}, {"HM_AGENT_REVIEWS_PER_DAY", "many", false},
+		{"HM_AGENT_REVIEW_MAX_LATE", "15m", true}, {"HM_AGENT_REVIEW_MAX_LATE", "12h", true}, {"HM_AGENT_REVIEW_MAX_LATE", "14m59s", false},
+		{"HM_AGENT_REVIEW_MAX_LATE", "12h1s", false}, {"HM_AGENT_REVIEW_MAX_LATE", "0", false}, {"HM_AGENT_REVIEW_MAX_LATE", "-6h", false},
+	} {
+		_, err := load(map[string]string{tc.name: tc.raw})
+		if (err == nil) != tc.valid {
+			t.Errorf("%s=%s: err = %v, want valid = %v", tc.name, tc.raw, err, tc.valid)
+		}
+		if err != nil && !strings.Contains(err.Error(), tc.name) {
+			t.Errorf("%s=%s: message %q does not name the variable", tc.name, tc.raw, err)
+		}
+	}
+	cfg, err = load(map[string]string{"HM_AGENT_REVIEWS_PER_DAY": "0", "HM_AGENT_REVIEW_MAX_LATE": "30m"})
+	if err != nil || cfg.AgentReviewsPerDay != 0 || cfg.AgentReviewMaxLate != 30*time.Minute {
+		t.Errorf("overrides = %d, %v, %v; want 0 and 30m", cfg.AgentReviewsPerDay, cfg.AgentReviewMaxLate, err)
 	}
 }

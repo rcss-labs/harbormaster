@@ -201,6 +201,12 @@ func contractShapes() map[string]any {
 		"agentIdentity":   shapeOf(reflect.TypeFor[AgentIdentityDTO]()),
 		// investigations: the list of past ones that sits with the agent settings
 		"agentInvestigations": shapeOf(reflect.TypeFor[AgentInvestigationsDTO]()),
+		// scheduled reviews: the admin definitions, preview, run now and the list of past runs
+		"agentReviews":          shapeOf(reflect.TypeFor[ItemsResponse[ReviewDTO]]()),
+		"agentReview":           shapeOf(reflect.TypeFor[ReviewDTO]()),
+		"agentReviewPreview":    shapeOf(reflect.TypeFor[ReviewPreviewDTO]()),
+		"agentReviewRunStarted": shapeOf(reflect.TypeFor[ReviewRunStartedDTO]()),
+		"agentReviewRuns":       shapeOf(reflect.TypeFor[AgentReviewRunsDTO]()),
 		// AI investigations
 		"investigations": shapeOf(reflect.TypeFor[ItemsResponse[InvestigationDTO]]()),
 		"investigation":  shapeOf(reflect.TypeFor[InvestigationDetailDTO]()),

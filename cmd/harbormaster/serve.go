@@ -428,6 +428,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 			KVHealth:                storeHealth,
 			KickOffHours:            kicks.KickOffHours,
 			KickNotify:              kicks.KickNotify,
+			KickReview:              kicks.KickReview,
 			Focus:                   focusRegistry,
 			Bus:                     kicks.bus,
 			Snap:                    buildSnapshotReader(kvHealth, cfg, st, log),

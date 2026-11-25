@@ -83,6 +83,180 @@
     ],
     "next_cursor": "string"
   },
+  "agentReview": {
+    "enabled": "boolean",
+    "id": "number",
+    "last_run": {
+      "$null": {
+        "finished_at": {
+          "$null": "time"
+        },
+        "id": "number",
+        "reason": "string",
+        "state": "string"
+      }
+    },
+    "name": "string",
+    "next_run_at": {
+      "$null": "time"
+    },
+    "routes": [
+      {
+        "destination": "string",
+        "enabled": "boolean",
+        "id": "number",
+        "name": "string"
+      }
+    ],
+    "schedule": {
+      "at_minute": "number",
+      "cadence": "string",
+      "month_day": {
+        "$null": "number"
+      },
+      "timezone": "string",
+      "weekday": {
+        "$null": "number"
+      }
+    },
+    "scope": [
+      {
+        "account_id": "string",
+        "account_name": "string",
+        "cluster": "string",
+        "cluster_id": "string",
+        "key": "string",
+        "kind": "string",
+        "missing": "boolean",
+        "region": "string",
+        "service": "string",
+        "service_id": "string",
+        "tag_id": "number",
+        "tag_name": "string",
+        "threshold": {
+          "$null": "number"
+        },
+        "value": "string"
+      }
+    ],
+    "type": "string",
+    "version": "number",
+    "worst_case_month_usd": {
+      "$null": "string"
+    }
+  },
+  "agentReviewPreview": {
+    "next_run_at": {
+      "$null": "time"
+    },
+    "services_total": "number",
+    "services_unseen": "number",
+    "worst_case_month_usd": {
+      "$null": "string"
+    }
+  },
+  "agentReviewRunStarted": {
+    "run_id": "number"
+  },
+  "agentReviewRuns": {
+    "items": [
+      {
+        "attempts": "number",
+        "cost_usd": "string",
+        "finished_at": {
+          "$null": "time"
+        },
+        "id": "number",
+        "manual": "boolean",
+        "model": "string",
+        "name": "string",
+        "period_label": "string",
+        "provider": "string",
+        "reason": "string",
+        "requested_at": "time",
+        "review_id": {
+          "$null": "number"
+        },
+        "scheduled_for": "time",
+        "scope_label": "string",
+        "services_total": "number",
+        "started_at": {
+          "$null": "time"
+        },
+        "state": "string",
+        "summary": "string",
+        "summary_replaced": "boolean",
+        "type": "string"
+      }
+    ],
+    "next_cursor": "string"
+  },
+  "agentReviews": {
+    "items": [
+      {
+        "enabled": "boolean",
+        "id": "number",
+        "last_run": {
+          "$null": {
+            "finished_at": {
+              "$null": "time"
+            },
+            "id": "number",
+            "reason": "string",
+            "state": "string"
+          }
+        },
+        "name": "string",
+        "next_run_at": {
+          "$null": "time"
+        },
+        "routes": [
+          {
+            "destination": "string",
+            "enabled": "boolean",
+            "id": "number",
+            "name": "string"
+          }
+        ],
+        "schedule": {
+          "at_minute": "number",
+          "cadence": "string",
+          "month_day": {
+            "$null": "number"
+          },
+          "timezone": "string",
+          "weekday": {
+            "$null": "number"
+          }
+        },
+        "scope": [
+          {
+            "account_id": "string",
+            "account_name": "string",
+            "cluster": "string",
+            "cluster_id": "string",
+            "key": "string",
+            "kind": "string",
+            "missing": "boolean",
+            "region": "string",
+            "service": "string",
+            "service_id": "string",
+            "tag_id": "number",
+            "tag_name": "string",
+            "threshold": {
+              "$null": "number"
+            },
+            "value": "string"
+          }
+        ],
+        "type": "string",
+        "version": "number",
+        "worst_case_month_usd": {
+          "$null": "string"
+        }
+      }
+    ]
+  },
   "agentSettings": {
     "agent_reachable": "boolean",
     "catalogue": {
@@ -117,6 +291,24 @@
       "window_minutes": "number"
     },
     "monthly_budget_usd": "string",
+    "reviews": {
+      "enabled": "boolean",
+      "max_late_minutes": "number",
+      "max_reviews": "number",
+      "per_day": "number",
+      "supported_types": [
+        "string"
+      ],
+      "types": [
+        {
+          "id": "string",
+          "label": "string"
+        }
+      ],
+      "worst_case_run_usd": {
+        "$null": "string"
+      }
+    },
     "role_models": {
       "chat": {
         "$optional": {
@@ -130,6 +322,17 @@
         }
       },
       "investigator": {
+        "$optional": {
+          "$null": {
+            "allowance_below_question": "boolean",
+            "available": "boolean",
+            "max_question_usd": "string",
+            "model": "string",
+            "provider": "string"
+          }
+        }
+      },
+      "reviewer": {
         "$optional": {
           "$null": {
             "allowance_below_question": "boolean",
@@ -2065,6 +2268,11 @@
         "id": "number",
         "note": "string",
         "region": "string",
+        "review_run_id": {
+          "$optional": {
+            "$null": "number"
+          }
+        },
         "route": "string",
         "route_id": {
           "$null": "number"
@@ -2100,6 +2308,11 @@
     "id": "number",
     "note": "string",
     "region": "string",
+    "review_run_id": {
+      "$optional": {
+        "$null": "number"
+      }
+    },
     "route": "string",
     "route_id": {
       "$null": "number"

@@ -883,6 +883,10 @@ func deliveryDTO(d store.NotificationDelivery) NotificationDeliveryDTO {
 		dto.ServiceID = d.Key.ID()
 	}
 	dto.AccountID, dto.Region = d.Key.AccountID, d.Key.Region
+	if d.Details.ReviewRunID > 0 {
+		runID := d.Details.ReviewRunID
+		dto.ReviewRunID = &runID
+	}
 	if d.Key.Cluster != "" {
 		dto.ClusterID = d.Key.ClusterKey.ID()
 	}
