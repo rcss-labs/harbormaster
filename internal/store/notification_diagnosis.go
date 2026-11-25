@@ -3,19 +3,20 @@ package store
 import (
 	"context"
 	"fmt"
-	"sort"
 	"time"
 )
 
 // InsertDiagnosisDelivery plans the diagnosis message of d's route and incident, due at dueAt. It forces the event,
-// seq 0, status pending and no next_attempt_at: the older claim reads next_attempt_at and would render the row as an
-// Opened message. heldUntil is stored for display only (quiet hours are already part of dueAt). It returns false when
-// the route and incident already have a diagnosis row, so a row exists at most once; it is sent at least once.
+// seq 0, status pending, no next_attempt_at, no lease, no result and no attempts: the older claim reads
+// next_attempt_at and would render the row as an Opened message. heldUntil is stored for display only (quiet hours
+// are already part of dueAt). It returns false when the route and incident already have a diagnosis row, so a row
+// exists at most once; it is sent at least once.
 func (s *Store) InsertDiagnosisDelivery(ctx context.Context, d NotificationDelivery, dueAt time.Time, heldUntil *time.Time) (bool, error) {
 	if d.RouteID == nil || d.IncidentID == nil {
 		return false, fmt.Errorf("insert diagnosis delivery: a route and an incident are required")
 	}
 	d.Event, d.Seq, d.Status, d.NextAttemptAt, d.HeldUntil = "diagnosis", 0, "pending", nil, heldUntil
+	d.ClaimedUntil, d.FinishedAt, d.StatusCode, d.DurationMS, d.Attempts = nil, nil, nil, nil, 0
 	tag, err := s.Pool.Exec(ctx, `insert into notification_deliveries
 		(route_id, route_name, destination, target, incident_id, event, seq, severity, alert_title, alert_text,
 		 account_id, region, cluster_name, service_name, kind, status, attempts, next_attempt_at, held_until,
@@ -49,18 +50,5 @@ func (s *Store) ClaimDiagnosisDeliveries(ctx context.Context, now time.Time, lea
 	if err != nil {
 		return nil, fmt.Errorf("claim diagnosis deliveries: %w", err)
 	}
-	defer rows.Close()
-	out := []NotificationDelivery{}
-	for rows.Next() {
-		d, err := scanNotificationDelivery(rows)
-		if err != nil {
-			return nil, fmt.Errorf("claim diagnosis deliveries: %w", err)
-		}
-		out = append(out, d)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out, nil
+	return collectClaimedDeliveries(rows, "claim diagnosis deliveries")
 }

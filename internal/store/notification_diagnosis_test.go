@@ -3,7 +3,7 @@ package store_test
 import (
 	"context"
 	"os"
-	"sync"
+	"reflect"
 	"testing"
 	"time"
 
@@ -134,13 +134,29 @@ func TestOldHeldReleaseNeverTouchesADiagnosisRow(t *testing.T) {
 	if _, err := s.Pool.Exec(ctx, `update notification_deliveries set held_until = $2 where id = $1`, id, past); err != nil {
 		t.Fatal(err)
 	}
-	before := readDiagnosis(t, s, id)
+	before, err := s.GetNotificationDelivery(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := s.ReleaseHeldNotificationDeliveries(ctx, notifyT0, "resolved"); err != nil {
 		t.Fatal(err)
 	}
-	after := readDiagnosis(t, s, id)
-	if after.Status != "pending" || after.Next != nil || before.Status != after.Status {
-		t.Fatalf("after release = %+v, want unchanged pending with no next_attempt_at", after)
+	after, err := s.GetNotificationDelivery(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, after) || after.Status != "pending" || after.NextAttemptAt != nil {
+		t.Fatalf("after release = %+v, want exactly the row it was (%+v)", after, before)
+	}
+	// The incident resolving does not make the older release cancel it either.
+	if _, err := s.Pool.Exec(ctx, `update notification_incidents set resolved_at = $2 where id = $1`, incident.ID, notifyT0); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReleaseHeldNotificationDeliveries(ctx, notifyT0, "resolved"); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := s.GetNotificationDelivery(ctx, id); !reflect.DeepEqual(before, again) {
+		t.Fatalf("after release on a resolved incident = %+v, want exactly the row it was", again)
 	}
 }
 
@@ -213,44 +229,97 @@ func TestClaimDiagnosis_RespectsBusyRoutesAndPerRouteCap(t *testing.T) {
 	}
 }
 
+// TestClaimDiagnosis_TwoClaimersTakeARowOnce makes the overlap certain. The slow claimer's comparisons of
+// timestamps sleep (a test-only operator that shadows the built-in one, found first through its search path), so
+// its ranking snapshot is taken before the fast claimer takes the row and commits. The slow claimer then reaches the
+// row after the lease is set; only the re-check on the locked row keeps it from taking the row a second time.
 func TestClaimDiagnosis_TwoClaimersTakeARowOnce(t *testing.T) {
-	s := storetest.Open(t)
-	incident, route := seedIncidentAndRoute(t, s)
-	mustInsertDiagnosis(t, s, diagnosisDelivery(route, incident), notifyT0)
-	var wg sync.WaitGroup
-	counts := make(chan int, 8)
-	for range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			rows, err := s.ClaimDiagnosisDeliveries(context.Background(), notifyT0, time.Minute, store.ClaimFilter{Limit: 5})
-			if err != nil {
-				t.Error(err)
-			}
-			counts <- len(rows)
-		}()
+	fast := storetest.Open(t)
+	ctx := context.Background()
+	incident, route := seedIncidentAndRoute(t, fast)
+	mustInsertDiagnosis(t, fast, diagnosisDelivery(route, incident), notifyT0)
+	var schema string
+	if err := fast.Pool.QueryRow(ctx, `select current_schema()`).Scan(&schema); err != nil {
+		t.Fatal(err)
 	}
-	wg.Wait()
-	close(counts)
-	total := 0
-	for n := range counts {
-		total += n
+	for _, stmt := range []string{
+		`create function slow_le(a timestamptz, b timestamptz) returns bool language plpgsql as $$
+			begin
+				if current_setting('hm.slow', true) = 'on' then perform pg_sleep(0.6); end if;
+				return not (a > b);
+			end $$`,
+		`create operator <= (leftarg = timestamptz, rightarg = timestamptz, function = slow_le)`,
+	} {
+		if _, err := fast.Pool.Exec(ctx, stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
 	}
-	if total != 1 {
-		t.Fatalf("rows claimed across claimers = %d, want exactly 1", total)
+	slow, err := store.OpenWithParams(ctx, os.Getenv("HM_TEST_DATABASE_URL"), map[string]string{"search_path": schema + ", pg_catalog", "hm.slow": "on"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer slow.Close()
+
+	type result struct {
+		rows []store.NotificationDelivery
+		err  error
+	}
+	slowDone := make(chan result, 1)
+	go func() {
+		rows, err := slow.ClaimDiagnosisDeliveries(ctx, notifyT0, time.Minute, store.ClaimFilter{Limit: 5})
+		slowDone <- result{rows, err}
+	}()
+	time.Sleep(150 * time.Millisecond) // the slow claimer is now inside its first sleeping comparison
+	fastRows, err := fast.ClaimDiagnosisDeliveries(ctx, notifyT0, time.Minute, store.ClaimFilter{Limit: 5})
+	if err != nil || len(fastRows) != 1 {
+		t.Fatalf("fast claim = %+v, %v, want the row", fastRows, err)
+	}
+	got := <-slowDone
+	if got.err != nil || len(got.rows) != 0 {
+		t.Fatalf("slow claim = %+v, %v, want nothing: the row was already taken", got.rows, got.err)
 	}
 }
 
-// claimOneDiagnosis inserts and claims a diagnosis row, returning its id and lease.
+func TestClaimDiagnosis_LimitTakesTheEarliestDue(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	route, err := s.CreateNotificationRoute(ctx, newRoute("a"), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setAlerts(t, s, notifyAlert("s1", "service_failing", model.AlertDanger), notifyAlert("s2", "service_failing", model.AlertDanger),
+		notifyAlert("s3", "service_failing", model.AlertDanger))
+	incidents, _ := syncIncidents(t, s, notifyT0)
+	dueByIncident := map[int64]time.Time{}
+	// Inserted latest first, so id order and due order disagree.
+	for i, in := range incidents {
+		due := notifyT0.Add(time.Duration(len(incidents)-i) * time.Minute)
+		mustInsertDiagnosis(t, s, diagnosisDelivery(route, in), due)
+		dueByIncident[in.ID] = due
+	}
+	rows, err := s.ClaimDiagnosisDeliveries(ctx, notifyT0.Add(time.Hour), time.Minute, store.ClaimFilter{Limit: 2})
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("claim = %d rows, %v, want 2", len(rows), err)
+	}
+	for _, r := range rows {
+		if due := dueByIncident[*r.IncidentID]; due.After(notifyT0.Add(2 * time.Minute)) {
+			t.Errorf("claimed a row due at +%v, want only the two earliest (due +1m and +2m)", due.Sub(notifyT0))
+		}
+	}
+}
+
+// claimOneDiagnosis inserts a diagnosis row and leases it directly in SQL, so the tests that use it do not depend on
+// ClaimDiagnosisDeliveries; it returns the row id and the lease.
 func claimOneDiagnosis(t *testing.T, s *store.Store) (int64, *time.Time) {
 	t.Helper()
 	incident, route := seedIncidentAndRoute(t, s)
 	id := mustInsertDiagnosis(t, s, diagnosisDelivery(route, incident), notifyT0)
-	rows, err := s.ClaimDiagnosisDeliveries(context.Background(), notifyT0, time.Minute, store.ClaimFilter{Limit: 5})
-	if err != nil || len(rows) != 1 {
-		t.Fatalf("claim = %+v, %v", rows, err)
+	var lease time.Time
+	if err := s.Pool.QueryRow(context.Background(), `update notification_deliveries set claimed_until = $2 where id = $1
+		returning claimed_until`, id, notifyT0.Add(time.Minute)).Scan(&lease); err != nil {
+		t.Fatal(err)
 	}
-	return id, rows[0].ClaimedUntil
+	return id, &lease
 }
 
 func TestFinish_DiagnosisRetryUsesItsOwnColumn(t *testing.T) {
@@ -345,16 +414,15 @@ func TestCancelUnsent_CancelsPendingDiagnosis(t *testing.T) {
 
 func TestCancelUnsent_LeavesAClaimedDiagnosisToFinish(t *testing.T) {
 	s := storetest.Open(t)
-	incident, route := seedIncidentAndRoute(t, s)
-	mustInsertDiagnosis(t, s, diagnosisDelivery(route, incident), notifyT0)
-	rows, err := s.ClaimDiagnosisDeliveries(context.Background(), notifyT0, time.Minute, store.ClaimFilter{Limit: 5})
-	if err != nil || len(rows) != 1 {
-		t.Fatalf("claim = %+v, %v", rows, err)
-	}
-	if err := s.CancelUnsentNotificationDeliveries(context.Background(), []int64{incident.ID}, "p", "h", notifyT0); err != nil {
+	id, _ := claimOneDiagnosis(t, s)
+	var incidentID int64
+	if err := s.Pool.QueryRow(context.Background(), `select incident_id from notification_deliveries where id = $1`, id).Scan(&incidentID); err != nil {
 		t.Fatal(err)
 	}
-	if st := readDiagnosis(t, s, rows[0].ID); st.Status != "pending" || st.Claimed == nil {
+	if err := s.CancelUnsentNotificationDeliveries(context.Background(), []int64{incidentID}, "p", "h", notifyT0); err != nil {
+		t.Fatal(err)
+	}
+	if st := readDiagnosis(t, s, id); st.Status != "pending" || st.Claimed == nil {
 		t.Fatalf("claimed row = %+v, want left pending under its lease", st)
 	}
 }
@@ -441,5 +509,116 @@ func TestMigration0220_KeepsExistingRowsAndOldEventsInsert(t *testing.T) {
 	}
 	if ok, err := s.InsertDiagnosisDelivery(ctx, diagnosisDelivery(route, incident), notifyT0, nil); err != nil || !ok {
 		t.Fatalf("diagnosis insert after the migration = %v, %v", ok, err)
+	}
+}
+
+func TestInsertDiagnosis_RefusesAMissingRouteOrIncident(t *testing.T) {
+	s := storetest.Open(t)
+	incident, route := seedIncidentAndRoute(t, s)
+	noRoute, noIncident := diagnosisDelivery(route, incident), diagnosisDelivery(route, incident)
+	noRoute.RouteID, noIncident.IncidentID = nil, nil
+	for name, d := range map[string]store.NotificationDelivery{"no route": noRoute, "no incident": noIncident} {
+		if ok, err := s.InsertDiagnosisDelivery(context.Background(), d, notifyT0, nil); err == nil || ok {
+			t.Errorf("%s: insert = %v, %v, want an error (a row without both ids would escape the unique key)", name, ok, err)
+		}
+	}
+	var n int
+	if err := s.Pool.QueryRow(context.Background(), `select count(*) from notification_deliveries`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("rows = %d, %v, want none", n, err)
+	}
+}
+
+func TestInsertDiagnosis_IgnoresLeaseResultAndAttemptsFromTheCaller(t *testing.T) {
+	s := storetest.Open(t)
+	incident, route := seedIncidentAndRoute(t, s)
+	d := diagnosisDelivery(route, incident)
+	lease, finished, code, ms := notifyT0.Add(time.Hour), notifyT0, 200, 12
+	d.ClaimedUntil, d.FinishedAt, d.StatusCode, d.DurationMS, d.Attempts = &lease, &finished, &code, &ms, 4
+	id := mustInsertDiagnosis(t, s, d, notifyT0)
+	got, err := s.GetNotificationDelivery(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ClaimedUntil != nil || got.FinishedAt != nil || got.StatusCode != nil || got.DurationMS != nil || got.Attempts != 0 {
+		t.Fatalf("row = %+v, want no lease, result or attempts (a lease would hide the row from its first claim)", got)
+	}
+}
+
+func TestSummary_FailedDiagnosisNeverMakesARouteFailing(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	incident, route := seedIncidentAndRoute(t, s)
+	for seq := 1; seq <= 2; seq++ {
+		d := delivery(route, incident, "repeat", seq)
+		d.Status, d.NextAttemptAt = "failed", nil
+		d.CreatedAt = notifyT0.Add(time.Duration(seq) * time.Minute)
+		mustPlan(t, s, d)
+	}
+	diag := diagnosisDelivery(route, incident)
+	diag.CreatedAt = notifyT0.Add(10 * time.Minute)
+	id := mustInsertDiagnosis(t, s, diag, notifyT0)
+	if _, err := s.Pool.Exec(ctx, `update notification_deliveries set status = 'failed' where id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	sum, err := s.NotificationSummary(ctx, notifyT0.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sum.FailingRouteIDs) != 0 {
+		t.Fatalf("failing routes = %v, want none: two failed alerts and one failed diagnosis are not three failed alerts", sum.FailingRouteIDs)
+	}
+	if sum.Failed24h != 2 {
+		t.Fatalf("Failed24h = %d, want 2 (the failed diagnosis is not counted)", sum.Failed24h)
+	}
+}
+
+func TestSummary_DeliveredDiagnosisDoesNotHideAFailingRoute(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	incident, route := seedIncidentAndRoute(t, s)
+	for seq := 1; seq <= 3; seq++ {
+		d := delivery(route, incident, "repeat", seq)
+		d.Status, d.NextAttemptAt = "failed", nil
+		d.CreatedAt = notifyT0.Add(time.Duration(seq) * time.Minute)
+		mustPlan(t, s, d)
+	}
+	diag := diagnosisDelivery(route, incident)
+	diag.CreatedAt = notifyT0.Add(10 * time.Minute) // newer than the three failures
+	id := mustInsertDiagnosis(t, s, diag, notifyT0)
+	if _, err := s.Pool.Exec(ctx, `update notification_deliveries set status = 'delivered', finished_at = $2 where id = $1`, id, notifyT0); err != nil {
+		t.Fatal(err)
+	}
+	sum, err := s.NotificationSummary(ctx, notifyT0.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sum.FailingRouteIDs) != 1 || sum.FailingRouteIDs[0] != route.ID || sum.Failed24h != 3 {
+		t.Fatalf("summary = %+v, want the route failing and 3 failed alerts: a delivered diagnosis is not an alert delivery", sum)
+	}
+}
+
+func TestExpireStaleTests_LeavesAClaimedDiagnosisAlone(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	id, _ := claimOneDiagnosis(t, s) // pending, no next_attempt_at, lease set: the shape of an abandoned test row
+	n, err := s.ExpireStaleNotificationTests(ctx, notifyT0.Add(time.Hour))
+	if err != nil || n != 0 {
+		t.Fatalf("expired = %d, %v, want 0", n, err)
+	}
+	if st := readDiagnosis(t, s, id); st.Status != "pending" {
+		t.Fatalf("status = %s, want pending: the lease expiring means reclaim, not failure", st.Status)
+	}
+}
+
+func TestMaxRenderedGeneration_IgnoresADeliveredDiagnosis(t *testing.T) {
+	s := storetest.Open(t)
+	ctx := context.Background()
+	incident, route := seedIncidentAndRoute(t, s)
+	id := mustInsertDiagnosis(t, s, diagnosisDelivery(route, incident), notifyT0)
+	if _, err := s.Pool.Exec(ctx, `update notification_deliveries set status = 'delivered', details = '{"generation": 9}' where id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	if g, err := s.MaxRenderedGeneration(ctx, route.ID, incident.ID); err != nil || g != 0 {
+		t.Fatalf("generation = %d, %v, want 0: a diagnosis message shows no group generation", g, err)
 	}
 }

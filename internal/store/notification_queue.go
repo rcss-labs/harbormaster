@@ -511,12 +511,17 @@ func (s *Store) ClaimNotificationDeliveries(ctx context.Context, now time.Time, 
 	if err != nil {
 		return nil, fmt.Errorf("claim notification deliveries: %w", err)
 	}
+	return collectClaimedDeliveries(rows, "claim notification deliveries")
+}
+
+// collectClaimedDeliveries reads the rows a claim returned, ordered by id; what names the claim in errors.
+func collectClaimedDeliveries(rows pgx.Rows, what string) ([]NotificationDelivery, error) {
 	defer rows.Close()
 	out := []NotificationDelivery{}
 	for rows.Next() {
 		d, err := scanNotificationDelivery(rows)
 		if err != nil {
-			return nil, fmt.Errorf("claim notification deliveries: %w", err)
+			return nil, fmt.Errorf("%s: %w", what, err)
 		}
 		out = append(out, d)
 	}
@@ -784,21 +789,21 @@ func (s *Store) ListNotificationDeliveries(ctx context.Context, f DeliveryFilter
 
 // NotificationSummary feeds the failed-deliveries banner and the Settings badge.
 type NotificationSummary struct {
-	Failed24h       int     // failed deliveries (tests included) created in the last 24 hours
-	FailingRouteIDs []int64 // routes whose last 3 non-test finished deliveries all failed
+	Failed24h       int     // failed deliveries (tests included, diagnosis messages not) created in the last 24 hours
+	FailingRouteIDs []int64 // routes whose last 3 finished alert deliveries (not tests, not diagnosis messages) all failed
 }
 
 // NotificationSummary counts recent failures and finds the routes that keep failing.
 func (s *Store) NotificationSummary(ctx context.Context, now time.Time) (NotificationSummary, error) {
 	var sum NotificationSummary
-	if err := s.Pool.QueryRow(ctx, `select count(*) from notification_deliveries where status = 'failed' and created_at >= $1`,
+	if err := s.Pool.QueryRow(ctx, `select count(*) from notification_deliveries where status = 'failed' and event <> 'diagnosis' and created_at >= $1`,
 		now.Add(-24*time.Hour)).Scan(&sum.Failed24h); err != nil {
 		return NotificationSummary{}, fmt.Errorf("notification summary: %w", err)
 	}
 	rows, err := s.Pool.Query(ctx, `select route_id from (
 			select route_id, status, row_number() over (partition by route_id order by created_at desc, id desc) as n
 			from notification_deliveries
-			where route_id is not null and event <> 'test' and status in ('delivered', 'failed')
+			where route_id is not null and event not in ('test', 'diagnosis') and status in ('delivered', 'failed')
 		) last_three where n <= 3 group by route_id having count(*) = 3 and bool_and(status = 'failed') order by route_id`)
 	if err != nil {
 		return NotificationSummary{}, fmt.Errorf("notification summary: %w", err)
