@@ -145,6 +145,7 @@ type fakeAgent struct {
 
 	mu              sync.Mutex
 	calls           []agentclient.RunRequest
+	bodies          []string // the calls as they came
 	script          func(c *call)
 	roles           []string
 	reviewTypes     []string
@@ -159,7 +160,7 @@ type fakeAgent struct {
 }
 
 func newFakeAgent(t *testing.T) *fakeAgent {
-	a := &fakeAgent{roles: []string{"chat", "investigator", "reviewer", "test"}, reviewTypes: []string{"cost", "security", "reliability", "capacity"}, models: []string{testModel}, catalogueStatus: http.StatusOK, runTimeout: time.Minute, maxRunTokens: 200_000, outputPrice: 15_000_000}
+	a := &fakeAgent{roles: []string{"chat", "investigator", "reviewer", "test"}, reviewTypes: []string{"cost", "security", "reliability", "capacity", "custom"}, models: []string{testModel}, catalogueStatus: http.StatusOK, runTimeout: time.Minute, maxRunTokens: 200_000, outputPrice: 15_000_000}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/catalogue", func(w http.ResponseWriter, r *http.Request) {
 		if a.onCatalogue != nil {
@@ -188,7 +189,7 @@ func newFakeAgent(t *testing.T) *fakeAgent {
 			return
 		}
 		a.mu.Lock()
-		a.calls = append(a.calls, body)
+		a.calls, a.bodies = append(a.calls, body), append(a.bodies, string(raw))
 		c := &call{n: len(a.calls), w: w, r: r, body: body}
 		script := a.script
 		a.active++
@@ -229,6 +230,12 @@ func (a *fakeAgent) count() int {
 	return len(a.calls)
 }
 
+func (a *fakeAgent) body(i int) string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.bodies[i]
+}
+
 func (a *fakeAgent) call(i int) agentclient.RunRequest {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -243,7 +250,7 @@ func refusal(raw []byte) string {
 			Kind    string          `json:"kind"`
 			Subject json.RawMessage `json:"subject"`
 			Alert   json.RawMessage `json:"alert"`
-			Review  *struct{ Type, Range, Period string }
+			Review  *struct{ Type, Range, Period, Instructions string }
 			Scope   *struct {
 				Entries       []map[string]string `json:"entries"`
 				ServicesTotal int                 `json:"services_total"`
@@ -261,8 +268,13 @@ func refusal(raw []byte) string {
 		return "not a review task"
 	case task.Review == nil || task.Scope == nil:
 		return "review and scope are needed"
-	case !slices.Contains([]string{"cost", "security", "reliability", "capacity"}, task.Review.Type):
+	case !slices.Contains([]string{"cost", "security", "reliability", "capacity", "custom"}, task.Review.Type):
 		return "type " + task.Review.Type
+	case task.Review.Type != "custom" && task.Review.Instructions != "":
+		return "instructions of a built-in type"
+	case task.Review.Type == "custom" && (agentresult.CheckInstructions(task.Review.Instructions) != agentresult.InstructionsOK ||
+		agentresult.CleanInstructions(task.Review.Instructions) != task.Review.Instructions):
+		return "instructions"
 	case !slices.Contains([]string{"24h", "7d", "30d"}, task.Review.Range):
 		return "range " + task.Review.Range
 	case !regexp.MustCompile(`^[A-Za-z0-9 ,.:()-]{1,80}$`).MatchString(task.Review.Period):
