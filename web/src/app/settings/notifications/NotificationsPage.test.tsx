@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { NotificationPreviewRequest, NotificationRouteInput } from '../../../api/notifications'
 import { ME_ADMIN, ME_OMER } from '../../../test/fixtures'
 import { server } from '../../../test/msw'
@@ -554,6 +554,10 @@ describe('NotificationsPage delivery log', () => {
   })
 
   it('reads a pending diagnosis with a future release time as held', async () => {
+    // Only Date is faked: an hour from late evening would cross midnight and add the date to the label.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 10, 26, 12, 0))
+    onTestFinished(() => vi.useRealTimers())
     const until = new Date(Date.now() + 3_600_000)
     const pad = (n: number) => String(n).padStart(2, '0')
     server.use(
