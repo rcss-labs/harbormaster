@@ -557,7 +557,7 @@ describe('NotificationsPage delivery log', () => {
     // Only Date is faked: an hour from late evening would cross midnight and add the date to the label.
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date(2026, 10, 26, 12, 0))
-    onTestFinished(() => vi.useRealTimers())
+    onTestFinished(() => { vi.useRealTimers() })
     const until = new Date(Date.now() + 3_600_000)
     const pad = (n: number) => String(n).padStart(2, '0')
     server.use(
