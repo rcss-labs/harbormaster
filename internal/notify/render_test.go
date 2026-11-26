@@ -426,3 +426,61 @@ func TestSlackBody_UpdateHeadline(t *testing.T) {
 		t.Errorf("email subject = %q", subject)
 	}
 }
+
+// The top-level text is what Slack shows in push notifications and plain-text clients; it is parsed for mentions and
+// links like the blocks are, so it must be escaped the same way.
+func TestSlackBody_FallbackTextIsEscaped(t *testing.T) {
+	for _, event := range []Event{EventOpened, EventRepeat, EventUpdate, EventResolved, EventTest} {
+		m := testMessage(event)
+		m.Subject.Title = "<!channel> <@U1> a & b <https://evil|x>"
+		body, err := SlackBody(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded struct {
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(body, &decoded); err != nil {
+			t.Fatal(err)
+		}
+		if event == EventTest {
+			// The test message has a fixed headline and carries no alert title.
+			if decoded.Text != "Test message from Harbormaster" {
+				t.Errorf("test: fallback text = %q", decoded.Text)
+			}
+			continue
+		}
+		for _, bad := range []string{"<!channel>", "<@U1>", "<https://evil|x>"} {
+			if strings.Contains(decoded.Text, bad) {
+				t.Errorf("%s: fallback text %q contains the unescaped %q", event, decoded.Text, bad)
+			}
+		}
+		if !strings.Contains(decoded.Text, "&lt;!channel&gt; &lt;@U1&gt; a &amp; b &lt;https://evil|x&gt;") {
+			t.Errorf("%s: fallback text = %q, want the escaped title", event, decoded.Text)
+		}
+	}
+}
+
+// Only Slack parses the headline as markup; every other destination keeps the raw title.
+func TestOtherDestinationsKeepTheRawTitle(t *testing.T) {
+	m := testMessage(EventOpened)
+	m.Subject.Title = "a & <b>"
+	pd, err := PagerDutyBody(m, "key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var event struct {
+		Payload struct {
+			Summary string `json:"summary"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(pd, &event); err != nil {
+		t.Fatal(err)
+	}
+	if event.Payload.Summary != "a & <b>" {
+		t.Errorf("pagerduty summary = %q, want the raw title", event.Payload.Summary)
+	}
+	if got := m.plainHeadline(); got != "a & <b>" {
+		t.Errorf("plainHeadline = %q, want the raw title", got)
+	}
+}
