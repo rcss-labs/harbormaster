@@ -1,0 +1,1 @@
+GO-2026-6909 fixture: the advisory recorded in accepted-only.json

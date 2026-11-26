@@ -207,17 +207,25 @@ func TestDegraded_StoreCutMidRun(t *testing.T) {
 			within(t, 60*time.Second, "harbormaster_kv_up 1", func() bool {
 				return metricSum(scrapeMetrics(t, base), "harbormaster_kv_up") == 1
 			})
+			// Focus answers 404 for a service the first poll has not written yet, so wait for the service page first.
+			within(t, 30*time.Second, "a polled service page", func() bool {
+				status, _ := me.send(http.MethodGet, "/api/services/"+degradedServiceID, nil)
+				return status == http.StatusOK
+			})
 			me.focus(true)
 			var before focusAnswer
 			within(t, 30*time.Second, "a live focus with a read time", func() bool {
 				before = me.focus(false)
 				return before.State == "live" && before.RefreshedAt != nil
 			})
-			within(t, 30*time.Second, "a polled service page", func() bool {
-				status, _ := me.send(http.MethodGet, "/api/services/"+degradedServiceID, nil)
-				return status == http.StatusOK
+			// The baseline must not move on its own: a deployment the first poll saw in flight is finished by a later poll,
+			// which would change the page after the cut and read as the store down altering it.
+			var serviceBefore string
+			within(t, 30*time.Second, "the service's deployment history settled", func() bool {
+				var status int
+				status, serviceBefore = me.send(http.MethodGet, "/api/services/"+degradedServiceID, nil)
+				return status == http.StatusOK && deploymentsFinished(serviceBefore)
 			})
-			_, serviceBefore := me.send(http.MethodGet, "/api/services/"+degradedServiceID, nil)
 			_, clusterBefore := me.send(http.MethodGet, "/api/clusters/"+degradedClusterID, nil)
 			servicesTierBefore := lastOK(t, conn, "services")
 
@@ -351,4 +359,26 @@ func degradedRoute(base string) map[string]any {
 		"min_severity": "warning", "kinds": kinds, "repeat_seconds": 0, "quiet_enabled": false, "quiet_timezone": "UTC",
 		"notify_resolved": false, "scope": []any{}, "fallback": false,
 	}
+}
+
+// deploymentsFinished reports whether a service page's history has at least one deployment and every one has its
+// outcome recorded; an empty history is a page read before the history was written, not a settled one.
+func deploymentsFinished(page string) bool {
+	var out struct {
+		Deployments []struct {
+			Outcome string `json:"outcome"`
+		} `json:"deployments_14d"`
+	}
+	if err := json.Unmarshal([]byte(page), &out); err != nil {
+		return false
+	}
+	if len(out.Deployments) == 0 {
+		return false
+	}
+	for _, d := range out.Deployments {
+		if d.Outcome == "" {
+			return false
+		}
+	}
+	return true
 }

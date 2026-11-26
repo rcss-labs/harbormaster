@@ -106,7 +106,7 @@ func SlackBody(m Message) ([]byte, error) {
 	}
 	context := slackEscape.Replace(m.where()) + " · <" + m.Link() + "|Open in Harbormaster>"
 	return json.Marshal(map[string]any{
-		"text": m.plainHeadline(),
+		"text": slackEscape.Replace(m.plainHeadline()),
 		"blocks": []any{
 			map[string]any{"type": "section", "text": map[string]any{"type": "mrkdwn", "text": section}},
 			map[string]any{"type": "context", "elements": []any{map[string]any{"type": "mrkdwn", "text": context}}},
