@@ -60,6 +60,48 @@ export interface MeDTO {
   break_glass: boolean
   email: string | null
   display_name: string | null
+  /** The agent service is configured on this server. Absent on servers without it. */
+  agent_enabled?: boolean
+  /** This user may use the agent chat. */
+  ai_chat?: boolean
+  /** Scheduled AI reviews are on: the agent is enabled and reviews are not turned off. It decides about the navigation
+   *  entry; stored results need only `agent_enabled`. Absent on older servers. */
+  reviews_enabled?: boolean
+}
+
+// ---- Agent chat ----
+
+export interface AgentStatusDTO {
+  enabled: boolean
+  can_chat: boolean
+  model_configured: boolean
+  budget_exhausted: boolean
+  /** The agent answered its catalogue call just now; absent on older servers. */
+  agent_reachable?: boolean
+}
+export interface AgentConversationSummaryDTO {
+  id: number
+  title: string
+  updated_at: string
+}
+export interface AgentMessageDTO {
+  id: number
+  role: 'user' | 'assistant'
+  text: string
+  tools: string[]
+  interrupted: boolean
+  created_at: string
+}
+export interface AgentConversationDTO {
+  id: number
+  title: string
+  messages: AgentMessageDTO[]
+}
+/** What the user is looking at; the server uses it to ground the question. */
+export interface AgentPageContext {
+  path: string
+  service_id?: string
+  cluster_id?: string
 }
 
 // ---- Shared ----
@@ -445,6 +487,8 @@ export interface UserDTO {
   display_name: string | null
   /** Unexpired personal access tokens; absent while tokens are off (HM_API_TOKENS=false). */
   token_count?: number
+  /** The user may use the agent chat. */
+  ai_chat: boolean
 }
 export interface UsersDTO {
   items: UserDTO[]
@@ -689,6 +733,14 @@ export interface AlertDTO {
   next_step: AlertStepDTO
   /** The newest change just before the alert; null when unknown, never guessed. */
   just_before: AlertChangeDTO | null
+  /** The investigation of this alert's incident. Only for session callers on a server with the agent; absent or null otherwise. */
+  investigation?: AlertInvestigationDTO | null
+}
+/** The alert's own link to its investigation. */
+export interface AlertInvestigationDTO {
+  id: number
+  state: string
+  reason: string
 }
 export interface AlertStepDTO {
   label: string

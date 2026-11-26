@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/rcss-labs/harbormaster/internal/hmtools"
 )
 
 // unavailableMessage is the only thing the model learns about a transport
@@ -31,7 +32,7 @@ func tooLargeResult(size int) *mcp.CallToolResult {
 
 // upstreamErrorResult maps a non-2xx, non-401 upstream answer to a tool error
 // (design, "Mapping"). 401 is handled by the caller: it becomes HTTP 401.
-func upstreamErrorResult(resp Response) *mcp.CallToolResult {
+func upstreamErrorResult(resp hmtools.Response) *mcp.CallToolResult {
 	if resp.Status >= 500 || (resp.Status >= 300 && resp.Status < 400) {
 		return toolError(unavailableMessage)
 	}

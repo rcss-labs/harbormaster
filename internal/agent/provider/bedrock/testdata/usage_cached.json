@@ -1,0 +1,6 @@
+[
+  {"type": "messageStart", "payload": {"role": "assistant"}},
+  {"type": "contentBlockDelta", "payload": {"contentBlockIndex": 0, "delta": {"text": "ok"}}},
+  {"type": "messageStop", "payload": {"stopReason": "end_turn"}},
+  {"type": "metadata", "payload": {"usage": {"inputTokens": 10, "outputTokens": 5, "totalTokens": 135, "cacheReadInputTokens": 100, "cacheWriteInputTokens": 20}, "metrics": {"latencyMs": 1}}}
+]

@@ -61,10 +61,11 @@ func runCreateAdmin(ctx context.Context, args []string, getenv func(string) stri
 	}
 	defer st.Close()
 
-	if _, err := st.GetUserByUsername(ctx, *username); err == nil {
-		return fmt.Errorf("%w: %s", errUserExists, *username)
-	} else if !errors.Is(err, store.ErrNotFound) {
+	// Any kind of user holds a name: GetUserByUsername finds humans only.
+	if taken, err := st.UsernameTaken(ctx, *username); err != nil {
 		return err
+	} else if taken {
+		return fmt.Errorf("%w: %s", errUserExists, *username)
 	}
 	hash, err := auth.HashPassword(password)
 	if err != nil {

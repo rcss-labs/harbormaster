@@ -246,3 +246,31 @@ func TestNotificationRoute_AWSSelectorKeepsAnEmptyValue(t *testing.T) {
 		t.Fatalf("scope = %+v err=%v, want the env tag with an empty value", created.Scope, err)
 	}
 }
+
+func TestRouteInvestigateRoundTrips(t *testing.T) {
+	s, ctx := storetest.Open(t), context.Background()
+	in := newRoute("Inv")
+	in.Investigate = true
+	created, err := s.CreateNotificationRoute(ctx, in, 0)
+	if err != nil || !created.Investigate {
+		t.Fatalf("created = %+v, %v; want the switch on", created, err)
+	}
+	got, err := s.GetNotificationRoute(ctx, created.ID)
+	if err != nil || !got.Investigate {
+		t.Fatalf("get = %+v, %v; want the switch on", got, err)
+	}
+	list, err := s.ListNotificationRoutes(ctx)
+	if err != nil || len(list) != 1 || !list[0].Investigate {
+		t.Fatalf("list = %+v, %v", list, err)
+	}
+	stale := got
+	got.Investigate = false
+	updated, err := s.UpdateNotificationRoute(ctx, got, 0)
+	if err != nil || updated.Investigate || updated.Version != 2 {
+		t.Fatalf("updated = %+v, %v; want the switch off at version 2", updated, err)
+	}
+	stale.Investigate = true
+	if _, err := s.UpdateNotificationRoute(ctx, stale, 0); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("stale update = %v, want ErrConflict", err)
+	}
+}

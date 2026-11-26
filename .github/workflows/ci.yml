@@ -34,10 +34,16 @@ jobs:
       - run: npm --prefix web ci
       - run: make lint
 
-  go-test:
-    name: go-test
+  # internal/api runs its tests one after another and alone nears the 30-minute go test limit, so it is split
+  # into three parts by test name (tools/go-test-part.sh); "rest" is every other package.
+  go-test-part:
+    name: go-test (${{ matrix.part }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [rest, api-0, api-1, api-2]
     # Image tags must match `make test-db` and tools/kv-images.txt; the first step fails if they drift.
     services:
       postgres:
@@ -76,7 +82,20 @@ jobs:
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
-      - run: go test -timeout 30m ./...
+      - name: Check the parts cover every test once
+        if: matrix.part == 'rest'
+        run: tools/go-test-part_test.sh
+      - run: tools/go-test-part.sh ${{ matrix.part }}
+
+  # The required check: passes only when every part passed.
+  go-test:
+    name: go-test
+    needs: go-test-part
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: test "${{ needs.go-test-part.result }}" = success
 
   web-test:
     name: web-test
@@ -153,7 +172,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: make ARCH=amd64 image check-image scanner-image check-scanner-image mcp-image check-mcp-image
+      - run: make ARCH=amd64 image check-image scanner-image check-scanner-image mcp-image check-mcp-image agent-image check-agent-image
 
   vulncheck:
     name: vulncheck

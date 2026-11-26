@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/rcss-labs/harbormaster/internal/hmtools"
 	"github.com/rcss-labs/harbormaster/internal/mcpgw"
 )
 
@@ -81,14 +82,14 @@ func run(args []string, stdout, stderr io.Writer, getenv func(string) string) in
 // configuration error (the message names the variable).
 func serve(ctx context.Context, stderr io.Writer, getenv func(string) string) int {
 	logger := slog.New(slog.NewJSONHandler(stderr, nil))
-	mcpgw.Version = version
+	hmtools.Version = version
 
 	cfg, err := mcpgw.LoadConfig(getenv)
 	if err != nil {
 		logger.Error("invalid configuration", "err", err.Error())
 		return 2
 	}
-	upstream, err := mcpgw.NewUpstreamWithCA(cfg.UpstreamURL, cfg.UpstreamTimeout, cfg.UpstreamCAPEM)
+	upstream, err := hmtools.NewUpstreamWithCA(cfg.UpstreamURL, cfg.UpstreamTimeout, cfg.UpstreamCAPEM)
 	if err != nil {
 		logger.Error("invalid configuration", "err", "HM_MCP_UPSTREAM_URL: "+err.Error())
 		return 2
@@ -136,7 +137,7 @@ func serve(ctx context.Context, stderr io.Writer, getenv func(string) string) in
 }
 
 // healthcheck asks the local gateway's /healthz on the port of HM_MCP_LISTEN.
-// This loopback client is the one HTTP client outside internal/mcpgw/upstream.go.
+// This loopback client is the one HTTP client outside internal/hmtools/upstream.go.
 func healthcheck(stderr io.Writer, getenv func(string) string) int {
 	listen := getenv("HM_MCP_LISTEN")
 	if listen == "" {

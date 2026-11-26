@@ -49,7 +49,7 @@ func TestOAuthMeta_ProtectedResource(t *testing.T) {
 			t.Errorf("%s: POST status %d allow %q, want 405 GET", path, resp.StatusCode, resp.Header.Get("Allow"))
 		}
 	}
-	if n := len(h.upstream.seen()); n != 0 {
+	if n := len(h.upstream.Seen()); n != 0 {
 		t.Errorf("%d upstream calls for static metadata", n)
 	}
 }

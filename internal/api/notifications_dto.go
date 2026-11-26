@@ -51,6 +51,8 @@ type NotificationRouteDTO struct {
 	NotifyResolved   bool                      `json:"notify_resolved"`
 	Scope            []NotificationSelectorDTO `json:"scope"` // empty means everything
 	Fallback         bool                      `json:"fallback"`
+	// Investigate: a diagnosis from the AI agent follows the alert on this route.
+	Investigate bool `json:"investigate"`
 	// MatchesNothing: the route has scope entries and every one is missing.
 	MatchesNothing bool      `json:"matches_nothing"`
 	Failing        bool      `json:"failing"` // its last three deliveries all failed
@@ -97,7 +99,9 @@ type NotificationRouteInput struct {
 	NotifyResolved  bool                      `json:"notify_resolved"`
 	Scope           []NotificationSelectorDTO `json:"scope"`
 	Fallback        bool                      `json:"fallback"`
-	Version         *int                      `json:"version,omitempty"`
+	// Investigate is optional: a request that leaves it out (an older browser bundle) keeps the stored value.
+	Investigate *bool `json:"investigate,omitempty"`
+	Version     *int  `json:"version,omitempty"`
 }
 
 // NotificationPreviewRequest is POST /api/notifications/preview. RouteID names the route being edited, so a
@@ -148,6 +152,15 @@ type NotificationPreviewDTO struct {
 	NotificationCount int `json:"notification_count"`
 	// Pending counts alerts still inside the settle time that would otherwise match or count.
 	Pending int `json:"pending"`
+	// Agent is set when the draft has investigate on and the agent is on: how many of the route's services the agent
+	// identity cannot View now.
+	Agent *NotificationPreviewAgentDTO `json:"agent"`
+}
+
+// NotificationPreviewAgentDTO counts the route's services the agent identity can and cannot see.
+type NotificationPreviewAgentDTO struct {
+	ServicesTotal  int `json:"services_total"`
+	ServicesUnseen int `json:"services_unseen"`
 }
 
 // NotificationDeliveryDTO is one row of the delivery log.
@@ -175,6 +188,8 @@ type NotificationDeliveryDTO struct {
 	ClusterID string `json:"cluster_id"`
 	AccountID string `json:"account_id"`
 	Region    string `json:"region"`
+	// ReviewRunID is the review run a review row reports; absent on every other row (the web type is optional).
+	ReviewRunID *int64 `json:"review_run_id,omitempty"`
 }
 
 // NotificationTargetAccountDTO is a connected account the scope picker can offer.

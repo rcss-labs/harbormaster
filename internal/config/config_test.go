@@ -1,7 +1,14 @@
 package config
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"fmt"
+	"math/big"
 	"reflect"
 	"strings"
 	"testing"
@@ -56,19 +63,21 @@ func TestLoad_Defaults(t *testing.T) {
 			IdleInterval:  5 * time.Minute,
 		},
 		Retention: RetentionConfig{
-			StoppedTasks:      168 * time.Hour,
-			ServiceEvents:     720 * time.Hour,
-			CountsHistory:     168 * time.Hour,
-			OperationLog:      2160 * time.Hour,
-			DeploymentHistory: 2160 * time.Hour,
-			AuditLog:          8760 * time.Hour,
-			OrphanTags:        720 * time.Hour,
-			AvailabilityDaily: 8760 * time.Hour,
-			CapacityDaily:     8760 * time.Hour,
-			UtilDaily:         2160 * time.Hour,
-			ScanImages:        168 * time.Hour,
-			ScanRuns:          720 * time.Hour,
-			NotificationLog:   720 * time.Hour,
+			StoppedTasks:       168 * time.Hour,
+			ServiceEvents:      720 * time.Hour,
+			CountsHistory:      168 * time.Hour,
+			OperationLog:       2160 * time.Hour,
+			DeploymentHistory:  2160 * time.Hour,
+			AuditLog:           8760 * time.Hour,
+			OrphanTags:         720 * time.Hour,
+			AvailabilityDaily:  8760 * time.Hour,
+			CapacityDaily:      8760 * time.Hour,
+			UtilDaily:          2160 * time.Hour,
+			ScanImages:         168 * time.Hour,
+			ScanRuns:           720 * time.Hour,
+			NotificationLog:    720 * time.Hour,
+			AgentConversations: 720 * time.Hour,
+			AgentRuns:          2160 * time.Hour,
 		},
 		Scan: ScanConfig{
 			RoleName:    "harbormaster-scan",
@@ -91,7 +100,10 @@ func TestLoad_Defaults(t *testing.T) {
 		SnapshotCacheTTL: 30 * time.Second,
 		TokenMaxTTL:      2160 * time.Hour, TokenMaxTTLSSO: 168 * time.Hour, TokenMaxPerUser: 10,
 		TokenLogSearchMaxGB: 2, TokenLogSearchDailyGB: 20,
-		OAuthAccessTTL:   time.Hour,
+		OAuthAccessTTL: time.Hour, AgentRunTokenTTL: 15 * time.Minute,
+		AgentIdentityRatePerSecond: 5, AgentIdentityLogSearchMaxGB: 2, AgentIdentityLogSearchDailyGB: 20,
+		AgentInvestigationWindow: 15 * time.Minute, AgentInvestigationsConcurrent: 2, AgentInvestigationsPerHour: 20, AgentInvestigationMaxWait: 15 * time.Minute,
+		AgentReviewsPerDay: 24, AgentReviewMaxLate: 6 * time.Hour,
 		OAuthClientHosts: []string{"claude.ai"},
 		OAuthRedirectURIs: []string{
 			"https://claude.ai/api/mcp/auth_callback", "https://claude.com/api/mcp/auth_callback",
@@ -816,6 +828,7 @@ func TestLoad_TokenValidation(t *testing.T) {
 		{"cidr match-all v4", map[string]string{"HM_MCP_GATEWAY_CIDRS": "0.0.0.0/0"}, "HM_MCP_GATEWAY_CIDRS"},
 		{"cidr match-all v6", map[string]string{"HM_MCP_GATEWAY_CIDRS": "::/0"}, "HM_MCP_GATEWAY_CIDRS"},
 		{"url no host", map[string]string{"HM_MCP_PUBLIC_URL": "https://"}, "HM_MCP_PUBLIC_URL"},
+		{"url bad port", map[string]string{"HM_MCP_PUBLIC_URL": "https://mcp.example.com:99999"}, "HM_MCP_PUBLIC_URL"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -908,5 +921,255 @@ func TestLoad_OAuthDefaultsAndValidation(t *testing.T) {
 	cfg, err = load(with("HM_OAUTH_CLIENT_HOSTS", "a.example,b.example"))
 	if err != nil || !reflect.DeepEqual(cfg.OAuthClientHosts, []string{"a.example", "b.example"}) {
 		t.Fatalf("hosts override = %v, %v", cfg.OAuthClientHosts, err)
+	}
+}
+
+func TestLoad_AgentDefaults(t *testing.T) {
+	cfg, err := Load(tokenEnv(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AgentEnabled() || cfg.AgentURL != "" || cfg.AgentCAPEM != "" || cfg.AgentRunTokenTTL != 15*time.Minute {
+		t.Errorf("agent defaults = %+v", cfg)
+	}
+	cfg, err = Load(tokenEnv(map[string]string{"HM_AGENT_URL": "https://agent.internal:8484", "HM_AGENT_RUN_TOKEN_TTL": "5m"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.AgentEnabled() || cfg.AgentURL != "https://agent.internal:8484" || cfg.AgentRunTokenTTL != 5*time.Minute {
+		t.Errorf("agent cfg = %+v", cfg)
+	}
+}
+
+func TestLoad_AgentURLValidation(t *testing.T) {
+	valid := []string{
+		"https://agent.internal", "https://agent.internal:8484",
+		"http://localhost:8484", "http://127.0.0.1:8484", "http://[::1]:8484",
+	}
+	for _, u := range valid {
+		if _, err := Load(tokenEnv(map[string]string{"HM_AGENT_URL": u})); err != nil {
+			t.Errorf("HM_AGENT_URL %q refused: %v", u, err)
+		}
+	}
+	invalid := map[string]string{
+		"http remote host":    "http://agent.internal:8484",
+		"http private ip":     "http://10.0.0.5:8484",
+		"scheme ftp":          "ftp://agent.internal",
+		"no scheme":           "agent.internal:8484",
+		"no host":             "https://",
+		"path":                "https://agent.internal/api",
+		"trailing slash":      "https://agent.internal/",
+		"query":               "https://agent.internal?a=b",
+		"fragment":            "https://agent.internal#x",
+		"userinfo":            "https://user:pw@agent.internal",
+		"loopback lookalike":  "http://localhost.example.com",
+		"http loopback path":  "http://localhost:8484/x",
+		"empty trailing hash": "https://agent.internal#",
+		"port zero":           "https://agent.internal:0",
+		"port too large":      "https://agent.internal:70000",
+		"port not a number":   "https://agent.internal:http",
+		"empty port":          "https://agent.internal:",
+		"no hostname":         "https://:8484",
+	}
+	for name, u := range invalid {
+		t.Run(name, func(t *testing.T) {
+			_, err := Load(tokenEnv(map[string]string{"HM_AGENT_URL": u}))
+			if err == nil || !strings.Contains(err.Error(), "HM_AGENT_URL") {
+				t.Fatalf("HM_AGENT_URL %q: err = %v, want one naming HM_AGENT_URL", u, err)
+			}
+		})
+	}
+}
+
+func TestLoad_AgentRunTokenTTLAndCAValidation(t *testing.T) {
+	for _, ttl := range []string{"0s", "-1m", "59s", "61m", "24h"} {
+		if _, err := Load(tokenEnv(map[string]string{"HM_AGENT_RUN_TOKEN_TTL": ttl})); err == nil ||
+			!strings.Contains(err.Error(), "HM_AGENT_RUN_TOKEN_TTL") {
+			t.Errorf("ttl %q: err = %v, want one naming HM_AGENT_RUN_TOKEN_TTL", ttl, err)
+		}
+	}
+	for _, ttl := range []string{"1m", "1h"} {
+		if _, err := Load(tokenEnv(map[string]string{"HM_AGENT_RUN_TOKEN_TTL": ttl})); err != nil {
+			t.Errorf("ttl %q refused: %v", ttl, err)
+		}
+	}
+	if _, err := Load(tokenEnv(map[string]string{"HM_AGENT_CA_PEM": "not a certificate"})); err == nil ||
+		!strings.Contains(err.Error(), "HM_AGENT_CA_PEM") {
+		t.Errorf("bad PEM: err = %v, want one naming HM_AGENT_CA_PEM", err)
+	}
+	cfg, err := Load(tokenEnv(map[string]string{"HM_AGENT_CA_PEM": testCertPEM(t)}))
+	if err != nil || cfg.AgentCAPEM == "" {
+		t.Errorf("valid PEM: cfg.AgentCAPEM set = %v, err = %v", cfg.AgentCAPEM != "", err)
+	}
+}
+
+func TestLoad_InvestigationSettingsValidation(t *testing.T) {
+	for name, values := range map[string]struct{ good, bad []string }{
+		"HM_AGENT_INVESTIGATION_WINDOW":      {[]string{"1m", "15m", "24h"}, []string{"0s", "59s", "24h1s", "-1m", "soon"}},
+		"HM_AGENT_INVESTIGATIONS_CONCURRENT": {[]string{"1", "8"}, []string{"0", "9", "-1", "two"}},
+		"HM_AGENT_INVESTIGATIONS_PER_HOUR":   {[]string{"0", "1", "500"}, []string{"-1", "many"}},
+		"HM_AGENT_INVESTIGATION_MAX_WAIT":    {[]string{"1m", "24h"}, []string{"0s", "59s", "24h1s", "-1m"}},
+	} {
+		for _, v := range values.good {
+			if _, err := Load(tokenEnv(map[string]string{name: v})); err != nil {
+				t.Errorf("%s=%s refused: %v", name, v, err)
+			}
+		}
+		for _, v := range values.bad {
+			if _, err := Load(tokenEnv(map[string]string{name: v})); err == nil || !strings.Contains(err.Error(), name) {
+				t.Errorf("%s=%s: err = %v, want one naming it", name, v, err)
+			}
+		}
+	}
+	cfg, err := Load(tokenEnv(map[string]string{"HM_AGENT_INVESTIGATION_WINDOW": "30m", "HM_AGENT_INVESTIGATIONS_CONCURRENT": "4",
+		"HM_AGENT_INVESTIGATIONS_PER_HOUR": "0", "HM_AGENT_INVESTIGATION_MAX_WAIT": "5m"}))
+	if err != nil || cfg.AgentInvestigationWindow != 30*time.Minute || cfg.AgentInvestigationsConcurrent != 4 ||
+		cfg.AgentInvestigationsPerHour != 0 || cfg.AgentInvestigationMaxWait != 5*time.Minute {
+		t.Errorf("cfg = %v %d %d %v, %v", cfg.AgentInvestigationWindow, cfg.AgentInvestigationsConcurrent, cfg.AgentInvestigationsPerHour, cfg.AgentInvestigationMaxWait, err)
+	}
+}
+
+// testCertPEM returns a throwaway self-signed certificate in PEM form.
+func testCertPEM(t *testing.T) string {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := x509.CreateCertificate(rand.Reader, &x509.Certificate{
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "test agent ca"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), IsCA: true, BasicConstraintsValid: true,
+	}, &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "test agent ca"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), IsCA: true, BasicConstraintsValid: true},
+		&key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
+}
+
+func TestLoad_RetentionAgentRuns(t *testing.T) {
+	cfg, err := Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example"}))
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.Retention.AgentRuns != 2160*time.Hour {
+		t.Errorf("default Retention.AgentRuns = %v, want 2160h", cfg.Retention.AgentRuns)
+	}
+	cfg, err = Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example", "HM_RETENTION_AGENT_RUNS": "48h"}))
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.Retention.AgentRuns != 48*time.Hour {
+		t.Errorf("Retention.AgentRuns = %v, want 48h", cfg.Retention.AgentRuns)
+	}
+}
+
+func TestLoad_RetentionAgentRunsRefusesAShortValue(t *testing.T) {
+	for _, tc := range []struct {
+		raw   string
+		valid bool
+	}{{"1h", false}, {"47h59m", false}, {"1ns", false}, {"-48h", false}, {"48h", true}, {"0", true}, {"2160h", true}} {
+		_, err := Load(envFromMap(map[string]string{"HM_DATABASE_URL": "postgres://example", "HM_RETENTION_AGENT_RUNS": tc.raw}))
+		if (err == nil) != tc.valid {
+			t.Errorf("HM_RETENTION_AGENT_RUNS=%s: err = %v, want valid = %v", tc.raw, err, tc.valid)
+		}
+		if err != nil && !strings.Contains(err.Error(), "HM_RETENTION_AGENT_RUNS") {
+			t.Errorf("HM_RETENTION_AGENT_RUNS=%s: message %q does not name the variable", tc.raw, err)
+		}
+	}
+}
+
+func TestLoad_AgentIdentityLimitsValidation(t *testing.T) {
+	cfg, err := Load(tokenEnv(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AgentIdentityRatePerSecond != 5 || cfg.AgentIdentityLogSearchMaxGB != 2 ||
+		cfg.AgentIdentityLogSearchDailyGB != 20 {
+		t.Errorf("defaults = %d, %d, %d; want 5, 2, 20",
+			cfg.AgentIdentityRatePerSecond, cfg.AgentIdentityLogSearchMaxGB, cfg.AgentIdentityLogSearchDailyGB)
+	}
+
+	cfg, err = Load(tokenEnv(map[string]string{
+		"HM_AGENT_IDENTITY_RATE_PER_SECOND": "50", "HM_AGENT_IDENTITY_LOG_SEARCH_MAX_GB": "0",
+		"HM_AGENT_IDENTITY_LOG_SEARCH_DAILY_GB": "0",
+	}))
+	if err != nil {
+		t.Fatalf("edge values: %v", err)
+	}
+	if cfg.AgentIdentityRatePerSecond != 50 || cfg.AgentIdentityLogSearchMaxGB != 0 ||
+		cfg.AgentIdentityLogSearchDailyGB != 0 {
+		t.Errorf("edge values = %d, %d, %d; want 50, 0, 0",
+			cfg.AgentIdentityRatePerSecond, cfg.AgentIdentityLogSearchMaxGB, cfg.AgentIdentityLogSearchDailyGB)
+	}
+	cfg, err = Load(tokenEnv(map[string]string{"HM_AGENT_IDENTITY_RATE_PER_SECOND": "1"}))
+	if err != nil || cfg.AgentIdentityRatePerSecond != 1 {
+		t.Errorf("rate 1: cfg %d, err %v; want 1 and no error", cfg.AgentIdentityRatePerSecond, err)
+	}
+
+	for name, tc := range map[string]struct{ key, value string }{
+		"rate zero":       {"HM_AGENT_IDENTITY_RATE_PER_SECOND", "0"},
+		"rate above 50":   {"HM_AGENT_IDENTITY_RATE_PER_SECOND", "51"},
+		"rate negative":   {"HM_AGENT_IDENTITY_RATE_PER_SECOND", "-1"},
+		"max negative":    {"HM_AGENT_IDENTITY_LOG_SEARCH_MAX_GB", "-1"},
+		"daily negative":  {"HM_AGENT_IDENTITY_LOG_SEARCH_DAILY_GB", "-1"},
+		"max too large":   {"HM_AGENT_IDENTITY_LOG_SEARCH_MAX_GB", "1000001"},
+		"daily too large": {"HM_AGENT_IDENTITY_LOG_SEARCH_DAILY_GB", "1000001"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := Load(tokenEnv(map[string]string{tc.key: tc.value}))
+			if err == nil || !strings.Contains(err.Error(), tc.key) {
+				t.Fatalf("err = %v, want it to name %s", err, tc.key)
+			}
+		})
+	}
+}
+
+func TestLoad_CustomReviewsDefaultOffAndParses(t *testing.T) {
+	cfg, err := Load(tokenEnv(nil))
+	if err != nil || cfg.AgentCustomReviews {
+		t.Errorf("unset: AgentCustomReviews = %v, err = %v; want off and no error", cfg.AgentCustomReviews, err)
+	}
+	for raw, want := range map[string]bool{"true": true, "false": false} {
+		cfg, err := Load(tokenEnv(map[string]string{"HM_AGENT_CUSTOM_REVIEWS": raw}))
+		if err != nil || cfg.AgentCustomReviews != want {
+			t.Errorf("%s: AgentCustomReviews = %v, err = %v; want %v", raw, cfg.AgentCustomReviews, err, want)
+		}
+	}
+	if _, err := Load(tokenEnv(map[string]string{"HM_AGENT_CUSTOM_REVIEWS": "sometimes"})); err == nil || !strings.Contains(err.Error(), "HM_AGENT_CUSTOM_REVIEWS") {
+		t.Errorf("a bad value: err = %v, want one naming HM_AGENT_CUSTOM_REVIEWS", err)
+	}
+}
+
+func TestLoad_AgentReviewSettings(t *testing.T) {
+	load := func(env map[string]string) (Config, error) {
+		env["HM_DATABASE_URL"] = "postgres://example"
+		return Load(envFromMap(env))
+	}
+	cfg, err := load(map[string]string{})
+	if err != nil || cfg.AgentReviewsPerDay != 24 || cfg.AgentReviewMaxLate != 6*time.Hour {
+		t.Errorf("defaults = %d, %v, %v; want 24 and 6h", cfg.AgentReviewsPerDay, cfg.AgentReviewMaxLate, err)
+	}
+	for _, tc := range []struct {
+		name, raw string
+		valid     bool
+	}{
+		{"HM_AGENT_REVIEWS_PER_DAY", "0", true}, {"HM_AGENT_REVIEWS_PER_DAY", "200", true}, {"HM_AGENT_REVIEWS_PER_DAY", "201", false},
+		{"HM_AGENT_REVIEWS_PER_DAY", "-1", false}, {"HM_AGENT_REVIEWS_PER_DAY", "many", false},
+		{"HM_AGENT_REVIEW_MAX_LATE", "15m", true}, {"HM_AGENT_REVIEW_MAX_LATE", "12h", true}, {"HM_AGENT_REVIEW_MAX_LATE", "14m59s", false},
+		{"HM_AGENT_REVIEW_MAX_LATE", "12h1s", false}, {"HM_AGENT_REVIEW_MAX_LATE", "0", false}, {"HM_AGENT_REVIEW_MAX_LATE", "-6h", false},
+	} {
+		_, err := load(map[string]string{tc.name: tc.raw})
+		if (err == nil) != tc.valid {
+			t.Errorf("%s=%s: err = %v, want valid = %v", tc.name, tc.raw, err, tc.valid)
+		}
+		if err != nil && !strings.Contains(err.Error(), tc.name) {
+			t.Errorf("%s=%s: message %q does not name the variable", tc.name, tc.raw, err)
+		}
+	}
+	cfg, err = load(map[string]string{"HM_AGENT_REVIEWS_PER_DAY": "0", "HM_AGENT_REVIEW_MAX_LATE": "30m"})
+	if err != nil || cfg.AgentReviewsPerDay != 0 || cfg.AgentReviewMaxLate != 30*time.Minute {
+		t.Errorf("overrides = %d, %v, %v; want 0 and 30m", cfg.AgentReviewsPerDay, cfg.AgentReviewMaxLate, err)
 	}
 }

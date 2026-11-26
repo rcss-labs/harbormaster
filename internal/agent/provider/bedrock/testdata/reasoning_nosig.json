@@ -1,0 +1,73 @@
+[
+ {
+  "type": "messageStart",
+  "payload": {
+   "role": "assistant"
+  }
+ },
+ {
+  "type": "contentBlockDelta",
+  "payload": {
+   "contentBlockIndex": 0,
+   "delta": {
+    "reasoningContent": {
+     "text": "unsigned thought"
+    }
+   }
+  }
+ },
+ {
+  "type": "contentBlockStop",
+  "payload": {
+   "contentBlockIndex": 0
+  }
+ },
+ {
+  "type": "contentBlockStart",
+  "payload": {
+   "contentBlockIndex": 1,
+   "start": {
+    "toolUse": {
+     "toolUseId": "tooluse_r",
+     "name": "list_services"
+    }
+   }
+  }
+ },
+ {
+  "type": "contentBlockDelta",
+  "payload": {
+   "contentBlockIndex": 1,
+   "delta": {
+    "toolUse": {
+     "input": "{}"
+    }
+   }
+  }
+ },
+ {
+  "type": "contentBlockStop",
+  "payload": {
+   "contentBlockIndex": 1
+  }
+ },
+ {
+  "type": "messageStop",
+  "payload": {
+   "stopReason": "tool_use"
+  }
+ },
+ {
+  "type": "metadata",
+  "payload": {
+   "usage": {
+    "inputTokens": 3,
+    "outputTokens": 4,
+    "totalTokens": 7
+   },
+   "metrics": {
+    "latencyMs": 1
+   }
+  }
+ }
+]

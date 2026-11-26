@@ -1,0 +1,10 @@
+.block { display: grid; gap: 8px; min-width: 0; }
+.block p { margin: 0; }
+.muted { color: var(--muted); font-size: 12px; }
+.summary { white-space: pre-wrap; overflow-wrap: anywhere; }
+.heading { margin: 0; font-size: 13px; font-weight: 600; }
+.item { display: grid; gap: 4px; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius); min-width: 0; }
+.item p { margin: 0; overflow-wrap: anywhere; }
+.itemHead { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.tool { font: 500 12px var(--mono); }
+.excerpt { margin: 0; padding: 8px; max-height: 240px; overflow: auto; background: var(--raised); border-radius: var(--radius-sm); font: 12px var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }

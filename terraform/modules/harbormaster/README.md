@@ -19,10 +19,10 @@ The same image can instead run as three ECS services (`harbormaster-web`, `harbo
 | `vpc_id` | string | required | |
 | `private_subnet_ids` | list(string) | required | Service tasks and RDS; two subnets in different AZs are expected; only the count (at least 2) is validated. |
 | `public_subnet_ids` | list(string) | `[]` | ALB when `internal = false`; must be non-empty unless `internal` (enforced by a precondition). |
-| `internal` | bool | required | Required. `true` puts Harbormaster on an internal ALB in `private_subnet_ids` (recommended; needed for `HM_API_TOKENS`). `false` creates an internet-facing ALB. There is no default, so an existing deployment that relied on the old default (`false`) must now set it explicitly instead of having its load balancer replaced. Any true value of `HM_API_TOKENS` (`true`, `1`, `t`) requires `internal = true`: a precondition fails the plan otherwise, because tokens must reach Harbormaster only through the MCP gateway. |
+| `internal` | bool | required | Required. `true` puts Harbormaster on an internal ALB in `private_subnet_ids` (recommended; needed for `HM_API_TOKENS`). `false` creates an internet-facing ALB. There is no default, so an existing deployment that relied on the old default (`false`) must now set it explicitly instead of having its load balancer replaced. Any true value of `HM_API_TOKENS` (`true`, `1`, `t`) requires `internal = true`: a precondition fails the plan otherwise, because tokens must reach Harbormaster only through the MCP gateway. Setting `HM_AGENT_URL` (the AI agent's private URL) in `extra_env` also requires `internal = true`: a precondition fails the plan with "HM_AGENT_URL needs internal = true: run tokens must never be accepted on a public load balancer." |
 | `allowed_cidrs` | list(string) | required | Required. CIDR blocks allowed to reach the ALB on 443. Use your VPN or office ranges; `0.0.0.0/0` makes the login page reachable from the whole internet. Must list at least one block. |
 | `alb_deletion_protection` | bool | `true` | Deletion protection on the ALB. Before a change that replaces the ALB (for example switching `internal` from `false` to `true`), first apply with `alb_deletion_protection = false`, then make the change, then turn it back on. |
-| `alb_ingress_security_group_ids` | list(string) | `[]` | Security groups allowed to reach the ALB on 443 in addition to `allowed_cidrs`. Set it to the `harbormaster-mcp` module's `task_security_group_id`. |
+| `alb_ingress_security_group_ids` | list(string) | `[]` | Security groups allowed to reach the ALB on 443 in addition to `allowed_cidrs`. Set it to the `harbormaster-mcp` module's `task_security_group_id` and, with the AI agent, the `harbormaster-agent` module's `task_security_group_id`. |
 | `certificate_arn` | string | required | ACM certificate for the HTTPS listener. |
 | `http_redirect` | bool | `true` | Port 80 redirects to 443. |
 | `image` | string | required | Full image reference including tag; must not end with `:latest`. |
@@ -271,3 +271,25 @@ Two fixed names make a destroy followed by a re-create collide:
 ## Do not manage Harbormaster with itself
 
 Do not connect Harbormaster's own service, cluster or database to Harbormaster's write permissions without `lifecycle` guards (for example `lifecycle { ignore_changes = [task_definition, desired_count, ...] }` on the `aws_ecs_service`, with the full list below) in the managing configuration. The recommended list for a managed service is `task_definition`, `desired_count`, `enable_execute_command`, `deployment_circuit_breaker`, `deployment_minimum_healthy_percent`, `deployment_maximum_percent` and `health_check_grace_period_seconds`; autoscaling resources edited from Harbormaster need the same treatment.
+
+## AI agent
+
+To enable the AI agent, deploy the [`harbormaster-agent`](../harbormaster-agent/README.md) module and set `HM_AGENT_URL` in `extra_env` to its `agent_url` output. This needs `internal = true` and the agent's `task_security_group_id` in `alb_ingress_security_group_ids`, so its tool calls reach this load balancer. If the agent's certificate is issued by a private CA, set `HM_AGENT_CA_PEM` in `extra_env` to that CA's PEM so Harbormaster trusts the agent's load balancer (a CA certificate is public, so a plain value is fine). Leaving `HM_AGENT_URL` unset keeps the agent off.
+
+Automatic investigations of alerts and scheduled reviews need no new input. Their settings go through `extra_env` (which reaches every service) and have these defaults:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `HM_AGENT_INVESTIGATION_WINDOW` | `15m` | Alerts for one subject within this time share one investigation (`1m` to `24h`). |
+| `HM_AGENT_INVESTIGATIONS_CONCURRENT` | `2` | Investigations that run at once (1 to 8). |
+| `HM_AGENT_INVESTIGATIONS_PER_HOUR` | `20` | Investigations that may start in an hour. `0` turns the investigator off. |
+| `HM_AGENT_INVESTIGATION_MAX_WAIT` | `15m` | A request that waited longer before its first start is skipped (`1m` to `24h`). |
+| `HM_AGENT_IDENTITY_RATE_PER_SECOND` | `5` | Requests per second of the agent identity, burst 60 times that (1 to 50). |
+| `HM_AGENT_IDENTITY_LOG_SEARCH_MAX_GB` | `2` | GiB one log search by the identity may scan (`0`: no cap of its own). |
+| `HM_AGENT_IDENTITY_LOG_SEARCH_DAILY_GB` | `20` | GiB the identity may scan per UTC day (`0`: its log search is off). |
+| `HM_AGENT_REVIEWS_PER_DAY` | `24` | Scheduled AI reviews that may start in 24 hours (0 to 200). `0` turns reviews off. |
+| `HM_AGENT_REVIEW_MAX_LATE` | `6h` | A review that is due but cannot start within this time is recorded as missed (`15m` to `12h`). |
+| `HM_AGENT_CUSTOM_REVIEWS` | `false` | `true` lets admins write the instructions of a custom review. Off by default. With it off, a custom review cannot be switched off, only deleted, so disable custom reviews before you set it to `false` or roll back. |
+| `HM_RETENTION_AGENT_RUNS` | `2160h` | Age after which finished investigations, review results and agent run records are deleted (`0` keeps all; otherwise at least `48h`). |
+
+With split services the investigator and the reviews run on the coordinator, which must also reach the agent: pass `security_group_ids.web` and `security_group_ids.coordinator` to the agent module's `harbormaster_task_security_group_ids`. See [Automatic AI investigations](../../../harbormaster-docs/docs/guides/ai-agent-investigator.md) before you switch a route on, and [Scheduled AI reviews](../../../harbormaster-docs/docs/guides/ai-agent-reviews.md) before you add a review.

@@ -17,6 +17,10 @@ This page records notable changes to Harbormaster. It follows [Keep a Changelog]
 - Image security scanning with Syft and Grype, a pre-deploy gate, and accepted-risk records.
 - Off-hours schedules that put services to sleep and wake them.
 - Alert notifications to Slack, Telegram, PagerDuty, webhook and email routes, with quiet hours.
+- AI chat: an optional, read-only agent service that answers questions about the services a person may see, with model providers by API key (Claude, OpenAI, Gemini) or Amazon Bedrock, a monthly allowance, and streaming answers. Off unless `HM_AGENT_URL` is set. See [AI chat](../guides/ai-agent-chat.md).
+- Automatic AI investigations of alerts: a per-route switch, a read-only agent identity with its own access, a stored summary and evidence, and a Diagnosis message after the Opened message. Off unless the AI agent is set up. See [Automatic AI investigations](../guides/ai-agent-investigator.md).
+- Scheduled AI reviews: cost, security findings, reliability and capacity summaries written by the AI agent on a daily, weekly or monthly schedule, read-only and without logs, stored with their evidence, shown under **Reviews** and sent to notification routes. Off unless the AI agent is set up and a reviewer model is chosen. See [Scheduled AI reviews](../guides/ai-agent-reviews.md).
+- Custom AI reviews: a scheduled review whose instructions an admin writes, with test runs that are stored and not sent. Off unless `HM_AGENT_CUSTOM_REVIEWS=true`. See [Custom reviews](../guides/ai-agent-reviews.md#custom-reviews).
 - Cost analytics, including Fargate Spot advice.
 - Networks and storage views.
 - Multiple AWS accounts and regions, connected through an assumed role with an external ID.

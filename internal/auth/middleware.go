@@ -51,20 +51,19 @@ func failInternal(w http.ResponseWriter, r *http.Request, what string, err error
 
 // Middleware attaches the credential, user and subject to the request context.
 //
-// With HM_API_TOKENS on, a request whose Authorization header is "Bearer " followed by a well-formed token takes the
-// token path: the cookie is not read, and a token that does not resolve is answered 401 here, on every route, never
-// continuing as anonymous or as a session. A resolved token yields its user, a read-only subject and a token
-// credential, and no session. With tokens off, or any other Authorization header, the header is ignored.
+// A request whose Authorization header is "Bearer " followed by a well-formed token takes the token path when tokens of
+// that kind are on (HM_API_TOKENS for personal and OAuth tokens, the agent for run tokens): the cookie is not read,
+// and a token that does not resolve is answered 401 here, on every route, never continuing as anonymous or as a
+// session. A resolved token yields its user, a read-only subject and a token credential, and no session. With the
+// kind's switch off, or any other Authorization header, the header is ignored.
 //
 // Otherwise the session cookie is used: a valid one attaches the session, user, subject and a session credential;
 // a missing or invalid cookie continues unauthenticated, and RequireAuth decides whether that is allowed.
 func (a *Service) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if a.cfg.APITokens {
-			if raw, ok := bearerToken(r); ok {
-				a.serveToken(w, r, next, raw)
-				return
-			}
+		if raw, ok := a.bearerToken(r); ok {
+			a.serveToken(w, r, next, raw)
+			return
 		}
 		cookie, err := r.Cookie(CookieName)
 		if err != nil || cookie.Value == "" {

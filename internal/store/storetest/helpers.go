@@ -51,3 +51,13 @@ func AddScanRequest(ctx context.Context, s *store.Store, r store.ScanRequest) (i
 	}
 	return id, nil
 }
+
+// PutAgentSettings replaces the agent settings whatever their version, for tests that need a starting state.
+func PutAgentSettings(ctx context.Context, s *store.Store, in store.AgentSettings) error {
+	current, err := s.GetAgentSettings(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = s.UpdateAgentSettings(ctx, current.Version, func(store.AgentSettings) (store.AgentSettings, error) { return in, nil })
+	return err
+}

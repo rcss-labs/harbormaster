@@ -1,0 +1,775 @@
+package store_test
+
+import (
+	"errors"
+	"math"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/rcss-labs/harbormaster/internal/store"
+	"github.com/rcss-labs/harbormaster/internal/store/storetest"
+)
+
+var agentNow = time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
+
+func agentRun(reserved int64) store.AgentRun {
+	return store.AgentRun{ID: uuid.New(), Role: "chat", Provider: "fake", Model: "m", ReservedMicroUSD: reserved}
+}
+
+func setBudget(t *testing.T, st *store.Store, micro int64) {
+	t.Helper()
+	if err := storetest.PutAgentSettings(t.Context(), st, store.AgentSettings{MonthlyBudgetMicroUSD: micro}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReserveAgentRun_RefusesWhenBudgetWouldBeExceeded(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	setBudget(t, st, 1000)
+	r := agentRun(600)
+	if err := st.ReserveAgentRun(ctx, r, time.Hour, agentNow); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.RecordAgentRunUsage(ctx, r.ID, 1, 1, 500, agentNow); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SettleAgentRun(ctx, r.ID, "done", nil, nil, agentNow); err != nil {
+		t.Fatal(err)
+	}
+	// 500 settled so far: 500 more fits exactly, 501 does not.
+	over := agentRun(501)
+	if err := st.ReserveAgentRun(ctx, over, time.Hour, agentNow); !errors.Is(err, store.ErrBudgetExhausted) {
+		t.Fatalf("reserve over budget = %v, want ErrBudgetExhausted", err)
+	}
+	var n int
+	if err := st.Pool.QueryRow(ctx, `select count(*) from agent_runs where id = $1`, over.ID).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("refused run was written: %d, %v", n, err)
+	}
+	if err := st.ReserveAgentRun(ctx, agentRun(500), time.Hour, agentNow); err != nil {
+		t.Fatalf("reserve exactly to budget: %v", err)
+	}
+}
+
+func TestReserveAgentRun_ZeroBudgetRefuses(t *testing.T) {
+	st := storetest.Open(t)
+	if err := st.ReserveAgentRun(t.Context(), agentRun(1), time.Hour, agentNow); !errors.Is(err, store.ErrBudgetExhausted) {
+		t.Fatalf("reserve with budget 0 = %v, want ErrBudgetExhausted", err)
+	}
+}
+
+func TestReserveAgentRun_CountsRunningRunsAtReservation(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	setBudget(t, st, 1000)
+	if err := st.ReserveAgentRun(ctx, agentRun(700), time.Hour, agentNow); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ReserveAgentRun(ctx, agentRun(400), time.Hour, agentNow); !errors.Is(err, store.ErrBudgetExhausted) {
+		t.Fatalf("second reserve = %v, want ErrBudgetExhausted", err)
+	}
+	settled, reserved, err := st.AgentSpend(ctx, time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil || settled != 0 || reserved != 700 {
+		t.Fatalf("spend = %d settled, %d reserved, %v; want 0, 700", settled, reserved, err)
+	}
+}
+
+// Twenty callers race for a budget that fits three: the settings-row lock must admit exactly three.
+func TestReserveAgentRun_ConcurrentReservationsNeverExceedBudget(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	setBudget(t, st, 300)
+	var wg sync.WaitGroup
+	errs := make([]error, 20)
+	for i := range errs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs[i] = st.ReserveAgentRun(ctx, agentRun(100), time.Hour, agentNow)
+		}()
+	}
+	wg.Wait()
+	ok := 0
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			ok++
+		case !errors.Is(err, store.ErrBudgetExhausted):
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+	if ok != 3 {
+		t.Fatalf("%d reservations succeeded, want exactly 3", ok)
+	}
+	_, reserved, err := st.AgentSpend(ctx, time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil || reserved != 300 {
+		t.Fatalf("reserved = %d, %v; want 300", reserved, err)
+	}
+}
+
+func TestReserveAgentRun_SettlesStaleRunsFirst(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	setBudget(t, st, 1000)
+	stale := agentRun(900)
+	if err := st.ReserveAgentRun(ctx, stale, time.Hour, agentNow.Add(-2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.RecordAgentRunUsage(ctx, stale.ID, 10, 10, 200, agentNow.Add(-2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	// The stale run keeps its recorded cost (200) and gives back the rest of its reservation.
+	if err := st.ReserveAgentRun(ctx, agentRun(800), time.Hour, agentNow); err != nil {
+		t.Fatalf("reserve after stale sweep: %v", err)
+	}
+	var state string
+	var cost int64
+	if err := st.Pool.QueryRow(ctx, `select state, cost_micro_usd from agent_runs where id = $1`, stale.ID).Scan(&state, &cost); err != nil {
+		t.Fatal(err)
+	}
+	if state != "failed" || cost != 200 {
+		t.Fatalf("stale run = %s / %d, want failed / 200", state, cost)
+	}
+
+	// The sweep is committed even when the reservation that triggered it is refused.
+	old := agentRun(0)
+	if _, err := st.Pool.Exec(ctx, `insert into agent_runs (id, role, provider, model, state, started_at) values ($1, 'chat', 'fake', 'm', 'running', $2)`,
+		old.ID, agentNow.Add(-5*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ReserveAgentRun(ctx, agentRun(999999), time.Hour, agentNow); !errors.Is(err, store.ErrBudgetExhausted) {
+		t.Fatalf("refusal expected, got %v", err)
+	}
+	if err := st.Pool.QueryRow(ctx, `select state from agent_runs where id = $1`, old.ID).Scan(&state); err != nil || state != "failed" {
+		t.Fatalf("stale run after refused reserve = %q, %v; want failed", state, err)
+	}
+}
+
+func TestSettleAgentRun_FreesUnusedReservation(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	setBudget(t, st, 1000)
+	r := agentRun(900)
+	if err := st.ReserveAgentRun(ctx, r, time.Hour, agentNow); err != nil {
+		t.Fatal(err)
+	}
+	// Usage overwrites (it may go down): provisional 300, then corrected to 120.
+	if err := st.RecordAgentRunUsage(ctx, r.ID, 5, 5, 300, agentNow); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.RecordAgentRunUsage(ctx, r.ID, 4, 4, 120, agentNow); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SettleAgentRun(ctx, r.ID, "done", nil, []string{"list_services"}, agentNow.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	month := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	settled, reserved, err := st.AgentSpend(ctx, month)
+	if err != nil || settled != 120 || reserved != 0 {
+		t.Fatalf("spend = %d, %d, %v; want 120, 0", settled, reserved, err)
+	}
+	if err := st.ReserveAgentRun(ctx, agentRun(880), time.Hour, agentNow); err != nil {
+		t.Fatalf("freed reservation not reusable: %v", err)
+	}
+}
+
+func TestAgentSpend_UsesUTCMonth(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	setBudget(t, st, 1000)
+	lastSecond := time.Date(2026, 10, 31, 23, 59, 59, 0, time.UTC)
+	r := agentRun(10)
+	if err := st.ReserveAgentRun(ctx, r, time.Hour, lastSecond); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.RecordAgentRunUsage(ctx, r.ID, 1, 1, 10, lastSecond); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SettleAgentRun(ctx, r.ID, "done", nil, nil, lastSecond); err != nil {
+		t.Fatal(err)
+	}
+	oct, nov := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	if s, _, err := st.AgentSpend(ctx, oct); err != nil || s != 10 {
+		t.Fatalf("october = %d, %v; want 10", s, err)
+	}
+	if s, _, err := st.AgentSpend(ctx, nov); err != nil || s != 0 {
+		t.Fatalf("november = %d, %v; want 0", s, err)
+	}
+	days, err := st.AgentUsageByDay(ctx, oct)
+	if err != nil || len(days) != 1 || days[0].Runs != 1 || days[0].CostMicroUSD != 10 {
+		t.Fatalf("usage by day = %+v, %v", days, err)
+	}
+}
+
+func mustNoErr(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func runRow(t *testing.T, st *store.Store, id uuid.UUID) (state string, cost, in, out int64, tools []string, last *time.Time) {
+	t.Helper()
+	err := st.Pool.QueryRow(t.Context(), `select state, cost_micro_usd, input_tokens, output_tokens, tools, last_usage_at from agent_runs where id = $1`, id).
+		Scan(&state, &cost, &in, &out, &tools, &last)
+	mustNoErr(t, err)
+	return
+}
+
+var novStart = time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+
+func TestRecordAgentRunUsage_LateUsageOnSweptRunRaisesButNeverLowers(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	setBudget(t, st, 10_000)
+	r := agentRun(900)
+	mustNoErr(t, st.ReserveAgentRun(ctx, r, time.Hour, agentNow.Add(-2*time.Hour)))
+	mustNoErr(t, st.RecordAgentRunUsage(ctx, r.ID, 10, 10, 200, agentNow.Add(-2*time.Hour)))
+	mustNoErr(t, st.ReserveAgentRun(ctx, agentRun(1), time.Hour, agentNow)) // sweeps r
+	late := agentNow.Add(time.Minute)
+	if err := st.RecordAgentRunUsage(ctx, r.ID, 30, 40, 700, late); !errors.Is(err, store.ErrAgentRunNotRunning) {
+		t.Fatalf("late usage = %v, want ErrAgentRunNotRunning", err)
+	}
+	state, cost, in, out, _, last := runRow(t, st, r.ID)
+	if state != "failed" || cost != 700 || in != 30 || out != 40 || last == nil || !last.Equal(late) {
+		t.Fatalf("after late usage: %s cost=%d in=%d out=%d last=%v", state, cost, in, out, last)
+	}
+	// A lower figure never lowers a swept run.
+	if err := st.RecordAgentRunUsage(ctx, r.ID, 1, 1, 5, agentNow.Add(-time.Hour)); !errors.Is(err, store.ErrAgentRunNotRunning) {
+		t.Fatalf("lower late usage = %v", err)
+	}
+	state, cost, in, out, _, last = runRow(t, st, r.ID)
+	if state != "failed" || cost != 700 || in != 30 || out != 40 || !last.Equal(late) {
+		t.Fatalf("lowered: %s cost=%d in=%d out=%d last=%v", state, cost, in, out, last)
+	}
+	if err := st.RecordAgentRunUsage(ctx, uuid.New(), 1, 1, 1, agentNow); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("unknown id = %v, want ErrNotFound", err)
+	}
+}
+
+func TestRecordAgentRunUsage_DoneRunIsUnchanged(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	setBudget(t, st, 10_000)
+	r := agentRun(100)
+	mustNoErr(t, st.ReserveAgentRun(ctx, r, time.Hour, agentNow))
+	mustNoErr(t, st.RecordAgentRunUsage(ctx, r.ID, 2, 2, 50, agentNow))
+	mustNoErr(t, st.SettleAgentRun(ctx, r.ID, "done", nil, nil, agentNow))
+	if err := st.RecordAgentRunUsage(ctx, r.ID, 9, 9, 99, agentNow.Add(time.Second)); !errors.Is(err, store.ErrAgentRunNotRunning) {
+		t.Fatalf("usage on done = %v, want ErrAgentRunNotRunning", err)
+	}
+	state, cost, in, out, _, _ := runRow(t, st, r.ID)
+	if state != "done" || cost != 50 || in != 2 || out != 2 {
+		t.Fatalf("done run changed: %s %d %d %d", state, cost, in, out)
+	}
+}
+
+func TestSettleAgentRun_LateSettleDoesNotResurrectSweptRun(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	setBudget(t, st, 10_000)
+	r := agentRun(900)
+	mustNoErr(t, st.ReserveAgentRun(ctx, r, time.Hour, agentNow.Add(-2*time.Hour)))
+	mustNoErr(t, st.ReserveAgentRun(ctx, agentRun(1), time.Hour, agentNow)) // sweeps r
+	err := st.SettleAgentRun(ctx, r.ID, "done", nil, []string{"list_services"}, agentNow)
+	if !errors.Is(err, store.ErrAgentRunNotRunning) {
+		t.Fatalf("late settle = %v, want ErrAgentRunNotRunning", err)
+	}
+	state, _, _, _, tools, _ := runRow(t, st, r.ID)
+	if state != "failed" || len(tools) != 1 || tools[0] != "list_services" {
+		t.Fatalf("after late settle: state %s tools %v; want failed with tools recorded", state, tools)
+	}
+	if err := st.SettleAgentRun(ctx, uuid.New(), "done", nil, nil, agentNow); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("unknown id = %v, want ErrNotFound", err)
+	}
+}
+
+func TestReserveAgentRun_ZeroBudgetRefusesZeroReservationButSweeps(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	old := agentRun(0)
+	_, err := st.Pool.Exec(ctx, `insert into agent_runs (id, role, provider, model, state, started_at) values ($1, 'chat', 'fake', 'm', 'running', $2)`,
+		old.ID, agentNow.Add(-5*time.Hour))
+	mustNoErr(t, err)
+	if err := st.ReserveAgentRun(ctx, agentRun(0), time.Hour, agentNow); !errors.Is(err, store.ErrBudgetExhausted) {
+		t.Fatalf("zero reservation with budget 0 = %v, want ErrBudgetExhausted", err)
+	}
+	if state, _, _, _, _, _ := runRow(t, st, old.ID); state != "failed" {
+		t.Fatalf("sweep not committed on refusal: %s", state)
+	}
+}
+
+func TestReserveAgentRun_RejectsNegativeAndSurvivesOverflow(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	setBudget(t, st, math.MaxInt64)
+	if err := st.ReserveAgentRun(ctx, agentRun(-1), time.Hour, agentNow); err == nil || errors.Is(err, store.ErrBudgetExhausted) {
+		t.Fatalf("negative reservation = %v, want a plain error", err)
+	}
+	big := agentRun(math.MaxInt64)
+	mustNoErr(t, st.ReserveAgentRun(ctx, big, time.Hour, agentNow))
+	if err := st.ReserveAgentRun(ctx, agentRun(1), time.Hour, agentNow); !errors.Is(err, store.ErrBudgetExhausted) {
+		t.Fatalf("reserve past MaxInt64 = %v, want ErrBudgetExhausted", err)
+	}
+	// Two runs at MaxInt64 cost must not make the sum error out.
+	other := agentRun(0)
+	_, err := st.Pool.Exec(ctx, `insert into agent_runs (id, role, provider, model, state, cost_micro_usd, started_at) values ($1, 'chat', 'fake', 'm', 'done', $2, $3)`,
+		other.ID, int64(math.MaxInt64), agentNow)
+	mustNoErr(t, err)
+	if s, r, err := st.AgentSpend(ctx, novStart); err != nil || s != math.MaxInt64 || r != math.MaxInt64 {
+		t.Fatalf("spend = %d, %d, %v; want saturated MaxInt64 both", s, r, err)
+	}
+	// The next month is a fresh budget: reservations still work.
+	mustNoErr(t, st.ReserveAgentRun(ctx, agentRun(math.MaxInt64), time.Hour, agentNow.AddDate(0, 1, 0)))
+}
+
+func TestReserveAgentRun_CostAboveReservationCounts(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	setBudget(t, st, 1000)
+	r := agentRun(100)
+	mustNoErr(t, st.ReserveAgentRun(ctx, r, time.Hour, agentNow))
+	mustNoErr(t, st.RecordAgentRunUsage(ctx, r.ID, 1, 1, 800, agentNow))
+	if err := st.ReserveAgentRun(ctx, agentRun(300), time.Hour, agentNow); !errors.Is(err, store.ErrBudgetExhausted) {
+		t.Fatalf("reserve with overrun cost = %v, want ErrBudgetExhausted", err)
+	}
+	if _, reserved, _ := st.AgentSpend(ctx, novStart); reserved != 800 {
+		t.Fatalf("reserved = %d, want 800 (cost above reservation)", reserved)
+	}
+}
+
+func TestReserveAgentRun_SweepRespectsFreshLastUsage(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	setBudget(t, st, 10_000)
+	r := agentRun(100)
+	mustNoErr(t, st.ReserveAgentRun(ctx, r, time.Hour, agentNow.Add(-5*time.Hour)))
+	mustNoErr(t, st.RecordAgentRunUsage(ctx, r.ID, 1, 1, 10, agentNow.Add(-time.Minute)))
+	mustNoErr(t, st.ReserveAgentRun(ctx, agentRun(1), time.Hour, agentNow))
+	if state, _, _, _, _, _ := runRow(t, st, r.ID); state != "running" {
+		t.Fatalf("run with fresh usage was swept: %s", state)
+	}
+}
+
+func TestReserveAgentRun_IgnoresLastMonthsSpend(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	setBudget(t, st, 1000)
+	oct := time.Date(2026, 10, 31, 23, 59, 59, 0, time.UTC)
+	r := agentRun(1000)
+	mustNoErr(t, st.ReserveAgentRun(ctx, r, 24*time.Hour, oct))
+	mustNoErr(t, st.RecordAgentRunUsage(ctx, r.ID, 1, 1, 1000, oct))
+	mustNoErr(t, st.SettleAgentRun(ctx, r.ID, "done", nil, nil, oct))
+	mustNoErr(t, st.ReserveAgentRun(ctx, agentRun(1000), 24*time.Hour, time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)))
+}
+
+// 23:30 at UTC-5 on 30 Nov is already 1 Dec in UTC.
+func TestReserveAgentRun_NonUTCNowUsesUTCMonth(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	setBudget(t, st, 1000)
+	west := time.FixedZone("west", -5*3600)
+	r := agentRun(1000)
+	mustNoErr(t, st.ReserveAgentRun(ctx, r, 24*time.Hour, time.Date(2026, 11, 30, 23, 30, 0, 0, west)))
+	mustNoErr(t, st.RecordAgentRunUsage(ctx, r.ID, 1, 1, 1000, time.Date(2026, 11, 30, 23, 30, 0, 0, west)))
+	mustNoErr(t, st.SettleAgentRun(ctx, r.ID, "done", nil, nil, time.Date(2026, 11, 30, 23, 30, 0, 0, west)))
+	if s, _, _ := st.AgentSpend(ctx, time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)); s != 1000 {
+		t.Fatalf("december spend = %d, want 1000", s)
+	}
+	if s, _, _ := st.AgentSpend(ctx, novStart); s != 0 {
+		t.Fatalf("november spend = %d, want 0", s)
+	}
+	// December's budget is spent: a later reservation at the same non-UTC time must be refused.
+	if err := st.ReserveAgentRun(ctx, agentRun(1), 24*time.Hour, time.Date(2026, 11, 30, 23, 30, 0, 0, west)); !errors.Is(err, store.ErrBudgetExhausted) {
+		t.Fatalf("reserve in december at non-UTC now = %v, want ErrBudgetExhausted", err)
+	}
+}
+
+func TestAgentSpend_UnchangedWhenUserAndConversationDeleted(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	setBudget(t, st, 10_000)
+	u, err := st.CreateUser(ctx, "alice", "h", false, false)
+	mustNoErr(t, err)
+	c, err := st.CreateAgentConversation(ctx, u.ID, "t")
+	mustNoErr(t, err)
+	r := agentRun(500)
+	r.UserID, r.ConversationID = &u.ID, &c.ID
+	mustNoErr(t, st.ReserveAgentRun(ctx, r, time.Hour, agentNow))
+	mustNoErr(t, st.RecordAgentRunUsage(ctx, r.ID, 1, 1, 400, agentNow))
+	mustNoErr(t, st.SettleAgentRun(ctx, r.ID, "done", nil, nil, agentNow))
+	mustNoErr(t, st.DeleteAgentConversation(ctx, u.ID, c.ID))
+	if _, err := st.Pool.Exec(ctx, `delete from users where id = $1`, u.ID); err != nil {
+		t.Fatal(err)
+	}
+	if s, _, err := st.AgentSpend(ctx, novStart); err != nil || s != 400 {
+		t.Fatalf("spend after deletes = %d, %v; want 400", s, err)
+	}
+	var uid, cid *int64
+	mustNoErr(t, st.Pool.QueryRow(ctx, `select user_id, conversation_id from agent_runs where id = $1`, r.ID).Scan(&uid, &cid))
+	if uid != nil || cid != nil {
+		t.Fatalf("run still references user/conversation: %v %v", uid, cid)
+	}
+}
+
+func TestReserveAgentRun_ConversationMustBeOwned(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	setBudget(t, st, 10_000)
+	alice, _ := st.CreateUser(ctx, "alice", "h", false, false)
+	bob, _ := st.CreateUser(ctx, "bob", "h", false, false)
+	c, err := st.CreateAgentConversation(ctx, alice.ID, "t")
+	mustNoErr(t, err)
+	r := agentRun(10)
+	r.UserID, r.ConversationID = &bob.ID, &c.ID
+	if err := st.ReserveAgentRun(ctx, r, time.Hour, agentNow); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("reserve on another user's conversation = %v, want ErrNotFound", err)
+	}
+	r.ConversationID, r.UserID = &c.ID, nil
+	if err := st.ReserveAgentRun(ctx, r, time.Hour, agentNow); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("reserve on a conversation with no user = %v, want ErrNotFound", err)
+	}
+	r.UserID = &alice.ID
+	mustNoErr(t, st.ReserveAgentRun(ctx, r, time.Hour, agentNow))
+}
+
+func TestSettleAgentRun_SecondSettleOfSweptRunKeepsTools(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	setBudget(t, st, 10_000)
+	r := agentRun(900)
+	mustNoErr(t, st.ReserveAgentRun(ctx, r, time.Hour, agentNow.Add(-2*time.Hour)))
+	mustNoErr(t, st.ReserveAgentRun(ctx, agentRun(1), time.Hour, agentNow)) // sweeps r
+	if err := st.SettleAgentRun(ctx, r.ID, "failed", nil, []string{"list_services"}, agentNow); !errors.Is(err, store.ErrAgentRunNotRunning) {
+		t.Fatal(err)
+	}
+	if err := st.SettleAgentRun(ctx, r.ID, "failed", nil, nil, agentNow); !errors.Is(err, store.ErrAgentRunNotRunning) {
+		t.Fatal(err)
+	}
+	if _, _, _, _, tools, _ := runRow(t, st, r.ID); len(tools) != 1 || tools[0] != "list_services" {
+		t.Fatalf("tools after second settle = %v, want [list_services]", tools)
+	}
+}
+
+func TestAgentUsageByDay_SaturatesInsteadOfOverflowing(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	for i := 0; i < 2; i++ {
+		_, err := st.Pool.Exec(ctx, `insert into agent_runs (id, role, provider, model, state, cost_micro_usd, input_tokens, output_tokens, started_at)
+			values ($1, 'chat', 'fake', 'm', 'done', $2, $2, $2, $3)`, uuid.New(), int64(math.MaxInt64), agentNow)
+		mustNoErr(t, err)
+	}
+	days, err := st.AgentUsageByDay(ctx, novStart)
+	if err != nil || len(days) != 1 || days[0].Runs != 2 || days[0].CostMicroUSD != math.MaxInt64 || days[0].InputTokens != math.MaxInt64 {
+		t.Fatalf("usage = %+v, %v", days, err)
+	}
+}
+
+func TestRetryDeadlock(t *testing.T) {
+	deadlock := &pgconn.PgError{Code: "40P01"}
+	calls := 0
+	if err := store.RetryDeadlock(func() error {
+		calls++
+		if calls == 1 {
+			return deadlock
+		}
+		return nil
+	}); err != nil || calls != 2 {
+		t.Fatalf("one deadlock: err %v after %d calls, want nil after 2", err, calls)
+	}
+	calls = 0
+	if err := store.RetryDeadlock(func() error { calls++; return deadlock }); err == nil || calls != 2 {
+		t.Fatalf("persistent deadlock: err %v after %d calls, want error after exactly 2", err, calls)
+	}
+	calls = 0
+	other := errors.New("boom")
+	if err := store.RetryDeadlock(func() error { calls++; return other }); !errors.Is(err, other) || calls != 1 {
+		t.Fatalf("other error: %v after %d calls, want it unretried", err, calls)
+	}
+}
+
+// Settling stores the last figures in the same statement: as given on a running run (they may correct a provisional
+// figure downwards), raised only on a failed one, never on a done one.
+func TestSettleAgentRun_WritesTheFiguresWithTheState(t *testing.T) {
+	for name, tc := range map[string]struct {
+		prior string // how the run was settled before, if it was
+		usage *store.AgentUsage
+		want  store.AgentUsage
+		state string
+	}{
+		"running, lower":      {"", &store.AgentUsage{InputTokens: 5, OutputTokens: 5, CostMicroUSD: 50}, store.AgentUsage{InputTokens: 5, OutputTokens: 5, CostMicroUSD: 50}, "done"},
+		"running, higher":     {"", &store.AgentUsage{InputTokens: 15, OutputTokens: 15, CostMicroUSD: 150}, store.AgentUsage{InputTokens: 15, OutputTokens: 15, CostMicroUSD: 150}, "done"},
+		"running, none given": {"", nil, store.AgentUsage{InputTokens: 10, OutputTokens: 10, CostMicroUSD: 100}, "done"},
+		"failed, mixed":       {"failed", &store.AgentUsage{InputTokens: 5, OutputTokens: 15, CostMicroUSD: 150}, store.AgentUsage{InputTokens: 10, OutputTokens: 15, CostMicroUSD: 150}, "failed"},
+		"failed, lower":       {"failed", &store.AgentUsage{InputTokens: 15, OutputTokens: 5, CostMicroUSD: 50}, store.AgentUsage{InputTokens: 15, OutputTokens: 10, CostMicroUSD: 100}, "failed"},
+		"failed, none given":  {"failed", nil, store.AgentUsage{InputTokens: 10, OutputTokens: 10, CostMicroUSD: 100}, "failed"},
+		"done":                {"done", &store.AgentUsage{InputTokens: 15, OutputTokens: 15, CostMicroUSD: 150}, store.AgentUsage{InputTokens: 10, OutputTokens: 10, CostMicroUSD: 100}, "done"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			st := storetest.Open(t)
+			setBudget(t, st, 1_000_000)
+			r := agentRun(100)
+			mustNoErr(t, st.ReserveAgentRun(t.Context(), r, time.Hour, agentNow))
+			mustNoErr(t, st.RecordAgentRunUsage(t.Context(), r.ID, 10, 10, 100, agentNow))
+			if tc.prior != "" {
+				mustNoErr(t, st.SettleAgentRun(t.Context(), r.ID, tc.prior, nil, nil, agentNow))
+			}
+			err := st.SettleAgentRun(t.Context(), r.ID, "done", tc.usage, nil, agentNow.Add(time.Second))
+			if (tc.prior != "") != errors.Is(err, store.ErrAgentRunNotRunning) {
+				t.Errorf("settle = %v", err)
+			}
+			state, cost, in, out, _, _ := runRow(t, st, r.ID)
+			if got := (store.AgentUsage{InputTokens: in, OutputTokens: out, CostMicroUSD: cost}); got != tc.want || state != tc.state {
+				t.Errorf("run = %s %+v, want %s %+v", state, got, tc.state, tc.want)
+			}
+		})
+	}
+}
+
+// When the settlement is refused its figures are not half written, and the other way round.
+func TestSettleAgentRun_FiguresAndStateAreOneWrite(t *testing.T) {
+	st := storetest.Open(t)
+	setBudget(t, st, 1_000_000)
+	r := agentRun(100)
+	mustNoErr(t, st.ReserveAgentRun(t.Context(), r, time.Hour, agentNow))
+	for _, q := range []string{
+		`create function refuse() returns trigger language plpgsql as $$ begin raise exception 'refused'; end $$`,
+		`create trigger refuse before update on agent_runs for each row when (new.cost_micro_usd is distinct from old.cost_micro_usd) execute function refuse()`,
+	} {
+		_, err := st.Pool.Exec(t.Context(), q)
+		mustNoErr(t, err)
+	}
+	if err := st.SettleAgentRun(t.Context(), r.ID, "done", &store.AgentUsage{CostMicroUSD: 50}, nil, agentNow); err == nil {
+		t.Error("settle succeeded without its figures")
+	}
+	if state, cost, _, _, _, _ := runRow(t, st, r.ID); state != "running" || cost != 0 {
+		t.Errorf("run = %s cost %d, want it untouched", state, cost)
+	}
+}
+
+func TestReserveLeaving_RefusesWhenTheRoomAfterwardsIsTooSmall(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	setBudget(t, st, 100)
+	refused := agentRun(40)
+	if err := st.ReserveAgentRunLeaving(ctx, refused, 70, time.Hour, agentNow); !errors.Is(err, store.ErrBudgetExhausted) {
+		t.Fatalf("leave 70 = %v, want ErrBudgetExhausted", err)
+	}
+	var n int
+	if err := st.Pool.QueryRow(ctx, `select count(*) from agent_runs where id = $1`, refused.ID).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("refused run was written: %d, %v", n, err)
+	}
+	ok := agentRun(40)
+	if err := st.ReserveAgentRunLeaving(ctx, ok, 60, time.Hour, agentNow); err != nil {
+		t.Fatalf("leave 60: %v", err)
+	}
+	var held int64
+	if err := st.Pool.QueryRow(ctx, `select reserved_micro_usd from agent_runs where id = $1`, ok.ID).Scan(&held); err != nil || held != 40 {
+		t.Fatalf("row holds %d, %v; want the request, 40", held, err)
+	}
+	if _, reserved, err := st.AgentSpend(ctx, agentNow); err != nil || reserved != 40 {
+		t.Fatalf("reserved = %d, %v; the leave must not be held", reserved, err)
+	}
+}
+
+// spendSetup puts settled and running spend, and a stale reservation, on a fresh store with budget 1000.
+func spendSetup(t *testing.T, settled, running, stale int64) *store.Store {
+	t.Helper()
+	st := storetest.Open(t)
+	ctx := t.Context()
+	setBudget(t, st, 1000)
+	if settled > 0 {
+		r := agentRun(settled)
+		mustNoErr(t, st.ReserveAgentRun(ctx, r, time.Hour, agentNow))
+		mustNoErr(t, st.RecordAgentRunUsage(ctx, r.ID, 1, 1, settled, agentNow))
+		mustNoErr(t, st.SettleAgentRun(ctx, r.ID, "done", nil, nil, agentNow))
+	}
+	if running > 0 {
+		mustNoErr(t, st.ReserveAgentRun(ctx, agentRun(running), time.Hour, agentNow))
+	}
+	if stale > 0 {
+		if _, err := st.Pool.Exec(ctx, `insert into agent_runs (id, role, provider, model, state, reserved_micro_usd, started_at)
+			values ($1, 'chat', 'fake', 'm', 'running', $2, $3)`, uuid.New(), stale, agentNow.Add(-5*time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return st
+}
+
+func TestReserveLeaving_ZeroLeaveIsReserve(t *testing.T) {
+	type step struct {
+		request int64
+		want    bool
+	}
+	for name, tc := range map[string]struct {
+		budget                int64
+		settled, running, old int64 // old: a stale reservation the first call sweeps
+		steps                 []step
+	}{
+		"exactly the budget":      {1000, 0, 0, 0, []step{{1000, true}}},
+		"one over the budget":     {1000, 0, 0, 0, []step{{1001, false}}},
+		"second fits the room":    {1000, 0, 0, 0, []step{{600, true}, {400, true}}},
+		"second is one too many":  {1000, 0, 0, 0, []step{{600, true}, {401, false}}},
+		"budget 0 refuses free":   {0, 0, 0, 0, []step{{0, false}}},
+		"free run with a budget":  {1, 0, 0, 0, []step{{0, true}}},
+		"refusal keeps the room":  {1000, 0, 0, 0, []step{{1001, false}, {1000, true}}},
+		"settled spend":           {1000, 300, 0, 0, []step{{700, true}, {1, false}}},
+		"settled and one over":    {1000, 300, 0, 0, []step{{701, false}}},
+		"a stale run is swept":    {1000, 0, 0, 900, []step{{1000, true}}},
+		"settled, running, stale": {1000, 200, 300, 400, []step{{500, true}, {1, false}}},
+		"settled, running, over":  {1000, 200, 300, 400, []step{{501, false}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			for _, viaLeaving := range []bool{false, true} {
+				st := spendSetup(t, tc.settled, tc.running, tc.old)
+				if tc.budget != 1000 {
+					setBudget(t, st, tc.budget)
+				}
+				for i, s := range tc.steps {
+					var err error
+					if viaLeaving {
+						err = st.ReserveAgentRunLeaving(t.Context(), agentRun(s.request), 0, time.Hour, agentNow)
+					} else {
+						err = st.ReserveAgentRun(t.Context(), agentRun(s.request), time.Hour, agentNow)
+					}
+					if s.want && err != nil || !s.want && !errors.Is(err, store.ErrBudgetExhausted) {
+						t.Errorf("leaving=%v step %d (%d) = %v, want accepted=%v", viaLeaving, i, s.request, err, s.want)
+					}
+				}
+			}
+		})
+	}
+}
+
+// The room a leave is tested against is what settled and running spend leave, not the whole budget.
+func TestReserveLeaving_TheLeaveIsTestedAgainstTheRoomLeft(t *testing.T) {
+	for name, tc := range map[string]struct{ settled, running int64 }{
+		"settled spend": {250, 0},
+		"running":       {0, 250},
+		"both":          {100, 150},
+	} {
+		t.Run(name, func(t *testing.T) {
+			const request, room = 400, 750
+			leave := int64(room - request)
+			over := spendSetup(t, tc.settled, tc.running, 0)
+			if err := over.ReserveAgentRunLeaving(t.Context(), agentRun(request), leave+1, time.Hour, agentNow); !errors.Is(err, store.ErrBudgetExhausted) {
+				t.Fatalf("one over the room = %v, want ErrBudgetExhausted", err)
+			}
+			st := spendSetup(t, tc.settled, tc.running, 0)
+			if err := st.ReserveAgentRunLeaving(t.Context(), agentRun(request), leave, time.Hour, agentNow); err != nil {
+				t.Fatalf("exactly the room: %v", err)
+			}
+			if err := st.ReserveAgentRun(t.Context(), agentRun(leave), time.Hour, agentNow); err != nil {
+				t.Fatalf("a plain run of the leave's size: %v", err)
+			}
+		})
+	}
+}
+
+// Leaving and plain reservations at once never hold more than the budget.
+func TestReserveLeaving_ConcurrentLeavingAndPlainNeverExceedBudget(t *testing.T) {
+	st := storetest.Open(t)
+	setBudget(t, st, 1000)
+	var wg sync.WaitGroup
+	for i := range 12 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if i%2 == 0 {
+				_ = st.ReserveAgentRunLeaving(t.Context(), agentRun(100), 300, time.Hour, agentNow)
+			} else {
+				_ = st.ReserveAgentRun(t.Context(), agentRun(100), time.Hour, agentNow)
+			}
+		}()
+	}
+	wg.Wait()
+	_, reserved, err := st.AgentSpend(t.Context(), novStart)
+	if err != nil || reserved > 1000 {
+		t.Fatalf("reserved = %d, %v; want at most 1000", reserved, err)
+	}
+	// A leaving run was only accepted while 300 more would fit, so the plain runs that followed it stopped at 1000,
+	// and any leaving run that got in left room for 300 at that moment: the total is a multiple of 100.
+	if reserved%100 != 0 || reserved == 0 {
+		t.Fatalf("reserved = %d", reserved)
+	}
+}
+
+// A refusal caused by the leave alone, or by overflow, still commits the stale sweep.
+func TestReserveLeaving_RefusalStillCommitsTheStaleSweep(t *testing.T) {
+	for name, leave := range map[string]int64{"the leave alone": 950, "overflow": math.MaxInt64} {
+		t.Run(name, func(t *testing.T) {
+			st := storetest.Open(t)
+			ctx := t.Context()
+			setBudget(t, st, 1000)
+			old := uuid.New()
+			if _, err := st.Pool.Exec(ctx, `insert into agent_runs (id, role, provider, model, state, started_at) values ($1, 'chat', 'fake', 'm', 'running', $2)`,
+				old, agentNow.Add(-5*time.Hour)); err != nil {
+				t.Fatal(err)
+			}
+			if err := st.ReserveAgentRunLeaving(ctx, agentRun(100), leave, time.Hour, agentNow); !errors.Is(err, store.ErrBudgetExhausted) {
+				t.Fatalf("refusal expected, got %v", err)
+			}
+			var state string
+			if err := st.Pool.QueryRow(ctx, `select state from agent_runs where id = $1`, old).Scan(&state); err != nil || state != "failed" {
+				t.Fatalf("stale run after the refusal = %q, %v; want failed", state, err)
+			}
+		})
+	}
+}
+
+func TestReserveLeaving_SaturatesInsteadOfWrapping(t *testing.T) {
+	st := storetest.Open(t)
+	setBudget(t, st, math.MaxInt64)
+	// Added without saturating these sums wrap to a small or negative number and would fit.
+	for name, tc := range map[string]struct{ request, leave int64 }{
+		"both above half the cap": {math.MaxInt64/2 + 1, math.MaxInt64/2 + 1},
+		"request at the cap":      {math.MaxInt64, 1},
+		"leave at the cap":        {1, math.MaxInt64},
+		"both at the cap":         {math.MaxInt64, math.MaxInt64},
+	} {
+		run := agentRun(tc.request)
+		if err := st.ReserveAgentRunLeaving(t.Context(), run, tc.leave, time.Hour, agentNow); !errors.Is(err, store.ErrBudgetExhausted) {
+			t.Errorf("%s: %v, want ErrBudgetExhausted", name, err)
+		}
+	}
+	// Exactly the cap fits.
+	if err := st.ReserveAgentRunLeaving(t.Context(), agentRun(math.MaxInt64-5), 5, time.Hour, agentNow); err != nil {
+		t.Errorf("request + leave = the cap: %v", err)
+	}
+}
+
+func TestReserveLeaving_NegativeLeaveIsAnError(t *testing.T) {
+	st := storetest.Open(t)
+	setBudget(t, st, 1000)
+	run := agentRun(10)
+	err := st.ReserveAgentRunLeaving(t.Context(), run, -1, time.Hour, agentNow)
+	if err == nil || errors.Is(err, store.ErrBudgetExhausted) {
+		t.Fatalf("negative leave = %v, want a plain error", err)
+	}
+	var n int
+	if err := st.Pool.QueryRow(t.Context(), `select count(*) from agent_runs where id = $1`, run.ID).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("a run was written: %d, %v", n, err)
+	}
+}
+
+func TestReserveLeaving_AChatRunStillFitsAfterAReview(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := t.Context()
+	setBudget(t, st, 1000)
+	const oneChatRun = 300
+	if err := st.ReserveAgentRunLeaving(ctx, agentRun(700), oneChatRun, time.Hour, agentNow); err != nil {
+		t.Fatalf("review: %v", err)
+	}
+	if err := st.ReserveAgentRunLeaving(ctx, agentRun(oneChatRun), 0, time.Hour, agentNow); err != nil {
+		t.Fatalf("chat after the review: %v", err)
+	}
+	// A review one micro-dollar larger would have taken that room.
+	st2 := storetest.Open(t)
+	setBudget(t, st2, 1000)
+	if err := st2.ReserveAgentRunLeaving(ctx, agentRun(701), oneChatRun, time.Hour, agentNow); !errors.Is(err, store.ErrBudgetExhausted) {
+		t.Fatalf("review taking the chat room = %v, want ErrBudgetExhausted", err)
+	}
+}

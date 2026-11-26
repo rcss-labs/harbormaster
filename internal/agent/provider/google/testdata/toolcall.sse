@@ -1,0 +1,4 @@
+data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Let me look."}]}}],"usageMetadata":{"promptTokenCount":30,"candidatesTokenCount":4,"totalTokenCount":34}}
+
+data: {"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"list_clusters","args":{"region":"eu-west-1","limit":5}},"thoughtSignature":"c2lnLW9uZQ=="},{"functionCall":{"name":"get_service","args":{"name":"api"}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":30,"candidatesTokenCount":20,"totalTokenCount":50}}
+

@@ -1,0 +1,6 @@
+[
+  {"type": "messageStart", "payload": {"role": "assistant"}},
+  {"type": "contentBlockDelta", "payload": {"contentBlockIndex": 0, "delta": {"text": "partial"}}},
+  {"type": "metadata", "payload": {"usage": {"inputTokens": 9, "outputTokens": 2, "totalTokens": 11}, "metrics": {"latencyMs": 1}}},
+  {"exception": "modelStreamErrorException", "payload": {"message": "vendor-detail-should-not-leak"}}
+]

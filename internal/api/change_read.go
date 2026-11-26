@@ -4,13 +4,16 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 
+	"github.com/rcss-labs/harbormaster/internal/apitoken"
 	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/deploy"
 	"github.com/rcss-labs/harbormaster/internal/model"
+	"github.com/rcss-labs/harbormaster/internal/secretshape"
 	"github.com/rcss-labs/harbormaster/internal/store"
 )
 
@@ -65,8 +68,9 @@ type TaskDefinitionResponse struct {
 	Can               ChangeCanDTO     `json:"can"`
 	Tag               TagDTO           `json:"tag"`
 	PolledAt          time.Time        `json:"polled_at"`
-	// EnvironmentRedacted is true when HM_TOKEN_REDACT_ENV replaced the environment values for an access token, so
-	// a caller does not report "[redacted]" as a real value.
+	// EnvironmentRedacted is true when the environment values of this answer were redacted for an access token: all of
+	// them, or, for a run token whose provider was lifted, those that looked secret and at least one did. A caller
+	// must not report "[redacted]" as a real value.
 	EnvironmentRedacted bool `json:"environment_redacted,omitempty"`
 }
 
@@ -97,7 +101,8 @@ type RevisionDefinitionResponse struct {
 	Definition   json.RawMessage `json:"definition"`
 	RegisteredAt time.Time       `json:"registered_at"`
 	RegisteredBy string          `json:"registered_by"`
-	// EnvironmentRedacted is true when HM_TOKEN_REDACT_ENV replaced the environment values for an access token.
+	// EnvironmentRedacted is true when the environment values of this answer were redacted for an access token (see
+	// TaskDefinitionResponse).
 	EnvironmentRedacted bool `json:"environment_redacted,omitempty"`
 }
 
@@ -168,11 +173,7 @@ func (s *Server) getTaskDefinition(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	redacted := s.redactForToken(r)
-	definitionSource := deployed.Definition
-	if redacted {
-		definitionSource = redactEnvironment(definitionSource)
-	}
+	definitionSource, redacted := redactEnvironment(deployed.Definition, s.redactionFor(r))
 	definition, err := deploy.DefinitionJSON(definitionSource)
 	if err != nil {
 		s.fail(w, err)
@@ -244,11 +245,7 @@ func (s *Server) getRevisionDefinition(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	redacted := s.redactForToken(r)
-	definitionSource := found.Definition
-	if redacted {
-		definitionSource = redactEnvironment(definitionSource)
-	}
+	definitionSource, redacted := redactEnvironment(found.Definition, s.redactionFor(r))
 	definition, err := deploy.DefinitionJSON(definitionSource)
 	if err != nil {
 		s.fail(w, err)
@@ -307,59 +304,143 @@ func (s *Server) getDesiredCount(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// redactedValue replaces an environment value for an access token when HM_TOKEN_REDACT_ENV is on.
-const redactedValue = "[redacted]"
+// redactedValue replaces an environment value that must not reach the caller.
+const redactedValue = secretshape.Redacted
 
-// redactForToken reports whether this request's answer must hide environment values: only for an access token and
-// only while the switch is on (it is off by default, owner decision 9). A session is never redacted.
-func (s *Server) redactForToken(r *http.Request) bool {
-	return s.Cfg.TokenRedactEnv && auth.IsToken(r.Context())
+// envRedaction says which environment values an answer hides. The zero value hides everything, so a mode that
+// was never decided fails closed.
+type envRedaction int
+
+const (
+	redactAll          envRedaction = iota // every value
+	redactNone                             // no value
+	redactSecretShapes                     // only values whose name or content looks secret
+)
+
+// redactionFor decides the mode for this request.
+func (s *Server) redactionFor(r *http.Request) envRedaction {
+	cred, ok := auth.CredentialFrom(r.Context())
+	return redactionMode(cred, ok, s.Cfg.TokenRedactEnv)
 }
 
-// redactEnvironment returns a copy of the task definition with every containerDefinitions[].environment[].value
-// replaced by "[redacted]". Names, secrets[].valueFrom and everything else are kept. The input is never modified:
-// definitions may be shared with a cache.
-func redactEnvironment(definition map[string]any) map[string]any {
-	containers, ok := definition["containerDefinitions"].([]any)
+// redactionMode: a session is never redacted. A personal or OAuth access token is redacted entirely while
+// HM_TOKEN_REDACT_ENV is on (off by default, owner decision 9). A run token is redacted entirely when that switch
+// is on or its provider was not lifted, and otherwise only for secret-looking values: the operator's switch is
+// never weakened by an admin's per-provider lift. No credential or an unknown kind is redacted entirely.
+func redactionMode(cred auth.Credential, ok, tokenRedactEnv bool) envRedaction {
 	if !ok {
-		return definition
+		return redactAll
+	}
+	switch cred.Kind {
+	case auth.CredentialSession:
+		return redactNone
+	case auth.CredentialToken:
+		switch cred.TokenKind {
+		case apitoken.KindPAT, apitoken.KindOAuthAccess:
+			if tokenRedactEnv {
+				return redactAll
+			}
+			return redactNone
+		case apitoken.KindRun:
+			if tokenRedactEnv || cred.RedactEnv {
+				return redactAll
+			}
+			return redactSecretShapes
+		}
+	}
+	return redactAll
+}
+
+// redactEnvironment returns a copy of the task definition with the environment values replaced by "[redacted]" as
+// the mode says, and whether the answer should be flagged as redacted. Names, secrets[].valueFrom and everything
+// else are kept. The input is never modified: definitions may be shared with a cache. Any shape this code does not
+// expect (another type, another key casing, a non-string value) is replaced rather than passed through.
+func redactEnvironment(definition map[string]any, mode envRedaction) (map[string]any, bool) {
+	if mode == redactNone {
+		return definition, false
+	}
+	replaced := mode == redactAll
+	hide := func() any {
+		replaced = true
+		return redactedValue
 	}
 	out := make(map[string]any, len(definition))
 	for key, value := range definition {
-		out[key] = value
-	}
-	redactedContainers := make([]any, len(containers))
-	for i, raw := range containers {
-		container, ok := raw.(map[string]any)
-		if !ok {
-			redactedContainers[i] = raw
+		if !strings.EqualFold(key, "containerDefinitions") {
+			out[key] = value
 			continue
 		}
-		copied := make(map[string]any, len(container))
-		for key, value := range container {
-			copied[key] = value
+		containers, ok := value.([]any)
+		if !ok {
+			out[key] = hide()
+			continue
 		}
-		if environment, ok := container["environment"].([]any); ok {
-			redactedEnvironment := make([]any, len(environment))
-			for j, rawEntry := range environment {
-				entry, ok := rawEntry.(map[string]any)
-				if !ok {
-					redactedEnvironment[j] = rawEntry
+		redactedContainers := make([]any, len(containers))
+		for i, raw := range containers {
+			container, ok := raw.(map[string]any)
+			if !ok {
+				redactedContainers[i] = hide()
+				continue
+			}
+			copied := make(map[string]any, len(container))
+			for field, fieldValue := range container {
+				if !strings.EqualFold(field, "environment") {
+					copied[field] = fieldValue
 					continue
 				}
-				copiedEntry := make(map[string]any, len(entry))
-				for key, value := range entry {
-					copiedEntry[key] = value
-				}
-				if _, has := copiedEntry["value"]; has {
-					copiedEntry["value"] = redactedValue
-				}
-				redactedEnvironment[j] = copiedEntry
+				copied[field] = redactEntries(fieldValue, mode, hide)
 			}
-			copied["environment"] = redactedEnvironment
+			redactedContainers[i] = copied
 		}
-		redactedContainers[i] = copied
+		out[key] = redactedContainers
 	}
-	out["containerDefinitions"] = redactedContainers
-	return out
+	return out, replaced
+}
+
+func redactEntries(raw any, mode envRedaction, hide func() any) any {
+	entries, ok := raw.([]any)
+	if !ok {
+		return hide()
+	}
+	redacted := make([]any, len(entries))
+	for i, rawEntry := range entries {
+		entry, ok := rawEntry.(map[string]any)
+		if !ok {
+			redacted[i] = hide()
+			continue
+		}
+		// An entry spelled with both "name" and "Name" is secret when either name is.
+		nameSecret := false
+		for key, value := range entry {
+			if text, _ := value.(string); strings.EqualFold(key, "name") && secretshape.NameLooksSecret(text) {
+				nameSecret = true
+			}
+		}
+		copied := make(map[string]any, len(entry))
+		for key, value := range entry {
+			switch {
+			case strings.EqualFold(key, "name"):
+				copied[key] = value
+			case strings.EqualFold(key, "value") && hidesValue(mode, nameSecret, value):
+				copied[key] = hide()
+			case strings.EqualFold(key, "value"):
+				copied[key] = value
+			default:
+				// A key an environment entry should not have may carry a value too.
+				copied[key] = hide()
+			}
+		}
+		redacted[i] = copied
+	}
+	return redacted
+}
+
+// hidesValue reports whether the mode replaces one environment value. In secrets-only mode a value that is not a
+// string counts as secret.
+func hidesValue(mode envRedaction, nameSecret bool, value any) bool {
+	if mode != redactSecretShapes {
+		return true
+	}
+	text, ok := value.(string)
+	return !ok || nameSecret || secretshape.ScrubText(text) != text
 }

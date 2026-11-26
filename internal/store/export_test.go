@@ -163,3 +163,11 @@ func (s *Store) UpsertTargetHealth(ctx context.Context, rows []model.TargetHealt
 func (s *Store) DeleteTargetHealthNotIn(ctx context.Context, t awsx.Target, keep []string) error {
 	return deleteTargetHealthNotIn(ctx, s.Pool, t, keep)
 }
+
+// RetryDeadlock exposes retryDeadlock to the external tests.
+var RetryDeadlock = retryDeadlock
+
+// ClaimFollowUpDeliveriesForTest exposes the unexported claim so a test can hand it an event no caller may pass.
+func (s *Store) ClaimFollowUpDeliveriesForTest(ctx context.Context, event string, now time.Time, lease time.Duration, f ClaimFilter) ([]NotificationDelivery, error) {
+	return s.claimFollowUpDeliveries(ctx, event, now, lease, f)
+}

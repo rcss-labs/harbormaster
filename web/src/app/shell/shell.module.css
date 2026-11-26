@@ -68,7 +68,7 @@
 
 .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 /* Crumbs wrap and shrink (min-width: 0) before they can overlap the search button; the search shrinks to 160px. */
-.topbar { min-height: 56px; flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 24px; border-bottom: 1px solid var(--border); background: var(--chrome); position: relative; z-index: 3; }
+.topbar { min-height: 56px; flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 8px 24px; border-bottom: 1px solid var(--border); background: var(--chrome); position: relative; z-index: 3; }
 .popAnchor { position: relative; flex: none; }
 .scopeBtn { display: inline-flex; align-items: center; gap: 8px; height: 32px; max-width: 280px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--raised); color: var(--text); cursor: pointer; font: inherit; font-weight: 500; }
 .scopeBtn:hover { background: var(--hover); }
@@ -88,11 +88,14 @@
 .scopeName { display: flex; gap: 6px; }
 .scopeName input { flex: 1; min-width: 0; height: 28px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--surface); color: var(--text); font: inherit; }
 
-.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 0 6px; flex: 1 1 120px; min-width: 0; color: var(--muted); line-height: 1.3; overflow-wrap: anywhere; }
+/* The controls on the right stay together. When the bar is too full (200 % zoom, a long name) the group drops to a second row instead of leaving the window; the order of the controls is unchanged. */
+.tools { display: flex; align-items: center; gap: inherit; flex: 0 1 auto; min-width: 0; margin-left: auto; }
+.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 0 6px; flex: 1 1 120px; min-width: 96px; color: var(--muted); line-height: 1.3; overflow-wrap: break-word; }
+.crumbs > * { min-width: 0; }
 .crumbs a:hover { color: var(--text); }
 .sep { color: var(--muted); }
 .here { color: var(--text); font-weight: 500; }
-.searchBtn { flex: 0 1 280px; min-width: 160px; height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 6px 0 8px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--raised); color: var(--muted); cursor: pointer; text-align: left; white-space: nowrap; overflow: hidden; font: inherit; }
+.searchBtn { flex: 0 1 280px; width: 280px; min-width: 160px; height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 6px 0 8px; border: 1px solid var(--border-strong); border-radius: var(--r); background: var(--raised); color: var(--muted); cursor: pointer; text-align: left; white-space: nowrap; overflow: hidden; font: inherit; }
 .searchBtn:hover { border-color: var(--muted); }
 .searchBtn svg { flex: none; }
 .searchText { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -160,7 +163,7 @@
 @media (max-width: 1439px) {
   .app:not(.appCollapsed) { --side: 220px; }
   .topbar { gap: 4px; padding: 8px 16px; }
-  .searchBtn { flex-basis: 160px; }
+  .searchBtn { flex-basis: 160px; width: 160px; }
 }
 @media (max-width: 900px) {
   .content { padding: 12px; }

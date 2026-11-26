@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -61,9 +62,41 @@ type NotificationRoute struct {
 	NotifyResolved bool
 	Scope          []NotificationSelector // empty = everything
 	Fallback       bool                   // only when no other route matches
+	Investigate    bool                   // start an automatic investigation when an alert opens on this route
 	Version        int
 	UpdatedAt      time.Time
 	UpdatedBy      *int64
+}
+
+// TargetLabel is what the delivery log and the route list show as the route's destination. It never includes a URL
+// path, a routing key or a token.
+func (r NotificationRoute) TargetLabel() string {
+	c := r.Config
+	switch r.Destination {
+	case "slack":
+		if c.Label != "" {
+			return c.Label
+		}
+		if c.URLHost != "" {
+			return c.URLHost
+		}
+		return "Slack"
+	case "pagerduty":
+		if c.Label != "" {
+			return c.Label
+		}
+		return "PagerDuty"
+	case "webhook":
+		return c.URLHost
+	case "telegram":
+		if c.Label != "" {
+			return c.Label
+		}
+		return c.ChatID
+	case "email":
+		return strings.Join(c.Recipients, ", ")
+	}
+	return ""
 }
 
 const MaxNotificationRoutes = 50
@@ -71,13 +104,13 @@ const MaxNotificationRoutes = 50
 var ErrRouteLimit = errors.New("notification route limit reached")
 
 const notificationRouteColumns = `id, name, enabled, destination, config, secret_enc, fallback, min_severity, kinds,
-	repeat_seconds, quiet_enabled, quiet_timezone, notify_resolved, version, updated_at, updated_by`
+	repeat_seconds, quiet_enabled, quiet_timezone, notify_resolved, version, updated_at, updated_by, investigate`
 
 func scanNotificationRoute(row pgx.Row) (NotificationRoute, error) {
 	var r NotificationRoute
 	var config []byte
 	err := row.Scan(&r.ID, &r.Name, &r.Enabled, &r.Destination, &config, &r.SecretEnc, &r.Fallback, &r.MinSeverity, &r.Kinds,
-		&r.RepeatSeconds, &r.QuietEnabled, &r.QuietTimezone, &r.NotifyResolved, &r.Version, &r.UpdatedAt, &r.UpdatedBy)
+		&r.RepeatSeconds, &r.QuietEnabled, &r.QuietTimezone, &r.NotifyResolved, &r.Version, &r.UpdatedAt, &r.UpdatedBy, &r.Investigate)
 	if err != nil {
 		return NotificationRoute{}, err
 	}
@@ -201,11 +234,11 @@ func (s *Store) CreateNotificationRoute(ctx context.Context, r NotificationRoute
 	}
 	created, err := scanNotificationRoute(tx.QueryRow(ctx,
 		`insert into notification_routes (name, enabled, destination, config, secret_enc, fallback, min_severity, kinds,
-		   repeat_seconds, quiet_enabled, quiet_timezone, notify_resolved, updated_by)
-		 values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, nullif($13, 0::bigint))
+		   repeat_seconds, quiet_enabled, quiet_timezone, notify_resolved, updated_by, investigate)
+		 values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, nullif($13, 0::bigint), $14)
 		 returning `+notificationRouteColumns,
 		r.Name, r.Enabled, r.Destination, config, r.SecretEnc, r.Fallback, r.MinSeverity, r.Kinds,
-		r.RepeatSeconds, r.QuietEnabled, r.QuietTimezone, r.NotifyResolved, by))
+		r.RepeatSeconds, r.QuietEnabled, r.QuietTimezone, r.NotifyResolved, by, r.Investigate))
 	if isUniqueViolation(err) {
 		return NotificationRoute{}, ErrConflict
 	}
@@ -242,11 +275,11 @@ func (s *Store) UpdateNotificationRoute(ctx context.Context, r NotificationRoute
 		`update notification_routes set name = $3, enabled = $4, destination = $5, config = $6, secret_enc = $7,
 		   fallback = $8, min_severity = $9, kinds = $10, repeat_seconds = $11, quiet_enabled = $12,
 		   quiet_timezone = $13, notify_resolved = $14, version = version + 1, updated_at = now(),
-		   updated_by = nullif($15, 0::bigint)
+		   updated_by = nullif($15, 0::bigint), investigate = $16
 		 where id = $1 and version = $2
 		 returning `+notificationRouteColumns,
 		r.ID, r.Version, r.Name, r.Enabled, r.Destination, config, r.SecretEnc,
-		r.Fallback, r.MinSeverity, r.Kinds, r.RepeatSeconds, r.QuietEnabled, r.QuietTimezone, r.NotifyResolved, by))
+		r.Fallback, r.MinSeverity, r.Kinds, r.RepeatSeconds, r.QuietEnabled, r.QuietTimezone, r.NotifyResolved, by, r.Investigate))
 	if isUniqueViolation(err) {
 		return NotificationRoute{}, ErrConflict
 	}

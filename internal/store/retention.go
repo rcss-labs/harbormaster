@@ -15,6 +15,10 @@ type Retention struct {
 	ScanRuns, ScanImages time.Duration
 	// NotificationLog prunes the notification delivery log and long-resolved alert incidents.
 	NotificationLog time.Duration
+	// AgentConversations prunes agent chats not active for that long; their runs and usage stay.
+	AgentConversations time.Duration
+	// AgentRuns prunes finished, audited agent runs and old investigations and review runs; this month's runs always stay.
+	AgentRuns time.Duration
 }
 
 // RetentionResult maps a table key ("tasks", "service_events", ...) to rows deleted.
@@ -89,6 +93,34 @@ func (s *Store) RunRetention(ctx context.Context, now time.Time, r Retention) (R
 			return result, fmt.Errorf("retention scan_acceptances_pruned: %w", err)
 		}
 		result["scan_acceptances_pruned"] = tag.RowsAffected()
+	}
+
+	if r.AgentConversations > 0 {
+		n, err := s.DeleteAgentConversationsBefore(ctx, now.Add(-r.AgentConversations))
+		if err != nil {
+			return result, fmt.Errorf("retention agent_conversations: %w", err)
+		}
+		result["agent_conversations"] = n
+	}
+
+	if r.AgentRuns > 0 {
+		n, err := s.DeleteInvestigationsBefore(ctx, now.Add(-r.AgentRuns), now)
+		if err != nil {
+			return result, fmt.Errorf("retention agent_investigations: %w", err)
+		}
+		result["agent_investigations"] = n
+		n, err = s.DeleteReviewRunsBefore(ctx, now.Add(-r.AgentRuns), now)
+		if err != nil {
+			return result, fmt.Errorf("retention agent_review_runs: %w", err)
+		}
+		result["agent_review_runs"] = n
+		// Plan call 18: whatever the setting, the current UTC month's runs stay, so the month's spend cannot shrink.
+		monthStart, _ := utcMonthBounds(now)
+		n, err = s.DeleteAgentRunsBefore(ctx, now.Add(-r.AgentRuns), monthStart)
+		if err != nil {
+			return result, fmt.Errorf("retention agent_runs: %w", err)
+		}
+		result["agent_runs"] = n
 	}
 
 	pruned, err := s.PruneImagePlatforms(ctx, now.Add(-imagePlatformsRetention))

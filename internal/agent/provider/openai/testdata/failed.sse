@@ -1,0 +1,3 @@
+event: response.failed
+data: {"type":"response.failed","sequence_number":1,"response":{"id":"resp_fake5","object":"response","status":"failed","error":{"code":"server_error","message":"internal detail SECRET-BODY-TEXT"},"output":[],"usage":{"input_tokens":7,"input_tokens_details":{"cached_tokens":0},"output_tokens":0,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":7}}}
+

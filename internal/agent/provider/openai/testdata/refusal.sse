@@ -1,0 +1,6 @@
+event: response.refusal.delta
+data: {"type":"response.refusal.delta","sequence_number":1,"item_id":"msg_fake1","output_index":0,"content_index":0,"delta":"I cannot help with that."}
+
+event: response.completed
+data: {"type":"response.completed","sequence_number":2,"response":{"id":"resp_fake7","object":"response","status":"completed","output":[],"usage":{"input_tokens":4,"input_tokens_details":{"cached_tokens":0},"output_tokens":6,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":10}}}
+

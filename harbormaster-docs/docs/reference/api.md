@@ -255,6 +255,52 @@ All are Admin-only.
 | `POST /api/notifications/deliveries/{id}/retry` | Retry a failed delivery. |
 | `GET /api/notifications/summary` | Delivery summary. |
 
+## AI agent and investigations
+
+These routes exist only while `HM_AGENT_URL` is set (`404` otherwise). All are session-only: access tokens and run tokens cannot call them. See [AI chat](../guides/ai-agent-chat.md) and [Automatic AI investigations](../guides/ai-agent-investigator.md).
+
+| Method and path | Needs | Purpose |
+| --- | --- | --- |
+| `GET /api/agent/status` | Signed in | Whether the agent is on and whether you may chat. |
+| `GET /api/agent/conversations` | AI chat | Your conversations. |
+| `POST /api/agent/conversations` | AI chat | Start a conversation. |
+| `GET /api/agent/conversations/{id}` | AI chat | One of your conversations. |
+| `DELETE /api/agent/conversations/{id}` | AI chat | Delete one of your conversations. |
+| `POST /api/agent/conversations/{id}/messages` | AI chat | Ask a question. The answer streams back. |
+| `GET /api/agent/settings`, `PUT /api/agent/settings` | Admin | Read or save the allowance, the models and the provider choices. |
+| `POST /api/agent/settings/test` | Admin | Test a model with one small paid call. |
+| `GET /api/agent/usage` | Admin | Spend this month. |
+| `PUT /api/agent/identity` | Admin | Set what the agent identity may read, per tag. |
+| `GET /api/agent/investigations` | Admin | Every investigation, newest first, with state, reason and cost. Paged by cursor. |
+| `POST /api/users/{id}/ai-chat` | Admin | Turn AI chat on or off for a user. |
+| `GET /api/services/{serviceId}/investigations` | Signed in, View | Investigations of a service, for the timeline. |
+| `GET /api/investigations/{id}` | Signed in | One investigation. The summary needs View on its subject; each evidence item needs View, and Logs for log text, on its own service, checked now. |
+| `GET /api/investigations/by-incident/{incidentId}` | Signed in | The investigation of an alert incident, with the same checks. |
+
+Chat access (**AI chat**) is a per-user flag; global admins can always chat. A reader without permission gets `404`, not `403`. The `investigate` field on a notification route turns **Investigate with AI** on for it, and each alert in the overview list carries an `investigation` object (`id`, `state`, `reason`) for signed-in people only.
+
+## AI agent reviews
+
+These routes exist only while `HM_AGENT_URL` is set (otherwise `404`). All use the session cookie. None is available to access tokens or run tokens. See [Scheduled AI reviews](../guides/ai-agent-reviews.md).
+
+| Method and path | Needs | Purpose |
+| --- | --- | --- |
+| `GET /api/reviews/runs` | Signed in | Review results the caller may read, newest first, 50 a page. Query: `limit` and `cursor` (the `next_cursor` of the last page). A result the caller may not read is left out, and a test run is left out of the list for anyone who is not an admin. |
+| `GET /api/reviews/runs/{id}` | Signed in | One result with its summary and the evidence the caller may read (`evidence_hidden` counts the rest). `404` when the caller may not read it, and a test run answers `404` to anyone who is not an admin. |
+| `GET /api/agent/reviews` | Admin | List reviews with their schedule, scope, routes, next run, last run and worst case for a month. |
+| `POST /api/agent/reviews` | Admin | Create a review. A review of type `custom` carries `instructions`, and needs `HM_AGENT_CUSTOM_REVIEWS=true`. |
+| `PUT /api/agent/reviews/{id}` | Admin | Replace a review. Send the `version` you read: a stale one answers `409` (`review_changed`). |
+| `DELETE /api/agent/reviews/{id}` | Admin | Delete a review. Its results stay until retention removes them. |
+| `POST /api/agent/reviews/preview` | Admin | For a draft: services in scope, how many the agent cannot see, next run and worst case for a month. It reserves and spends nothing. |
+| `POST /api/agent/reviews/{id}/run` | Admin | Record a run to start now. Answers `202` with `{"run_id"}`. Spends nothing until the coordinator starts it. `409` (`review_busy`) when the review already has a run waiting or running. No body, `{}` or `{"deliver": true}` is an ordinary run that is sent. `{"deliver": false}` is a test run: stored, never sent, readable by admins only. Anything else in the body (`null`, another type, other members) answers `422`, and a content type that is not JSON answers `415`. |
+| `GET /api/agent/reviews/runs` | Admin | Results of one review or all, with their cost (both attempts). Query: `review_id`, `cursor`, `limit`. |
+
+A result has `id`, `review_id`, `name`, `type` (`cost`, `security`, `reliability`, `capacity` or `custom`), `manual`, `test`, `state`, `reason`, `period_label`, `scope_label`, `services_total`, `scheduled_for`, `requested_at`, `started_at`, `finished_at`, `summary` and `summary_replaced`. The summary is plain text written by AI.
+
+A review (`GET /api/agent/reviews`, and the body of a create, replace or preview) has `instructions`: the cleaned text for a custom review, an empty string for another type. A create or replace with `instructions` on a built-in type answers `422`. Only admins receive `instructions`: the result routes for readers (`/api/reviews/runs`) never carry it, and a test run is left out of the list and answers `404` for anyone who is not an admin. Each item of `GET /api/agent/reviews/runs` has `test` and `instructions`, the copy of the text that run used. The review settings (`reviews` in the agent settings) have `custom_enabled` and `max_instruction_chars` (2000), and `reviews.types` lists `custom` only while the switch is on. A preview of a draft with a bad text answers `instructions_problem` with the code.
+
+Refusals have the shape `{"error": {"code", "message", "field"}}`. The review codes are `invalid` (with the field), `route_not_supported` (a PagerDuty route), `review_limit` (20 reviews), `name_taken`, `review_changed`, `review_busy`, `no_model` and `reviews_off`, `type_fixed` (field `type`: a review cannot change to or from `custom`) and `custom_reviews_off` (field `type`: the switch is off, so a custom review cannot be created, changed or run). The instructions are refused with `422`, field `instructions`, and one of `instructions_required`, `instructions_too_long`, `instructions_not_text`, `instructions_hidden`, `instructions_secret` or `instructions_not_allowed` (instructions on a built-in type). The refusal never repeats the text. `review_changed` and `review_busy` answer `409`, and the others `422`. `GET /api/me` carries `reviews_enabled`, which the web app uses to show **Reviews**.
+
 ## Users, tags, permissions, accounts, audit, SSO
 
 All are Admin-only.

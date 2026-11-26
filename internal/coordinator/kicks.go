@@ -21,6 +21,12 @@ func (r *Runner) kickJobs() map[string]func() {
 	if r.Notify != nil {
 		jobs["notify"] = r.Notify.Kick
 	}
+	if r.Investigate != nil {
+		jobs["investigate"] = r.Investigate.Kick
+	}
+	if r.Review != nil {
+		jobs["review"] = r.Review.Kick
+	}
 	return jobs
 }
 

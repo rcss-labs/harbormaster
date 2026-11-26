@@ -36,6 +36,8 @@ type UserDTO struct {
 	// TokenCount is how many unexpired access tokens the user holds. It is omitted while tokens are off, which is how
 	// the UI knows to hide the access-token actions.
 	TokenCount *int `json:"token_count,omitempty"`
+	// AIChat is the admin-granted flag for the agent chat; it matters only while the agent is enabled.
+	AIChat bool `json:"ai_chat"`
 }
 
 // ssoState derives the UserDTO SSO fields: a linked identity wins over a pending link, and a pending
@@ -72,7 +74,7 @@ func (s *Server) buildUserDTOs(r *http.Request, users []store.User) ([]UserDTO, 
 	for _, u := range users {
 		dto := UserDTO{ID: u.ID, Username: u.Username, Admin: u.Admin, MustChangePassword: u.MustChangePassword,
 			LastSignInAt: u.LastSignInAt, CanSee: []TagDTO{},
-			HasPassword: u.HasPassword(), BreakGlass: u.BreakGlass, Email: u.Email, DisplayName: u.DisplayName}
+			HasPassword: u.HasPassword(), BreakGlass: u.BreakGlass, Email: u.Email, DisplayName: u.DisplayName, AIChat: u.AIChat}
 		if s.Cfg.APITokens {
 			count := tokenCounts[u.ID]
 			dto.TokenCount = &count
@@ -126,6 +128,10 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, invalid("Use 2–32 lowercase letters, digits, dots, hyphens or underscores."))
 		return
 	}
+	if store.IsReservedUsername(body.Username) {
+		s.fail(w, invalid("That username is reserved."))
+		return
+	}
 	temp := auth.GenerateTemporaryPassword()
 	hash, err := auth.HashPassword(temp)
 	if err != nil {
@@ -170,7 +176,7 @@ func (s *Server) deleteUser(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, invalid("You cannot delete yourself."))
 		return
 	}
-	target, err := s.Store.GetUser(r.Context(), id)
+	target, err := s.Store.GetHumanUser(r.Context(), id)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -193,7 +199,7 @@ func (s *Server) resetUserPassword(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, store.ErrNotFound)
 		return
 	}
-	target, err := s.Store.GetUser(r.Context(), id)
+	target, err := s.Store.GetHumanUser(r.Context(), id)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -220,7 +226,7 @@ func (s *Server) setUserAdmin(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	target, err := s.Store.GetUser(r.Context(), id)
+	target, err := s.Store.GetHumanUser(r.Context(), id)
 	if err != nil {
 		s.fail(w, err)
 		return

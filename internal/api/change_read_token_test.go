@@ -159,7 +159,10 @@ func TestRedactEnvironment_DoesNotModifyItsInput(t *testing.T) {
 			},
 		},
 	}
-	out := redactEnvironment(in)
+	out, flagged := redactEnvironment(in, redactAll)
+	if !flagged {
+		t.Error("not flagged")
+	}
 	entry := in["containerDefinitions"].([]any)[0].(map[string]any)["environment"].([]any)[0].(map[string]any)
 	if entry["value"] != "1" {
 		t.Fatalf("input modified: %v", entry)

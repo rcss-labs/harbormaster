@@ -19,6 +19,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 
+	"github.com/rcss-labs/harbormaster/internal/agentclient"
+	"github.com/rcss-labs/harbormaster/internal/agentjob"
+	"github.com/rcss-labs/harbormaster/internal/agentrun"
 	"github.com/rcss-labs/harbormaster/internal/api"
 	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/awsx"
@@ -28,6 +31,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/deploy"
 	"github.com/rcss-labs/harbormaster/internal/devseed"
 	"github.com/rcss-labs/harbormaster/internal/focus"
+	"github.com/rcss-labs/harbormaster/internal/investigate"
 	"github.com/rcss-labs/harbormaster/internal/kv"
 	"github.com/rcss-labs/harbormaster/internal/lease"
 	"github.com/rcss-labs/harbormaster/internal/notify"
@@ -36,6 +40,7 @@ import (
 	"github.com/rcss-labs/harbormaster/internal/platforms"
 	"github.com/rcss-labs/harbormaster/internal/poller"
 	"github.com/rcss-labs/harbormaster/internal/registry"
+	"github.com/rcss-labs/harbormaster/internal/review"
 	"github.com/rcss-labs/harbormaster/internal/rollup"
 	"github.com/rcss-labs/harbormaster/internal/safedial"
 	"github.com/rcss-labs/harbormaster/internal/saml/fakeidp"
@@ -270,10 +275,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 			return fmt.Errorf("notification secret box: %w", err)
 		}
 	}
-	var notifyDemo []devseed.Option
-	if cfg.Notify.FakeDemo {
-		notifyDemo = []devseed.Option{devseed.WithNotifyDemo(notifyBox, cfg.BaseURL)}
-	}
+	demoOptions := demoSeedOptions(cfg, notifyBox)
 
 	var (
 		clients awsx.Clients
@@ -311,7 +313,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		// The demo data, the fake IdP and the sign-in belong to the task that serves the API. Every process has its own
 		// fake estate (it lives in memory), so a split fake install shows leases, kicks and health, not write flows.
 		if role.ServesAPI() {
-			if err := devseed.Apply(ctx, st, cfg.OffHours.FakeDemo, notifyDemo...); err != nil {
+			if err := devseed.Apply(ctx, st, cfg.OffHours.FakeDemo, demoOptions...); err != nil {
 				return fmt.Errorf("seed demo data: %w", err)
 			}
 			idp, err := fakeidp.New(fakeidp.Options{BaseURL: cfg.BaseURL})
@@ -374,6 +376,21 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 		notifyDispatcher = &notify.Dispatcher{Store: st, Senders: notifySenders, Box: notifyBox, BaseURL: cfg.BaseURL,
 			Interval: cfg.Notify.Interval, Settle: cfg.Notify.Settle, Now: time.Now, Log: log, Telemetry: telemetry.Default}
 	}
+	var agentClient *agentclient.Client // stays nil while HM_AGENT_URL is unset
+	if cfg.AgentEnabled() && (role.ServesAPI() || role.Coordinates()) {
+		if agentClient, err = agentclient.New(cfg.AgentURL, cfg.AgentCAPEM); err != nil {
+			return err
+		}
+	}
+	// The investigator runs under the coordinator lease, as the agent's own identity.
+	var investigator *investigate.Runner
+	var reviewer *review.Runner // the scheduled reviews run beside it
+	if role.Coordinates() {
+		investigator = newInvestigator(ctx, cfg, st, agentClient, notifyDispatcher.Kick, log)
+		wireInvestigations(notifyDispatcher, cfg, investigator)
+		reviewer = newReviewer(cfg, st, agentClient, notifyDispatcher.Kick, log)
+		wireReviews(notifyDispatcher, reviewer)
+	}
 	telemetry.Default.SetBuildInfo(version) // plan 06
 
 	// What each role serves: the API and web app (all, web), or only /healthz and /metrics (poller, coordinator).
@@ -404,6 +421,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 			storeHealth = kvHealth
 		}
 		apiServer = api.New(api.Server{
+			Agent: agentClient,
 			Store: st, Auth: auth.NewService(st, cfg), Setup: setup,
 			Clients: clients, Prober: prober, Cfg: cfg, Log: log, Now: time.Now,
 			Deploy: &deploy.Service{Store: st, Clients: clients, Scaling: st, MaxDesiredCount: cfg.MaxDesiredCount, Now: time.Now,
@@ -422,6 +440,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 			KVHealth:                storeHealth,
 			KickOffHours:            kicks.KickOffHours,
 			KickNotify:              kicks.KickNotify,
+			KickReview:              kicks.KickReview,
 			Focus:                   focusRegistry,
 			Bus:                     kicks.bus,
 			Snap:                    buildSnapshotReader(kvHealth, cfg, st, log),
@@ -467,6 +486,11 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 				Bus:      kicks.bus,
 				Log:      log,
 			}
+			if cfg.AgentEnabled() {
+				coordinatorRunner.AgentRuns = &agentrun.Reconciler{Store: st, Now: time.Now, Log: log}
+			}
+			coordinatorRunner.Investigate = investigator
+			coordinatorRunner.Review = reviewer
 			pollerConfig.Coordinator = coordinatorRunner
 		}
 		pollerInstance = poller.New(st, clients, pollerConfig, log)
@@ -503,7 +527,7 @@ func runServe(ctx context.Context, args []string, getenv func(string) string, st
 	httpServer := &http.Server{Addr: cfg.Listen, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	if apiServer != nil {
 		// Shutdown drains in-flight requests; only running log searches are told to stop (they send StopQuery and
-		// audit on detached contexts), so deploys, writes, exec and tails keep their full drain.
+		// audit on detached contexts) and AI agent runs (they settle and save what was said), so deploys, writes, exec and tails keep their full drain.
 		httpServer.RegisterOnShutdown(apiServer.BeginDrain)
 	}
 
@@ -565,4 +589,73 @@ func imagePlatformResolver(cfg config.Config, st *store.Store, clients awsx.Clie
 		resolver.Public = &registry.Client{HTTP: registry.NewHTTPClient(safedial.Policy{}, nil)}
 	}
 	return resolver
+}
+
+// newInvestigator builds the job that runs the AI investigations of alerts and makes sure its identity exists, or
+// returns nil while the agent is off (no identity row may appear then). An identity that cannot be made now is no reason
+// not to serve: the job asks for it again. With HM_AGENT_INVESTIGATIONS_PER_HOUR=0 the job starts nothing and only ends
+// what was still requested.
+func newInvestigator(ctx context.Context, cfg config.Config, st *store.Store, agent *agentclient.Client, kickNotify func(), log *slog.Logger) *investigate.Runner {
+	if !cfg.AgentEnabled() {
+		return nil
+	}
+	if _, err := st.EnsureAgentIdentity(ctx); err != nil {
+		log.Error("agent identity not ready", "error", err)
+	}
+	return &investigate.Runner{
+		Store: st, Auth: auth.NewService(st, cfg), Agent: agent,
+		Concurrent: cfg.AgentInvestigationsConcurrent, PerHour: cfg.AgentInvestigationsPerHour, MaxWait: cfg.AgentInvestigationMaxWait,
+		KickNotify: kickNotify, Now: time.Now, Log: log,
+	}
+}
+
+// wireInvestigations connects the alert dispatcher to the investigator. With no investigator nothing is set, so the
+// dispatcher records no request and sends no diagnosis.
+func wireInvestigations(d *notify.Dispatcher, cfg config.Config, investigator *investigate.Runner) {
+	if d == nil || investigator == nil {
+		return
+	}
+	d.Investigate = cfg.AgentInvestigationsPerHour > 0
+	d.InvestigationWindow = cfg.AgentInvestigationWindow
+	d.OnInvestigationRequested = investigator.Kick
+}
+
+// newReviewer builds the job that runs the scheduled AI reviews, as the same identity, or returns nil while the agent
+// is off or HM_AGENT_REVIEWS_PER_DAY is 0: nothing is recorded or run then.
+func newReviewer(cfg config.Config, st *store.Store, agent *agentclient.Client, kickNotify func(), log *slog.Logger) *review.Runner {
+	if !cfg.AgentEnabled() || cfg.AgentReviewsPerDay <= 0 {
+		return nil
+	}
+	return &review.Runner{
+		Store: st, Driver: &agentjob.Driver{Store: st, Auth: auth.NewService(st, cfg), Agent: agent}, Scopes: st,
+		PerDay: cfg.AgentReviewsPerDay, CustomReviews: cfg.AgentCustomReviews, MaxLate: cfg.AgentReviewMaxLate,
+		InvestigationMaxWait: cfg.AgentInvestigationMaxWait, KickNotify: kickNotify, Now: time.Now, Log: log,
+	}
+}
+
+// wireReviews has the alert dispatcher send the results of reviews while there is a job that makes them.
+func wireReviews(d *notify.Dispatcher, reviewer *review.Runner) {
+	if d != nil {
+		d.Reviews = reviewer != nil
+		d.CustomReviews = reviewer != nil && reviewer.CustomReviews
+	}
+}
+
+// demoSeedOptions picks the extras fake AWS mode seeds: the demo notification routes, and the AI agent demo only when
+// the agent is switched on (HM_AGENT_URL).
+func demoSeedOptions(cfg config.Config, notifyBox *secretbox.Box) []devseed.Option {
+	var options []devseed.Option
+	if cfg.Notify.FakeDemo {
+		options = append(options, devseed.WithNotifyDemo(notifyBox, cfg.BaseURL))
+	}
+	if cfg.AgentEnabled() {
+		options = append(options, devseed.WithAgentDemo())
+		if notifyBox != nil {
+			options = append(options, devseed.WithReviewReceiver(notifyBox, cfg.BaseURL))
+			if cfg.AgentCustomReviews {
+				options = append(options, devseed.WithCustomReviewDemo())
+			}
+		}
+	}
+	return options
 }

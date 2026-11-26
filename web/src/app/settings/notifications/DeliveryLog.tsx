@@ -22,8 +22,9 @@ interface DeliveryLogProps {
   phone: boolean
 }
 
-/** Where a row's alert points: its service, its cluster (an aggregated cluster row), or its account. */
+/** Where a row's alert points: the review result, its service, its cluster (an aggregated cluster row), or its account. */
 function alertLink(row: NotificationDelivery): string | null {
+  if (row.event === 'review') return row.review_run_id ? `/reviews/runs/${row.review_run_id}` : null
   if (row.service_id) return `/services/${row.service_id}/overview`
   if (row.scope === 'cluster' && row.cluster_id) return `/clusters/${row.cluster_id}`
   if (row.scope === 'account' && row.account_id) return `/?account=${encodeURIComponent(row.account_id)}${row.region ? `&region=${encodeURIComponent(row.region)}` : ''}`
@@ -37,7 +38,7 @@ function AlertCell({ row }: { row: NotificationDelivery }) {
   return (
     <>
       {link ? <Link to={link}>{row.alert}</Link> : <span>{row.alert}</span>}
-      {row.event === 'update' && <span className={styles.tag}>{eventLabel('update')}</span>}
+      {(row.event === 'update' || row.event === 'diagnosis' || row.event === 'review') && <span className={styles.tag}>{eventLabel(row.event)}</span>}
     </>
   )
 }

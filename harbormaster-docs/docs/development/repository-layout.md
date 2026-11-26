@@ -6,10 +6,10 @@ This page maps the repository: the commands, the Go packages, the web app, Terra
 
 | Path | Contents |
 |---|---|
-| `cmd/` | The three binaries |
+| `cmd/` | The four binaries |
 | `internal/` | All Go packages (not importable from outside the module) |
 | `web/` | React single-page app, Vitest tests and Playwright e2e specs |
-| `terraform/` | Modules (`harbormaster`, `harbormaster-access`, `harbormaster-mcp`) and examples |
+| `terraform/` | Modules (`harbormaster`, `harbormaster-access`, `harbormaster-mcp`, `harbormaster-agent`) and examples |
 | `tools/` | Scripts for checks, smoke tests, image checks and the floci harness |
 | `docs/` | Design notes and ops runbooks |
 | `harbormaster-docs/` | This documentation site |
@@ -21,6 +21,7 @@ This page maps the repository: the commands, the Go packages, the web app, Terra
 | Package | Purpose |
 |---|---|
 | `cmd/harbormaster` | The server and embedded web UI. Commands include `serve`, `healthcheck`, `version` and `create-admin` |
+| `cmd/harbormaster-agent` | The AI agent service (`serve`, `healthcheck`, `version`). It has no database, cache or estate access and reads Harbormaster with run tokens |
 | `cmd/harbormaster-mcp` | The public, read-only MCP gateway. It holds no credentials and uses the caller's own token |
 | `cmd/harbormaster-scanner` | The scan task. Reads a job from the scan bucket, scans ECR images with Syft and Grype, writes results |
 
@@ -41,6 +42,7 @@ This page maps the repository: the commands, the Go packages, the web app, Terra
 | `devseed` | Demo users, tags and history for `serve --fake-aws` |
 | `execbridge` | Browser terminal to ECS Exec bridge, speaking the SSM data-channel protocol |
 | `focus` | Tracks which pages are open so owning pollers read them often |
+| `hmtools` | The read-only MCP tool table and the one upstream client that calls Harbormaster for it, shared with the agent service |
 | `kv` | The one door to a Valkey or Redis server, limited to commands both engines share |
 | `lease` | Ownership of polling slices and the coordinator role |
 | `limits` | Cross-task limits: sessions per user, rate limits |

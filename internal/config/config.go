@@ -2,6 +2,7 @@
 package config
 
 import (
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -54,7 +55,14 @@ type RetentionConfig struct {
 	ScanRuns   time.Duration
 	// Alert notification delivery log and resolved incidents.
 	NotificationLog time.Duration
+	// Agent chat conversations, by last activity.
+	AgentConversations time.Duration
+	// Agent runs and automatic investigations, by age; this month's runs are never pruned.
+	AgentRuns time.Duration
 }
+
+// MinAgentRunsRetention is the shortest non-zero HM_RETENTION_AGENT_RUNS; the store enforces the same floor.
+const MinAgentRunsRetention = 48 * time.Hour
 
 // AnalyticsConfig toggles optional analytics collection.
 type AnalyticsConfig struct {
@@ -165,6 +173,12 @@ type Config struct {
 	MCPPublicURL          string         // the MCP gateway's public base URL, shown in the UI's connect instructions
 	MCPGatewayCIDRs       []netip.Prefix // source ranges of the MCP gateway tasks; behind one, the client IP is the X-Forwarded-For entry to its left
 
+	// The agent identity (an unattended background run) has its own request rate and log search limits, so it cannot
+	// starve people or run up log search cost. Used only when the agent is on.
+	AgentIdentityRatePerSecond    int // HM_AGENT_IDENTITY_RATE_PER_SECOND: requests per second, 1 to 50; burst is 60x
+	AgentIdentityLogSearchMaxGB   int // HM_AGENT_IDENTITY_LOG_SEARCH_MAX_GB: GiB cap for one search; 0 = no cap of its own
+	AgentIdentityLogSearchDailyGB int // HM_AGENT_IDENTITY_LOG_SEARCH_DAILY_GB: GiB per UTC day; 0 = log search off
+
 	// OAuth for MCP connectors (MCP phase 4). Off unless OAuth is true, which needs APITokens and MCPPublicURL. The
 	// client host and redirect lists are configuration on purpose: what Claude's clients actually send was not yet
 	// verified against a real connector, and a finding should change a setting, not code.
@@ -172,6 +186,22 @@ type Config struct {
 	OAuthAccessTTL    time.Duration // lifetime of an OAuth access token
 	OAuthClientHosts  []string      // hosts a client_id metadata document URL may be on
 	OAuthRedirectURIs []string      // redirect URIs a client may use; http loopback entries match any port
+
+	// The AI agent (phase 1). Off unless AgentURL is set: no agent route exists and a run token does not authenticate.
+	AgentURL         string        // HM_AGENT_URL: the agent service's private base URL
+	AgentCAPEM       string        // HM_AGENT_CA_PEM: an extra root certificate for the agent's TLS certificate
+	AgentRunTokenTTL time.Duration // HM_AGENT_RUN_TOKEN_TTL: lifetime of a run token
+
+	// Automatic investigations of alerts (the AI agent, phase 2).
+	AgentInvestigationWindow      time.Duration // HM_AGENT_INVESTIGATION_WINDOW: alerts of one subject within it share an investigation
+	AgentInvestigationsConcurrent int           // HM_AGENT_INVESTIGATIONS_CONCURRENT: investigations that run at the same time
+	AgentInvestigationsPerHour    int           // HM_AGENT_INVESTIGATIONS_PER_HOUR: investigations started in an hour; 0 = the investigator is off
+	AgentInvestigationMaxWait     time.Duration // HM_AGENT_INVESTIGATION_MAX_WAIT: a request older than this is not started
+	// Scheduled reviews (phase 3); the settings page shows them read-only.
+	AgentReviewsPerDay int           // HM_AGENT_REVIEWS_PER_DAY: 0 turns reviews off, at most 200 runs start a day
+	AgentReviewMaxLate time.Duration // HM_AGENT_REVIEW_MAX_LATE: an occurrence older than this is skipped as missed
+
+	AgentCustomReviews bool // HM_AGENT_CUSTOM_REVIEWS: offers admin-written custom reviews; off by default
 
 	// KV selects the shared Valkey or Redis store; an empty URL means none
 	KV KVConfig
@@ -332,19 +362,21 @@ func Load(getenv func(string) string) (Config, error) {
 			IdleInterval:  reader.duration("HM_POLL_IDLE_INTERVAL", 5*time.Minute),
 		},
 		Retention: RetentionConfig{
-			StoppedTasks:      reader.duration("HM_RETENTION_STOPPED_TASKS", 168*time.Hour),
-			ServiceEvents:     reader.duration("HM_RETENTION_SERVICE_EVENTS", 720*time.Hour),
-			CountsHistory:     reader.duration("HM_RETENTION_COUNTS_HISTORY", 168*time.Hour),
-			OperationLog:      reader.duration("HM_RETENTION_OPERATION_LOG", 2160*time.Hour),
-			DeploymentHistory: reader.duration("HM_RETENTION_DEPLOYMENT_HISTORY", 2160*time.Hour),
-			AuditLog:          reader.duration("HM_RETENTION_AUDIT_LOG", 8760*time.Hour),
-			OrphanTags:        reader.duration("HM_RETENTION_ORPHAN_TAGS", 720*time.Hour),
-			AvailabilityDaily: reader.duration("HM_RETENTION_AVAILABILITY_DAILY", 8760*time.Hour),
-			CapacityDaily:     reader.duration("HM_RETENTION_CAPACITY_DAILY", 8760*time.Hour),
-			UtilDaily:         reader.duration("HM_RETENTION_UTIL_DAILY", 2160*time.Hour),
-			ScanImages:        reader.duration("HM_RETENTION_SCAN_IMAGES", 168*time.Hour),
-			ScanRuns:          reader.duration("HM_RETENTION_SCAN_RUNS", 720*time.Hour),
-			NotificationLog:   reader.duration("HM_RETENTION_NOTIFICATION_LOG", 720*time.Hour),
+			StoppedTasks:       reader.duration("HM_RETENTION_STOPPED_TASKS", 168*time.Hour),
+			ServiceEvents:      reader.duration("HM_RETENTION_SERVICE_EVENTS", 720*time.Hour),
+			CountsHistory:      reader.duration("HM_RETENTION_COUNTS_HISTORY", 168*time.Hour),
+			OperationLog:       reader.duration("HM_RETENTION_OPERATION_LOG", 2160*time.Hour),
+			DeploymentHistory:  reader.duration("HM_RETENTION_DEPLOYMENT_HISTORY", 2160*time.Hour),
+			AuditLog:           reader.duration("HM_RETENTION_AUDIT_LOG", 8760*time.Hour),
+			OrphanTags:         reader.duration("HM_RETENTION_ORPHAN_TAGS", 720*time.Hour),
+			AvailabilityDaily:  reader.duration("HM_RETENTION_AVAILABILITY_DAILY", 8760*time.Hour),
+			CapacityDaily:      reader.duration("HM_RETENTION_CAPACITY_DAILY", 8760*time.Hour),
+			UtilDaily:          reader.duration("HM_RETENTION_UTIL_DAILY", 2160*time.Hour),
+			ScanImages:         reader.duration("HM_RETENTION_SCAN_IMAGES", 168*time.Hour),
+			ScanRuns:           reader.duration("HM_RETENTION_SCAN_RUNS", 720*time.Hour),
+			NotificationLog:    reader.duration("HM_RETENTION_NOTIFICATION_LOG", 720*time.Hour),
+			AgentConversations: reader.duration("HM_RETENTION_AGENT_CONVERSATIONS", 720*time.Hour),
+			AgentRuns:          reader.duration("HM_RETENTION_AGENT_RUNS", 2160*time.Hour),
 		},
 		Scan: ScanConfig{
 			Enabled:           reader.boolean("HM_SCAN_ENABLED", false),
@@ -407,11 +439,27 @@ func Load(getenv func(string) string) (Config, error) {
 		MCPPublicURL:          strings.TrimSpace(reader.text("HM_MCP_PUBLIC_URL", "")),
 		MCPGatewayCIDRs:       reader.prefixes("HM_MCP_GATEWAY_CIDRS"),
 
+		AgentIdentityRatePerSecond:    reader.integer("HM_AGENT_IDENTITY_RATE_PER_SECOND", 5),
+		AgentIdentityLogSearchMaxGB:   reader.integer("HM_AGENT_IDENTITY_LOG_SEARCH_MAX_GB", 2),
+		AgentIdentityLogSearchDailyGB: reader.integer("HM_AGENT_IDENTITY_LOG_SEARCH_DAILY_GB", 20),
+
 		// MCP phase 4: OAuth for connectors
 		OAuth:             reader.boolean("HM_OAUTH", false),
 		OAuthAccessTTL:    reader.duration("HM_OAUTH_ACCESS_TTL", time.Hour),
 		OAuthClientHosts:  reader.list("HM_OAUTH_CLIENT_HOSTS"),
 		OAuthRedirectURIs: reader.list("HM_OAUTH_REDIRECT_URIS"),
+
+		AgentURL:         strings.TrimSpace(reader.text("HM_AGENT_URL", "")),
+		AgentCAPEM:       strings.TrimSpace(reader.text("HM_AGENT_CA_PEM", "")),
+		AgentRunTokenTTL: reader.duration("HM_AGENT_RUN_TOKEN_TTL", 15*time.Minute),
+
+		AgentInvestigationWindow:      reader.duration("HM_AGENT_INVESTIGATION_WINDOW", 15*time.Minute),
+		AgentInvestigationsConcurrent: reader.integer("HM_AGENT_INVESTIGATIONS_CONCURRENT", 2),
+		AgentInvestigationsPerHour:    reader.integer("HM_AGENT_INVESTIGATIONS_PER_HOUR", 20),
+		AgentInvestigationMaxWait:     reader.duration("HM_AGENT_INVESTIGATION_MAX_WAIT", 15*time.Minute),
+		AgentReviewsPerDay:            reader.integer("HM_AGENT_REVIEWS_PER_DAY", 24),
+		AgentReviewMaxLate:            reader.duration("HM_AGENT_REVIEW_MAX_LATE", 6*time.Hour),
+		AgentCustomReviews:            reader.boolean("HM_AGENT_CUSTOM_REVIEWS", false),
 
 		KV: KVConfig{
 			URL:    strings.TrimSpace(reader.text("HM_KV_URL", "")),
@@ -419,6 +467,16 @@ func Load(getenv func(string) string) (Config, error) {
 		},
 	}
 
+	// A short retention would delete the audit trail of investigations an operator may still be reading.
+	if d := cfg.Retention.AgentRuns; d != 0 && d < MinAgentRunsRetention {
+		reader.fail("HM_RETENTION_AGENT_RUNS", "%s is too short: use 0 to keep everything or at least %s", d, MinAgentRunsRetention)
+	}
+	if cfg.AgentReviewsPerDay < 0 || cfg.AgentReviewsPerDay > 200 {
+		reader.fail("HM_AGENT_REVIEWS_PER_DAY", "%d is out of range: use 0 (reviews off) to 200", cfg.AgentReviewsPerDay)
+	}
+	if d := cfg.AgentReviewMaxLate; d < 15*time.Minute || d > 12*time.Hour {
+		reader.fail("HM_AGENT_REVIEW_MAX_LATE", "%s is out of range: use 15m to 12h", d)
+	}
 	if reader.err != nil {
 		return Config{}, reader.err
 	}
@@ -494,6 +552,9 @@ func Load(getenv func(string) string) (Config, error) {
 	if err := validateTokens(cfg); err != nil {
 		return Config{}, err
 	}
+	if err := validateAgent(cfg); err != nil {
+		return Config{}, err
+	}
 	if len(cfg.OAuthClientHosts) == 0 {
 		cfg.OAuthClientHosts = DefaultOAuthClientHosts()
 	}
@@ -530,15 +591,85 @@ func validateTokens(cfg Config) error {
 	if cfg.TokenLogSearchDailyGB < 0 {
 		return errors.New("HM_TOKEN_LOG_SEARCH_DAILY_GB: must be 0 (token log search off) or positive")
 	}
-	if cfg.MCPPublicURL != "" {
-		parsed, err := url.Parse(cfg.MCPPublicURL)
-		if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil ||
-			parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Opaque != "" ||
-			strings.HasSuffix(cfg.MCPPublicURL, "/") || strings.ContainsAny(cfg.MCPPublicURL, "?#") {
-			return errors.New("HM_MCP_PUBLIC_URL: must be an https:// URL with no path, query or trailing slash")
-		}
+	if cfg.AgentIdentityRatePerSecond < 1 || cfg.AgentIdentityRatePerSecond > 50 {
+		return errors.New("HM_AGENT_IDENTITY_RATE_PER_SECOND: must be between 1 and 50")
+	}
+	if cfg.AgentIdentityLogSearchMaxGB < 0 || cfg.AgentIdentityLogSearchMaxGB > maxAgentIdentityGB {
+		return fmt.Errorf("HM_AGENT_IDENTITY_LOG_SEARCH_MAX_GB: must be between 0 and %d", maxAgentIdentityGB)
+	}
+	if cfg.AgentIdentityLogSearchDailyGB < 0 || cfg.AgentIdentityLogSearchDailyGB > maxAgentIdentityGB {
+		return fmt.Errorf("HM_AGENT_IDENTITY_LOG_SEARCH_DAILY_GB: must be between 0 (agent log search off) and %d", maxAgentIdentityGB)
+	}
+	if cfg.MCPPublicURL != "" && !isBaseURL(cfg.MCPPublicURL, false) {
+		return errors.New("HM_MCP_PUBLIC_URL: must be an https:// URL with no path, query or trailing slash")
 	}
 	return nil
+}
+
+// maxAgentIdentityGB bounds the agent identity's log search sizes, so a typo cannot lift its cost limit in practice.
+const maxAgentIdentityGB = 1_000_000
+
+// AgentEnabled reports whether the AI agent is on: HM_AGENT_URL is set.
+func (c Config) AgentEnabled() bool { return c.AgentURL != "" }
+
+// validateAgent checks the agent settings, whether or not the agent is on. The URL is https, or http for a loopback
+// host only (a local development agent), with no userinfo, path, query or fragment.
+func validateAgent(cfg Config) error {
+	if cfg.AgentRunTokenTTL < time.Minute || cfg.AgentRunTokenTTL > time.Hour {
+		return errors.New("HM_AGENT_RUN_TOKEN_TTL: must be between 1m and 1h")
+	}
+	if cfg.AgentURL != "" && !isBaseURL(cfg.AgentURL, true) {
+		return errors.New("HM_AGENT_URL: must be an https:// URL (http:// only for a loopback host) with no path, query or trailing slash")
+	}
+	if cfg.AgentCAPEM != "" && !x509.NewCertPool().AppendCertsFromPEM([]byte(cfg.AgentCAPEM)) {
+		return errors.New("HM_AGENT_CA_PEM: contains no PEM certificate")
+	}
+	if cfg.AgentInvestigationWindow < time.Minute || cfg.AgentInvestigationWindow > 24*time.Hour {
+		return errors.New("HM_AGENT_INVESTIGATION_WINDOW: must be between 1m and 24h")
+	}
+	if cfg.AgentInvestigationsConcurrent < 1 || cfg.AgentInvestigationsConcurrent > 8 {
+		return errors.New("HM_AGENT_INVESTIGATIONS_CONCURRENT: must be between 1 and 8")
+	}
+	if cfg.AgentInvestigationsPerHour < 0 {
+		return errors.New("HM_AGENT_INVESTIGATIONS_PER_HOUR: must be 0 (the investigator is off) or positive")
+	}
+	if cfg.AgentInvestigationMaxWait < time.Minute || cfg.AgentInvestigationMaxWait > 24*time.Hour {
+		return errors.New("HM_AGENT_INVESTIGATION_MAX_WAIT: must be between 1m and 24h")
+	}
+	return nil
+}
+
+// isBaseURL reports whether raw is a bare base URL: https (or http for a loopback host when loopbackHTTP), a hostname,
+// an optional valid port, and no userinfo, path, query, fragment or trailing slash.
+func isBaseURL(raw string, loopbackHTTP bool) bool {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Hostname() == "" || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" ||
+		parsed.Fragment != "" || parsed.Opaque != "" || strings.HasSuffix(raw, "/") || strings.ContainsAny(raw, "?#") {
+		return false
+	}
+	if port := parsed.Port(); port != "" {
+		if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+			return false
+		}
+	} else if strings.HasSuffix(parsed.Host, ":") {
+		return false // "host:" with an empty port
+	}
+	switch parsed.Scheme {
+	case "https":
+		return true
+	case "http":
+		return loopbackHTTP && isLoopbackHost(parsed.Hostname())
+	}
+	return false
+}
+
+// isLoopbackHost reports whether host is localhost or a loopback IP address.
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	addr, err := netip.ParseAddr(host)
+	return err == nil && addr.IsLoopback()
 }
 
 // DefaultOAuthClientHosts is where Claude's client metadata documents are expected to live. Unverified against a real

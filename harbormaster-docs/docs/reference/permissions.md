@@ -71,6 +71,52 @@ A **break-glass** admin can sign in with a password while single sign-on is on. 
 
 A request authenticated by an access token is read-only whatever its user's permissions are. It may use only View and Logs, an admin's token included. This check runs before the admin shortcut, and it is a second layer behind the list of routes tokens may call. See [Access tokens](../guides/access-tokens.md).
 
+## Run tokens are read-only
+
+The AI agent calls Harbormaster with a run token (prefix `hma_`), minted for one question as the asking user. The same rule applies as for access tokens: only routes marked as readable by tokens, only View and Logs, an admin's included, checked before the admin shortcut. A run token is tied to one run, ends after `HM_AGENT_RUN_TOKEN_TTL` (15 minutes by default) and ends with the user's sessions. The public MCP gateway refuses it. A run token does not authenticate at all while `HM_AGENT_URL` is unset.
+
+## The AI chat flag
+
+Using the AI chat needs a per-user flag, **AI chat**, set by a global admin in **Settings > Users**. It is off for new users. Global admins can chat without it. The flag grants no data access: the chat sees only what the user's own tags allow. Only global admins can change the flag, the chat, investigation and review models, the allowance, the redaction setting, the [scheduled reviews](#who-reads-a-review) and the [agent identity](#the-agent-identity)'s access. See [AI chat](../guides/ai-agent-chat.md).
+
+## The agent identity
+
+Automatic AI investigations and scheduled AI reviews run as the **agent identity**, a built-in user of a separate kind that is not a person. Its username is `harbormaster-agent` (the first free of that and `harbormaster-agent-1` to `-9`). The prefix `harbormaster-agent` is reserved: no user can be created with a name that starts with it, whatever the case (`_` and `.` count as `-`), and a single sign-on sign-in whose derived name would start with it fails.
+
+- **What it holds.** Only View, and Logs where an admin grants it, on the tags an admin picks in **Settings > AI agent > Agent identity** (**No access**, **View**, **View and logs**). It starts with no access. Every other action is masked off, even if a row for it were stored, and it can never be a global admin.
+- **What it can never do.** Sign in by password or single sign-on, hold a session, a personal access token or an OAuth grant, be an admin or a break-glass admin, have the AI chat flag, or use Operate, Deploy, Edit, Terminal or Accept risk. It is not listed on **Settings > Users**, and the user routes answer `404` for it. It cannot be deleted or edited there.
+- **How it reads.** For a run it gets a run token, valid for `HM_AGENT_RUN_TOKEN_TTL`, that is read-only like any run token: only the routes tokens may call, only View and Logs. Its use does not count as user activity, so it does not wake AWS polling that was idle.
+- **Limits of its own.** `HM_AGENT_IDENTITY_RATE_PER_SECOND` and the two `HM_AGENT_IDENTITY_LOG_SEARCH_*` limits (see [Configuration](configuration.md#ai-agent)).
+- **Where it shows.** The delete-tag impact view lists it among those who lose access when a tag it holds is deleted. Changes to its access are audited as `agent_identity_update`.
+- **It is off with the agent.** With `HM_AGENT_URL` unset, no identity row is created and nothing in this section applies. Once created, the row stays if you later unset it, inert.
+
+### Who reads an investigation
+
+A person's access to an investigation is checked on every request, from their current permissions:
+
+| Item | Needs |
+| --- | --- |
+| The summary of a service investigation | View on the service. A service that no longer exists: global admin. |
+| The summary of a cluster or account investigation | Global admin, or View on every service listed when it was requested. A list at the 50-service cap, or an empty one: global admin only. |
+| One evidence item | View on its service, and Logs as well when it is log text. Hidden items are counted, not described. |
+| The list of all investigations in Settings | Global admin. |
+
+Access tokens and run tokens cannot read investigations. See [Automatic AI investigations](../guides/ai-agent-investigator.md#who-sees-what).
+
+### Who reads a review
+
+Scheduled reviews run as the same agent identity. A review reads what the identity may View, with Logs never used, and the identity's access is the only boundary: the scope of a review is a focus, not a permission. Each run stores the tags the identity could View when it started and when it finished (its covered tags). A tag granted and removed again during one run is not covered. A person's access to a review result is checked on every request, from their current permissions:
+
+| Item | Needs |
+| --- | --- |
+| The summary of a result | Global admin, or View on every covered tag of the run. A run that covered no tag, or a tag that has been deleted since: global admin only. |
+| One evidence item | View on its service. A review cites View evidence only, so an item stored with any other action is hidden from everyone, admins included. Hidden items are counted, not described. |
+| The list of results (**Reviews**) | Signed in. It holds only the results the person may read. |
+| Creating, changing, switching, running or deleting a review, the model for reviews, and the list in **Settings > AI agent** | Global admin. |
+| The instructions of a custom review, the copy kept with each run, and a test run | Global admin only, whatever tags the run covered. A reader of a result never receives the instructions. |
+
+Access tokens and run tokens cannot read reviews or manage them, and no tool of the agent reads a review's definition. An unknown or unreadable result answers `404`, never `403`. A test run is hidden from every non-admin, also under the code of the earlier release. See [Scheduled AI reviews](../guides/ai-agent-reviews.md#who-sees-what).
+
 ## How tags match clusters, services and tasks
 
 A tag is a Harbormaster object (name, colour and a non-production flag). It is separate from AWS resource tags. Admins assign tags to **clusters** and to **services**.
@@ -105,7 +151,7 @@ List routes accept `?tag=` filters, and the web app has account, region and tag 
 | Register a task definition revision | Edit |
 | Terminal | Terminal |
 | Vulnerability and package acceptances | Accept risk |
-| Users, tags, permissions, accounts, audit, SSO, off-hours schedules, notification routes, instance settings | Global admin |
+| Users, tags, permissions, accounts, audit, SSO, off-hours schedules, notification routes (including the **Investigate with AI** switch), instance settings, the agent identity's access, the list of all investigations, and scheduled AI reviews (their definitions, the model for reviews, running one) | Global admin |
 
 The full route list with required actions is in the [API reference](api.md).
 

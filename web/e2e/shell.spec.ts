@@ -126,8 +126,8 @@ test('at 390 the top bar is one row and every other control is reachable from Mo
     return { controls, scrollWidth: document.documentElement.scrollWidth, headerHeight: header.getBoundingClientRect().height }
   })
   expect(bar.scrollWidth).toBeLessThanOrEqual(390)
-  // Back or logo, scope, freshness and search: one row, nothing wrapped under another.
-  expect(bar.controls.length).toBe(4)
+  // Back or logo, scope, freshness, Ask AI (the e2e server runs the agent) and search: one row, nothing wrapped under another.
+  expect(bar.controls.length).toBe(5)
   const centres = bar.controls.map((control) => control.centreY)
   expect(Math.max(...centres) - Math.min(...centres)).toBeLessThanOrEqual(2)
   for (const control of bar.controls) {

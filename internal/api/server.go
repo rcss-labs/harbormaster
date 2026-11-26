@@ -2,6 +2,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"github.com/rcss-labs/harbormaster/internal/cost"
 	"log/slog"
@@ -10,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rcss-labs/harbormaster/internal/agentclient"
 	"github.com/rcss-labs/harbormaster/internal/auth"
 	"github.com/rcss-labs/harbormaster/internal/awsx"
 	"github.com/rcss-labs/harbormaster/internal/config"
@@ -56,7 +58,7 @@ type Server struct {
 	Rates limits.Rate
 	// LogSearch runs Logs Insights searches across services; New defaults it from Clients and Cfg.
 	LogSearch *logs.Searcher
-	// draining is closed by BeginDrain when the process starts shutting down; running log searches watch it
+	// draining is closed by BeginDrain when the process starts shutting down; running log searches and agent runs watch it
 	// so they stop their Insights queries and audit inside the shutdown drain.
 	draining      chan struct{}
 	beginDrainOne *sync.Once
@@ -104,6 +106,9 @@ type Server struct {
 	// KickNotify wakes the notification dispatcher after a route change; nil is a no-op. Like KickOffHours it travels
 	// on the signal bus; if nobody hears it a change waits at most HM_NOTIFY_INTERVAL.
 	KickNotify func()
+	// KickReview wakes the review job after a definition change or a run now; nil is a no-op. It travels on the signal
+	// bus like KickNotify; if nobody hears it the job notices at its next tick.
+	KickReview func()
 	// KVHealth reports whether the shared Valkey or Redis store is reachable, for the poller status; nil means there is
 	// no store.
 	KVHealth kv.Upper
@@ -128,6 +133,23 @@ type Server struct {
 	// OAuth is the authorization server for MCP connectors; New builds it when HM_OAUTH is on, and its routes exist
 	// only then.
 	OAuth *oauthsrv.Service
+	// Agent is the client for the agent service; nil while HM_AGENT_URL is unset. The chat routes exist only when
+	// Cfg.AgentEnabled().
+	Agent *agentclient.Client
+	// AgentHeartbeat is how often an open chat stream gets a comment line to keep proxies from closing it
+	// (default 15s).
+	AgentHeartbeat time.Duration
+	// AgentWriteTimeout bounds one small write of a chat stream to the browser (default 10s); a browser that reads
+	// nothing for that long is dropped and its run cancelled.
+	AgentWriteTimeout time.Duration
+	// AgentRunSlack is how long past the agent's own run timeout a turn waits before giving up (default 30s).
+	AgentRunSlack time.Duration
+	// agentReach remembers for a few seconds that the agent's catalogue could not be read, so a page full of status
+	// calls does not queue on a dead agent.
+	agentReach *agentReach
+	// agentEventHook, when set, sees each agent event before the turn handles it. TEST ONLY: it lets a test hold
+	// the event loop at a known point.
+	agentEventHook func(ctx context.Context, ev agentclient.Event)
 	// testTokenRoutes marks extra routes for tokens, by pattern. TEST ONLY: it exists so a test can prove that the
 	// read-only subject alone refuses a write route that was marked by mistake. Production code never sets it.
 	testTokenRoutes map[string]auth.Scope
@@ -138,6 +160,8 @@ const (
 	limitExec   = "exec"
 	limitTail   = "tail"
 	limitSearch = "search"
+	// limitAgentChat holds the one running chat turn a user may have.
+	limitAgentChat = "agent_chat"
 )
 
 // Names of the token buckets in Server.Rates.
@@ -147,6 +171,8 @@ const (
 	rateSAMLLogin  = "samllogin"
 	rateFocusOpen  = "focusopen"
 	rateAPIToken   = "apitoken"
+	// rateAgentIdentity is the bucket of the agent identity's run tokens, apart from every person's.
+	rateAgentIdentity = "agentidentity"
 )
 
 // The per-user bucket for requests authenticated by an access token (design: "Authentication"). Constants, not
@@ -155,6 +181,12 @@ const (
 	apiTokenBurst     = 120
 	apiTokenPerSecond = 2
 )
+
+// agentIdentityBurstSeconds is how many seconds of the identity's rate its bucket holds.
+const agentIdentityBurstSeconds = 60
+
+// defaultAgentIdentityRate is what a hand-built Config that leaves HM_AGENT_IDENTITY_RATE_PER_SECOND unset gets.
+const defaultAgentIdentityRate = 5
 
 // allowRate takes a token from the named bucket. A limiter error allows the request: the fallback wrapper has already
 // tried the per-task bucket, and a store problem must never block sign-in or a search.
@@ -177,6 +209,7 @@ func New(s Server) *Server {
 	s.focusOpens = &focusOpens{}
 	s.routeLog = &routeRecorder{byMux: map[*http.ServeMux][]routeInfo{}}
 	s.targetKeys, s.memberLines = &ttlCache[[]store.TargetFilter]{}, &ttlCache[string]{}
+	s.agentReach = &agentReach{}
 	s.draining, s.beginDrainOne = make(chan struct{}), &sync.Once{}
 	if s.Log == nil {
 		s.Log = slog.Default()
@@ -223,6 +256,15 @@ func New(s Server) *Server {
 	if s.OAuth == nil && s.oauthOn() {
 		s.OAuth = oauthsrv.NewService(s.Store, s.Cfg)
 		s.OAuth.Now = s.Now
+	}
+	if s.AgentHeartbeat <= 0 {
+		s.AgentHeartbeat = 15 * time.Second
+	}
+	if s.AgentWriteTimeout <= 0 {
+		s.AgentWriteTimeout = 10 * time.Second
+	}
+	if s.AgentRunSlack <= 0 {
+		s.AgentRunSlack = 30 * time.Second
 	}
 	// plan 04: terminal
 	if s.ExecStartTimeout <= 0 {
@@ -427,6 +469,13 @@ func (s *Server) routes(mux *http.ServeMux) {
 	s.configSearchRoutes(mux) // estate-wide config search
 	if s.Cfg.APITokens {
 		s.tokenRoutes(mux) // access tokens: absent (404) while HM_API_TOKENS is off
+	} else if s.Cfg.AgentEnabled() {
+		s.whoAmIRoute(mux) // a run token still needs whoami; nothing else of token management exists
+	}
+	if s.Cfg.AgentEnabled() {
+		s.agentRoutes(mux) // the AI chat: absent (404) while HM_AGENT_URL is unset
+		s.agentIdentityRoutes(mux)
+		s.agentReviewRoutes(mux)
 	}
 	if s.oauthOn() {
 		s.oauthRoutes(mux) // OAuth for MCP connectors: absent (404) while HM_OAUTH is off
@@ -470,11 +519,26 @@ func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte("ok"))
 }
 
-// BeginDrain tells running log searches to stop; call it when Shutdown begins. Safe to call more than once,
+// BeginDrain tells running log searches and AI agent runs to stop; call it when Shutdown begins. Safe to call more than once,
 // and a no-op on a Server that was not built by New.
 func (s *Server) BeginDrain() {
 	if s == nil || s.draining == nil || s.beginDrainOne == nil {
 		return
 	}
 	s.beginDrainOne.Do(func() { close(s.draining) })
+}
+
+// tokenBucketFor picks the rate bucket a token request of this user draws from: a person's (burst 120, 2 per second),
+// or the agent identity's (burst 60 x its rate, refilled at its rate). ok is false for a kind it does not know, which
+// the caller refuses.
+func tokenBucketFor(user store.User, cfg config.Config) (name string, burst int, perSecond float64, ok bool) {
+	switch user.Kind {
+	case store.UserKindHuman:
+		return rateAPIToken, apiTokenBurst, apiTokenPerSecond, true
+	case store.UserKindAgent:
+		rate := cmp.Or(cfg.AgentIdentityRatePerSecond, defaultAgentIdentityRate)
+		return rateAgentIdentity, agentIdentityBurstSeconds * rate, float64(rate), true
+	default:
+		return "", 0, 0, false
+	}
 }

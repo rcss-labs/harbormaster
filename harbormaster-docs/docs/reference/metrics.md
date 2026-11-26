@@ -105,6 +105,12 @@ These three are exported only when `HM_KV_URL` is set.
 | `harbormaster_notification_deliveries_total` | counter | `destination`, `result` | Delivery attempts. `destination` is `slack`, `telegram`, `pagerduty`, `webhook` or `email`. `result` is `delivered`, `retried` or `failed`. | coordinator |
 | `harbormaster_registry_requests_total` | counter | `host`, `outcome` | Reads of public image registries by the ARM64 platform check. `host` is one of a short allow-list (Docker Hub, public ECR, GHCR). `outcome` is `ok`, `not_found`, `denied`, `rate_limited`, `blocked` or `error`. | coordinator |
 
+## AI investigations
+
+| Name | Type | Labels | Meaning | Role |
+| --- | --- | --- | --- | --- |
+| `harbormaster_investigation_step_errors_total` | counter | none | Errors and panics in the notification dispatcher's investigation step: recording investigation requests, planning or claiming Diagnosis messages, a Diagnosis worker that panicked, and the investigator job hook when it panics or is skipped because its previous call has not returned. Alert messages are not affected, so a rising value is the only sign that investigations or Diagnosis messages are not being requested or sent. The coordinator log has a matching line for each: `notify: investigation step` for an error, `notify: investigation step panicked` for a panic of the step, and `notify: follow-up worker panicked` for a send worker that panicked (it covers review messages too). `0` while the AI agent is off. | coordinator |
+
 ## Series that are not exported
 
 The MCP gateway and the scanner export no metrics. The gateway logs one line per request instead; see [AI access](../guides/ai-access-mcp.md).

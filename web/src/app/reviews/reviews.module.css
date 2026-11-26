@@ -1,0 +1,19 @@
+.view { display: grid; gap: 16px; min-width: 0; }
+.block { display: grid; gap: 8px; min-width: 0; }
+.block p { margin: 0; }
+.name { font-weight: 500; overflow-wrap: anywhere; }
+.muted { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.state { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.meta { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+
+.list { display: grid; }
+.row { display: grid; grid-template-columns: minmax(0, 2fr) auto auto minmax(0, 2fr) auto; gap: 12px; align-items: baseline; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.row:last-child { border-bottom: 0; }
+.rowName { color: var(--accent); overflow-wrap: anywhere; min-width: 0; }
+.firstLine { color: var(--muted); overflow-wrap: anywhere; min-width: 0; }
+.cell { overflow-wrap: anywhere; min-width: 0; }
+.more { display: flex; justify-content: center; padding: 8px; }
+.error { margin: 0; padding: 8px 12px; color: var(--bad); }
+@media (max-width: 700px) {
+  .row { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+}

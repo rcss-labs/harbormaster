@@ -294,12 +294,12 @@ else
   fail "tools/list returns exactly the 39 expected tools" "got $GOT_COUNT; diff: $(diff <(tr ' ' '\n' <<<"$EXPECTED_TOOLS") <(tr ' ' '\n' <<<"$GOT_TOOLS") | grep '^[<>]' | tr '\n' ' ')"
 fi
 # The hard-coded list must also match the tool table in the source, so a new tool cannot slip past this check.
-if [ -d "$ROOT/internal/mcpgw" ]; then
+if [ -d "$ROOT/internal/hmtools" ]; then
   SRC_TOOLS=$({
-    grep -hoE '^[[:space:]]+Name: "[a-z0-9_]+", Title:' "$ROOT"/internal/mcpgw/tools_*.go | sed -E 's/.*Name: "([a-z0-9_]+)".*/\1/'
-    grep -ho 'analyticsTool("[a-z_]*"' "$ROOT/internal/mcpgw/tools_insight.go" | sed -E 's/.*\("(.*)"/\1/'
+    grep -hoE '^[[:space:]]+Name: "[a-z0-9_]+", Title:' "$ROOT"/internal/hmtools/tools_*.go | sed -E 's/.*Name: "([a-z0-9_]+)".*/\1/'
+    grep -ho 'analyticsTool("[a-z_]*"' "$ROOT/internal/hmtools/tools_insight.go" | sed -E 's/.*\("(.*)"/\1/'
   } | sort | tr '\n' ' ' | sed 's/ $//')
-  if [ "$SRC_TOOLS" = "$EXPECTED_TOOLS" ]; then ok "expected tool list matches internal/mcpgw source"; else fail "expected tool list matches internal/mcpgw source" "update EXPECTED_TOOLS in mcp-e2e.sh"; fi
+  if [ "$SRC_TOOLS" = "$EXPECTED_TOOLS" ]; then ok "expected tool list matches internal/hmtools source"; else fail "expected tool list matches internal/hmtools source" "update EXPECTED_TOOLS in mcp-e2e.sh"; fi
 fi
 WRITEY=$(tr ' ' '\n' <<<"$GOT_TOOLS" | grep -E '(^|_)(create|delete|remove|update|edit|set|put|post|write|add|apply|restart|scale|deploy|rollback|stop|start|sleep|wake|exec|terminal|revoke|reset|register|run|kill|terminate|upload)(_|$)' | tr '\n' ' ' || true)
 check "no write-sounding tool names" "$([ -z "$WRITEY" ] && echo 0 || echo 1)" "found: $WRITEY"

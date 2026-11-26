@@ -17,6 +17,12 @@ import (
 // do not depend on order.
 func startServeWithKV(t *testing.T, extra map[string]string) string {
 	t.Helper()
+	return startServeLogged(t, extra, io.Discard)
+}
+
+// startServeLogged is startServeWithKV with the process's log lines written to logs.
+func startServeLogged(t *testing.T, extra map[string]string, logs io.Writer) string {
+	t.Helper()
 	dbURL := os.Getenv("HM_TEST_DATABASE_URL")
 	if dbURL == "" {
 		t.Skip("HM_TEST_DATABASE_URL not set")
@@ -29,9 +35,10 @@ func startServeWithKV(t *testing.T, extra map[string]string) string {
 	for k, v := range extra {
 		env[k] = v
 	}
+	addr = env["HM_LISTEN"] // a test that must know the address beforehand passes its own
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
-	go func() { done <- runServe(ctx, nil, func(k string) string { return env[k] }, io.Discard) }()
+	go func() { done <- runServe(ctx, nil, func(k string) string { return env[k] }, logs) }()
 	t.Cleanup(func() {
 		cancel()
 		select {

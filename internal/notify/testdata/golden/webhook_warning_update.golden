@@ -1,0 +1,1 @@
+{"account_id":"111111111111","at":"2026-11-21T12:00:00Z","cluster":"core","delivery_id":42,"event":"alert.updated","kind":"service_degraded","region":"us-east-1","scope":"service","service":"api","severity":"warning","text":"0 of 3 tasks are running.","title":"api: degraded \u003c\u0026\u003e","url":"https://hm.example.com/services/MTExMTExMTExMTExfHVzLWVhc3QtMXxjb3JlfGFwaQ"}

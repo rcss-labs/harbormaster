@@ -69,7 +69,7 @@ func TestRelay_PassesFormAndAnswerThrough(t *testing.T) {
 	if resp.Header.Get("X-Upstream-Secret") != "" {
 		t.Error("upstream headers must not be copied through")
 	}
-	seen := h.upstream.seen()
+	seen := h.upstream.Seen()
 	if len(seen) != 1 {
 		t.Fatalf("%d upstream requests, want 1", len(seen))
 	}
@@ -114,7 +114,7 @@ func TestRelay_RefusesJSONAndOversizedBodies(t *testing.T) {
 	check("no content type", h.relay(t, "", "a=b", nil), http.StatusUnsupportedMediaType)
 	check("multipart", h.relay(t, "multipart/form-data; boundary=x", "a=b", nil), http.StatusUnsupportedMediaType)
 	check("over the cap", h.relay(t, formType, "a="+strings.Repeat("x", 8<<10), nil), http.StatusRequestEntityTooLarge)
-	if n := len(h.upstream.seen()); n != 0 {
+	if n := len(h.upstream.Seen()); n != 0 {
 		t.Errorf("%d upstream calls for refused requests", n)
 	}
 
@@ -127,7 +127,7 @@ func TestRelay_RefusesJSONAndOversizedBodies(t *testing.T) {
 		t.Fatal(err)
 	}
 	check("chunked over the cap", resp, http.StatusRequestEntityTooLarge)
-	if n := len(h.upstream.seen()); n != 0 {
+	if n := len(h.upstream.Seen()); n != 0 {
 		t.Errorf("%d upstream calls for a chunked oversized body", n)
 	}
 
@@ -153,7 +153,7 @@ func TestRelay_OnlyPOSTAndOriginChecked(t *testing.T) {
 	if resp.StatusCode != http.StatusForbidden || !strings.Contains(body, "origin_not_allowed") {
 		t.Errorf("bad origin: status %d body %q", resp.StatusCode, body)
 	}
-	if n := len(h.upstream.seen()); n != 0 {
+	if n := len(h.upstream.Seen()); n != 0 {
 		t.Errorf("%d upstream calls with a bad Origin", n)
 	}
 	resp = h.relay(t, formType, tokenForm(), map[string]string{"Origin": "https://claude.ai"})
@@ -191,7 +191,7 @@ func TestRelay_OffWithoutAuthorizeURL(t *testing.T) {
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("POST /oauth/token status %d, want 404", resp.StatusCode)
 	}
-	if n := len(h.upstream.seen()); n != 0 {
+	if n := len(h.upstream.Seen()); n != 0 {
 		t.Errorf("%d upstream calls with OAuth off", n)
 	}
 }
@@ -303,7 +303,7 @@ func TestAuthorize_RedirectsToTheConfiguredHostOnly(t *testing.T) {
 	if got, want := resp.Header.Get("Location"), testAuthorizeURL+"/oauth/authorize?"+rawQuery; got != want {
 		t.Errorf("Location = %q, want %q", got, want)
 	}
-	if n := len(h.upstream.seen()); n != 0 {
+	if n := len(h.upstream.Seen()); n != 0 {
 		t.Errorf("%d upstream calls from a bare redirect", n)
 	}
 

@@ -1,0 +1,50 @@
+[
+ {
+  "type": "messageStart",
+  "payload": {
+   "role": "assistant"
+  }
+ },
+ {
+  "type": "contentBlockStart",
+  "payload": {
+   "contentBlockIndex": 0,
+   "start": {
+    "toolUse": {
+     "toolUseId": "tooluse_bad",
+     "name": "list_services"
+    }
+   }
+  }
+ },
+ {
+  "type": "contentBlockDelta",
+  "payload": {
+   "contentBlockIndex": 0,
+   "delta": {
+    "toolUse": {
+     "input": "{\"cluster\": \"prod\"}"
+    }
+   }
+  }
+ },
+ {
+  "type": "messageStop",
+  "payload": {
+   "stopReason": "max_tokens"
+  }
+ },
+ {
+  "type": "metadata",
+  "payload": {
+   "usage": {
+    "inputTokens": 4,
+    "outputTokens": 6,
+    "totalTokens": 10
+   },
+   "metrics": {
+    "latencyMs": 1
+   }
+  }
+ }
+]

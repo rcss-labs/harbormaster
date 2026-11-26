@@ -792,6 +792,9 @@ export const ME_ADMIN: MeDTO = {
   break_glass: true,
   email: 'sam@example.test',
   display_name: 'Sam',
+  agent_enabled: false,
+  ai_chat: false,
+  reviews_enabled: false,
 }
 
 export const ME_OMER: MeDTO = {
@@ -809,6 +812,9 @@ export const ME_OMER: MeDTO = {
   break_glass: false,
   email: null,
   display_name: null,
+  agent_enabled: false,
+  ai_chat: false,
+  reviews_enabled: false,
 }
 
 /** A user who signs in only through SSO: linked identity, no password. */
@@ -827,6 +833,9 @@ export const ME_SSO_USER: MeDTO = {
   break_glass: false,
   email: 'alex@example.test',
   display_name: 'Alex',
+  agent_enabled: false,
+  ai_chat: false,
+  reviews_enabled: false,
 }
 
 const plainTag = (t: TagDTO): TagDTO => ({ ...t, inherited: false })
@@ -849,6 +858,7 @@ export const USERS: UsersDTO = {
       username: 'sam',
       admin: true,
       must_change_password: false,
+      ai_chat: false,
       last_sign_in_at: minutesAgo(2),
       can_see: [TAG_DEV, TAG_STAGING, TAG_PROD].map(plainTag),
       ...NO_SSO,
@@ -863,6 +873,7 @@ export const USERS: UsersDTO = {
       username: 'dana',
       admin: false,
       must_change_password: false,
+      ai_chat: false,
       last_sign_in_at: minutesAgo(50),
       can_see: [TAG_DEV, TAG_STAGING, TAG_PROD].map(plainTag),
       ...NO_SSO,
@@ -877,6 +888,7 @@ export const USERS: UsersDTO = {
       username: 'omer',
       admin: false,
       must_change_password: false,
+      ai_chat: false,
       last_sign_in_at: minutesAgo(26 * 60),
       can_see: [TAG_DEV, TAG_STAGING].map(plainTag),
       ...NO_SSO,
@@ -886,6 +898,7 @@ export const USERS: UsersDTO = {
       username: 'oncall',
       admin: false,
       must_change_password: false,
+      ai_chat: false,
       last_sign_in_at: minutesAgo(3 * 1440),
       can_see: [TAG_STAGING, TAG_PROD].map(plainTag),
       ...NO_SSO,
@@ -898,6 +911,7 @@ export const USERS: UsersDTO = {
       username: 'alex',
       admin: false,
       must_change_password: false,
+      ai_chat: false,
       last_sign_in_at: minutesAgo(5 * 60),
       can_see: [TAG_DEV].map(plainTag),
       has_password: false,

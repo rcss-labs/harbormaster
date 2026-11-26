@@ -3,6 +3,7 @@ package mcpgw
 import (
 	"net/http/httptest"
 	"net/netip"
+	"strings"
 	"testing"
 
 	"github.com/rcss-labs/harbormaster/internal/auth"
@@ -49,13 +50,16 @@ func TestForwardedFor_SendsExactlyOneEntry(t *testing.T) {
 		{"trusted: the entry the load balancer appended", "10.0.100.5:1", "6.6.6.6, 203.0.113.7", true, "203.0.113.7"},
 		{"trusted: trailing empty entries skipped", "10.0.100.5:1", "203.0.113.7, ,", true, "203.0.113.7"},
 		{"trusted without a header: the peer", "10.0.100.5:1", "", true, "10.0.100.5"},
+		{"trusted: two header lines, the last entry of the last line", "10.0.100.5:1", "6.6.6.6\n9.9.9.9, 203.0.113.7", true, "203.0.113.7"},
 		{"untrusted: the peer, header dropped", "10.0.100.5:1", "6.6.6.6", false, "10.0.100.5"},
 	}
 	for _, c := range cases {
 		r := httptest.NewRequest("POST", "/mcp", nil)
 		r.RemoteAddr = c.remote
-		if c.xff != "" {
-			r.Header.Set("X-Forwarded-For", c.xff)
+		for _, line := range strings.Split(c.xff, "\n") {
+			if line != "" {
+				r.Header.Add("X-Forwarded-For", line)
+			}
 		}
 		if got := forwardedFor(r, c.trusted); got != c.want {
 			t.Errorf("%s: %q, want %q", c.name, got, c.want)

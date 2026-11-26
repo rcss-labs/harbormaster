@@ -149,10 +149,25 @@ func tokenDTOs(tokens []store.APIToken) []TokenDTO {
 	return out
 }
 
-// tokenCapBytes is the log search cap for one token-initiated search before the day's remainder is applied: the
-// token cap, lowered to the global cap when that is set and smaller.
-func (s *Server) tokenCapBytes() int64 {
-	capBytes := int64(s.Cfg.TokenLogSearchMaxGB) * logs.BytesPerGiB
+// tokenLogLimitsGB are the per-search cap and the daily budget, in GiB, of token-initiated log searches by this user:
+// the agent identity's own settings, a person's the access token settings. An unknown kind gets a budget of 0, which
+// refuses the search.
+func (s *Server) tokenLogLimitsGB(user store.User) (maxGB, dailyGB int) {
+	switch user.Kind {
+	case store.UserKindHuman:
+		return s.Cfg.TokenLogSearchMaxGB, s.Cfg.TokenLogSearchDailyGB
+	case store.UserKindAgent:
+		return s.Cfg.AgentIdentityLogSearchMaxGB, s.Cfg.AgentIdentityLogSearchDailyGB
+	default:
+		return 0, 0
+	}
+}
+
+// tokenCapBytes is the log search cap for one token-initiated search by the user before the day's remainder is
+// applied: the user's cap, lowered to the global cap when that is set and smaller.
+func (s *Server) tokenCapBytes(user store.User) int64 {
+	maxGB, _ := s.tokenLogLimitsGB(user)
+	capBytes := int64(maxGB) * logs.BytesPerGiB
 	global := int64(s.Cfg.LogSearchMaxGB) * logs.BytesPerGiB
 	if global > 0 && (capBytes == 0 || global < capBytes) {
 		capBytes = global
@@ -166,15 +181,16 @@ func nextUTCMidnight(now time.Time) time.Time {
 	return time.Date(y, m, d+1, 0, 0, 0, 0, time.UTC)
 }
 
-// tokenLogSearchState is today's token log search budget for the user.
-func (s *Server) tokenLogSearchState(ctx context.Context, userID int64) (WhoAmILogSearchDTO, error) {
+// tokenLogSearchState is today's token log search budget for the user, from the user's own ledger row.
+func (s *Server) tokenLogSearchState(ctx context.Context, user store.User) (WhoAmILogSearchDTO, error) {
 	now := s.now()
+	_, dailyGB := s.tokenLogLimitsGB(user)
 	dto := WhoAmILogSearchDTO{
-		DailyBytes:        int64(s.Cfg.TokenLogSearchDailyGB) * logs.BytesPerGiB,
-		MaxBytesPerSearch: s.tokenCapBytes(),
+		DailyBytes:        int64(dailyGB) * logs.BytesPerGiB,
+		MaxBytesPerSearch: s.tokenCapBytes(user),
 		ResetsAt:          nextUTCMidnight(now),
 	}
-	used, _, err := s.Store.TokenLogScanUsage(ctx, userID, now)
+	used, _, err := s.Store.TokenLogScanUsage(ctx, user.ID, now)
 	if err != nil {
 		return dto, err
 	}
@@ -183,7 +199,7 @@ func (s *Server) tokenLogSearchState(ctx context.Context, userID int64) (WhoAmIL
 }
 
 func (s *Server) tokenPolicy(ctx context.Context, user store.User, admin bool) (TokenPolicyDTO, error) {
-	state, err := s.tokenLogSearchState(ctx, user.ID)
+	state, err := s.tokenLogSearchState(ctx, user)
 	if err != nil {
 		return TokenPolicyDTO{}, err
 	}
@@ -332,7 +348,7 @@ func (s *Server) listUserTokens(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, store.ErrNotFound)
 		return
 	}
-	if _, err := s.Store.GetUser(r.Context(), id); err != nil {
+	if _, err := s.Store.GetHumanUser(r.Context(), id); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -356,7 +372,7 @@ func (s *Server) deleteUserToken(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, store.ErrNotFound)
 		return
 	}
-	target, err := s.Store.GetUser(r.Context(), userID)
+	target, err := s.Store.GetHumanUser(r.Context(), userID)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -404,7 +420,7 @@ func (s *Server) deleteUserGrant(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, store.ErrNotFound)
 		return
 	}
-	target, err := s.Store.GetUser(r.Context(), userID)
+	target, err := s.Store.GetHumanUser(r.Context(), userID)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -417,6 +433,11 @@ func (s *Server) deleteUserGrant(w http.ResponseWriter, r *http.Request) {
 func (s *Server) whoAmI(w http.ResponseWriter, r *http.Request) {
 	cred, _ := auth.CredentialFrom(r.Context())
 	if cred.Kind != auth.CredentialToken {
+		if !s.Cfg.APITokens {
+			// Only the agent is on: the route exists for run tokens alone, so a session sees it as absent.
+			s.fail(w, &APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Not found."})
+			return
+		}
 		s.fail(w, &APIError{Status: http.StatusBadRequest, Code: "invalid", Message: "Call this with an access token."})
 		return
 	}
@@ -443,7 +464,7 @@ func (s *Server) whoAmI(w http.ResponseWriter, r *http.Request) {
 		}
 		dto.Tags = append(dto.Tags, WhoAmITagDTO{ID: int64(t.ID), Name: t.Name, CanView: true, CanLogs: authz.Can(subject, authz.Logs, t.ID)})
 	}
-	if dto.LogSearch, err = s.tokenLogSearchState(r.Context(), user.ID); err != nil {
+	if dto.LogSearch, err = s.tokenLogSearchState(r.Context(), user); err != nil {
 		s.fail(w, err)
 		return
 	}

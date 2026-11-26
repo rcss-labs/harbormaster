@@ -30,7 +30,7 @@ A variable with no default is required.
 | `internal` | `bool` | none | yes | Required. true puts Harbormaster on an internal ALB in private_subnet_ids (recommended; needed for HM_API_TOKENS). false creates an internet-facing ALB. There is no default, so an existing deployment that relied on the old default (false) must now set it explicitly instead of having its load balancer replaced. |
 | `allowed_cidrs` | `list(string)` | none | yes | Required. CIDR blocks allowed to reach the ALB on 443. Use your VPN or office ranges; 0.0.0.0/0 makes the login page reachable from the whole internet. |
 | `alb_deletion_protection` | `bool` | `true` | no | Turn on deletion protection for the ALB. |
-| `alb_ingress_security_group_ids` | `list(string)` | `[]` | no | Security groups allowed to reach the load balancer on 443 in addition to allowed_cidrs. Set it to the harbormaster-mcp module's task_security_group_id. |
+| `alb_ingress_security_group_ids` | `list(string)` | `[]` | no | Security groups allowed to reach the load balancer on 443 in addition to allowed_cidrs. Set it to the harbormaster-mcp module's task_security_group_id and, with the AI agent, the harbormaster-agent module's task_security_group_id. |
 | `certificate_arn` | `string` | none | yes | ACM certificate ARN for the HTTPS listener. |
 | `http_redirect` | `bool` | `true` | no | Open port 80 and redirect it to 443. |
 | `image` | `string` | none | yes | Full container image reference including tag (for example an ECR URI ending in :v1.0.0). |
