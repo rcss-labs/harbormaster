@@ -350,6 +350,7 @@ func TestManager_GracefulStopHandsOverWithinOneTick(t *testing.T) {
 	if took > testTiming().TTL/2 {
 		t.Fatalf("hand-over took %v, want well under the TTL (%v): a graceful stop must release", took, testTiming().TTL)
 	}
+	waitFor(t, 2*time.Second, "b's holder to start", func() bool { return len(bRec.startsOf(sliceKeyOf("acct00"))) > 0 })
 	if got := bRec.startsOf(sliceKeyOf("acct00")); len(got) != 1 || got[0].Epoch != 2 {
 		t.Fatalf("b's starts = %+v, want one at epoch 2", got)
 	}
@@ -387,6 +388,8 @@ func TestManager_ExpiryHandsOverWithinTTLPlusOneTick(t *testing.T) {
 	if limit := tm.TTL + tm.Tick + 500*time.Millisecond; took > limit {
 		t.Fatalf("takeover took %v, want at most TTL + one tick (+ slack) = %v", took, limit)
 	}
+	// Held is set before the holder's goroutine runs, so the recorder may lag it by a scheduling slot.
+	waitFor(t, 2*time.Second, "b's holder to start", func() bool { return len(bRec.startsOf(sliceKeyOf("acct00"))) > 0 })
 	if got := bRec.startsOf(sliceKeyOf("acct00")); len(got) != 1 || got[0].Epoch != 2 {
 		t.Fatalf("b's starts = %+v, want one at epoch 2", got)
 	}
